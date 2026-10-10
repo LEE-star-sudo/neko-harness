@@ -296,6 +296,82 @@ button {
 	font-size: inherit;
 }
 
+/* ---- 语法高亮（highlight.js，浅色 sakura/tianyi 配色，底色 tianyi-50） ----
+ * 全部色值对 #eff8fe 对比度 ≥4.5（WCAG AA，实测：keyword 7.41 / string 6.91 /
+ * number 5.15 / title 5.29 / green 5.28 / comment(ink-600) ~5.6 / base 12.76）。 */
+.hljs {
+	color: var(--color-ink-900);
+	background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+	color: var(--color-ink-600);
+	font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-tag,
+.hljs-name {
+	color: var(--color-sakura-800);
+}
+
+.hljs-string,
+.hljs-doctag,
+.hljs-regexp {
+	color: var(--color-tianyi-800);
+}
+
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+	color: var(--color-tianyi-700);
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-attr {
+	color: var(--color-sakura-700);
+}
+
+.hljs-built_in,
+.hljs-type,
+.hljs-attribute,
+.hljs-selector-class,
+.hljs-selector-id,
+.hljs-meta {
+	color: var(--color-tianyi-700);
+}
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params,
+.hljs-subst {
+	color: var(--color-ink-900);
+}
+
+/* diff：增 #117555 = oklch(0.50 0.10 165)，删 sakura-800，均带 8% 底色提示 */
+.hljs-addition {
+	color: #117555;
+	background-color: oklch(0.5 0.1 165 / 0.08);
+}
+
+.hljs-deletion {
+	color: var(--color-sakura-800);
+	background-color: oklch(0.53 0.13 6.2 / 0.08);
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: 700;
+}
+
 .md hr {
 	border: none;
 	border-top: 1px dashed var(--color-sakura-300);
