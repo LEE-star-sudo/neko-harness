@@ -10,7 +10,7 @@
 import type { Context, ReplicatedState } from "@earendil-works/chord";
 import { defineService } from "@earendil-works/chord";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ChatView, NekoModelRef, UsageTotals } from "@neko-harness/core";
+import type { ChatView, NekoConversationChange, NekoModelInfo, NekoModelRef, UsageTotals } from "@neko-harness/core";
 
 /** 目录条目：非归档会话（含 root），id 为十进制字符串形式的 ConversationId。 */
 export type NekoSessionSummary = {
@@ -51,6 +51,16 @@ export interface NekoSessionManagement {
 
 export const NekoSessionManagement = defineService<NekoSessionManagement>("neko.session-management");
 
+/**
+ * 服务器级模型目录服务：Models registry 的全局快照（模型选择器数据源）。
+ * 模型列表是全局的，故放服务器级而非会话级。
+ */
+export interface NekoModels {
+	list(context: Context): Promise<readonly NekoModelInfo[]>;
+}
+
+export const NekoModels = defineService<NekoModels>("neko.models");
+
 export type NekoSubmitInput = {
 	readonly content: string;
 	readonly requestId?: string;
@@ -67,6 +77,8 @@ export interface NekoChat {
 	submit(input: NekoSubmitInput, context: Context): Promise<void>;
 	abort(context: Context): Promise<void>;
 	usage(context: Context): Promise<UsageTotals>;
+	/** 会话级切换模型/thinkingLevel；从下一次请求起生效。会话未知或已归档时抛远程错误。 */
+	configure(change: NekoConversationChange, context: Context): Promise<void>;
 }
 
 export const NekoChat = defineService<NekoChat>("neko.chat");

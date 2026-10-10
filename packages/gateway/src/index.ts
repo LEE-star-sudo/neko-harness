@@ -3,6 +3,7 @@ export {
 	NekoChat,
 	type NekoCreateSessionOptions,
 	type NekoDirectoryState,
+	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,

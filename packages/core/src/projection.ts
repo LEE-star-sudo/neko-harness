@@ -1,5 +1,6 @@
-import type { AssistantMessage, Usage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ModelThinkingLevel, Usage, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, LiveState, ToolSlot, UsageState } from "@earendil-works/pi-durable";
+import type { NekoModelRef } from "./runtime.ts";
 
 /**
  * ConversationView → 前端投影 ChatView（每次 commit 后重算，v1 全量快照）。
@@ -20,8 +21,14 @@ export type UsageTotals = {
 
 /** 前端渲染所需的会话视图投影。 */
 export type ChatView = {
-	/** 模型标签，如 "deepseek/deepseek-flash"。 */
+	/** 模型标签，如 "deepseek/deepseek-flash"；pi.agent 有显式模型时取自它（切换后立即更新）。 */
 	model: string;
+	/** 当前会话生效的代理配置（pi.agent doc 投影，configure 提交后随视图推送更新）。 */
+	agent: {
+		/** 生效模型（provider/modelId）；未设置时为 null。 */
+		model: NekoModelRef | null;
+		thinkingLevel: ModelThinkingLevel | null;
+	};
 	/** 会话工具的工作目录。 */
 	cwd: string;
 	/** 是否有运行中的 run（live.run !== undefined）。 */
@@ -174,10 +181,19 @@ export function totalUsage(state: UsageState): Usage {
 	return total;
 }
 
+/** pi.agent doc 在 ConversationView.docs 里的 JSON 形状（AgentState 的视图表示）。 */
+type AgentDocView = {
+	readonly model?: NekoModelRef;
+	readonly thinkingLevel?: ModelThinkingLevel;
+};
+
 /** ConversationView → 前端投影 ChatView（服务器每次 commit 后调用）。 */
 export function projectChatView(view: ConversationView, modelLabel: string, cwd: string): ChatView {
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	const usage = totalUsage((view.docs["pi.usage"] ?? { models: {}, tools: {} }) as UsageState);
+	// pi.agent 随每次 configure 提交进视图：投影同步读出生效模型/thinkingLevel，无竞态。
+	const agent = view.docs["pi.agent"] as AgentDocView | undefined;
+	const agentModel = agent?.model ?? null;
 
 	// 先按 callId 收集工具结果（pi.tool-result entry），再按序展开条目。
 	const results = new Map<string, Extract<ChatItem, { type: "tool" }>>();
@@ -257,7 +273,11 @@ export function projectChatView(view: ConversationView, modelLabel: string, cwd:
 					: "思考中…";
 
 	return {
-		model: modelLabel,
+		model: agentModel !== null ? `${agentModel.provider}/${agentModel.modelId}` : modelLabel,
+		agent: {
+			model: agentModel,
+			thinkingLevel: agent?.thinkingLevel ?? null,
+		},
 		cwd,
 		busy: live.run !== undefined,
 		status,

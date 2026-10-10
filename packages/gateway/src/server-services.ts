@@ -11,13 +11,14 @@ import { SessionNotFoundError } from "@earendil-works/pi-server";
 import type { NekoRuntime } from "@neko-harness/core";
 import {
 	type NekoDirectoryState,
+	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
 } from "./contract.ts";
 
 /**
- * 服务器级服务（目录订阅 + 会话管理），模式对照 coding-agent experimental services/server.ts：
+ * 服务器级服务（目录订阅 + 会话管理 + 模型目录），模式对照 coding-agent experimental services/server.ts：
  * 每个连接一个 RemoteServiceProvider + endpoint，目录为共享复制状态，变化推送给所有订阅。
  */
 export type NekoServerServices = {
@@ -64,8 +65,11 @@ export async function createNekoServerServices(options: {
 				const provider = new RemoteServiceProvider([
 					{ service: NekoSessionDirectory, mode: "singleton" },
 					{ service: NekoSessionManagement, mode: "singleton" },
+					{ service: NekoModels, mode: "singleton" },
 				]);
 				provider.provide(NekoSessionDirectory, { state: directory });
+				// 模型目录是全局快照（Models registry），列表查询无需序列化。
+				provider.provide(NekoModels, { list: async () => runtime.listModels() });
 				provider.provide(NekoSessionManagement, {
 					create: (createOptions) =>
 						serialize(async () => {

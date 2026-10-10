@@ -146,7 +146,7 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 			async openSession(metadata) {
 				const session = await runtime.getConversation(toConversationId(metadata.id));
 				if (session === undefined) throw new SessionNotFoundError(`Unknown session: ${metadata.id}`);
-				return openNekoSessionHandle({ session, modelLabel, cwd: sessionCwd, context });
+				return openNekoSessionHandle({ runtime, session, modelLabel, cwd: sessionCwd, context });
 			},
 		},
 		{ listeners, serverId, onError: options.onError },
