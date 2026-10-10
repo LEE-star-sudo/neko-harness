@@ -1,9 +1,10 @@
+import { fauxProvider } from "../../../test/faux.ts";
 // spec: agent-runtime「热替换扩展」——同名扩展重新 install 后：
 // 已开始执行的工具调用在原实现下完成，新发起的调用使用新实现。
 // 参考 reference/pi/packages/durable/test/examples/31-reload-and-restart.ts。
 
 import { describe, expect, it } from "bun:test";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type ToolExecutionResult, ToolResultEntry } from "@earendil-works/pi-durable";
 import { createNekoRuntime } from "../src/index.ts";
 

@@ -2,8 +2,11 @@ import { afterEach, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxProvider } from "../../../test/faux.ts";
 import { createNekoRuntime, normalizeWorkspace, projectChatView } from "../src/index.ts";
+
+import { SessionMetadataDoc } from "../src/session-metadata.ts";
 
 const dirs: string[] = [];
 function directory() {
@@ -130,27 +133,26 @@ it("registers independent workspaces across restart, archives and forks", async 
 	}
 });
 
-it("backfills archived pre-registry sessions without rebinding missing directories", async () => {
+it("rejects archived sessions without new metadata and preserves storage", async () => {
 	const a = directory(),
 		b = directory();
 	const faux = fauxProvider();
 	const options = { storagePath: join(a, "backfill.sqlite"), cwd: a, providers: [faux.provider], model };
-	let runtime = await createNekoRuntime(options);
+	const runtime = await createNekoRuntime(options);
 	try {
 		const older = await runtime.harness.createConversation(
 			{ ownership: { kind: "ownerless" }, agent: { model, cwd: b } },
 			runtime.context,
 		);
+		await runtime.harness.commit(async (tx) => {
+			(await tx.doc(SessionMetadataDoc, older.id)).createdAt = 0;
+		}, runtime.context);
 		await runtime.archiveConversation(older.id);
 		expect((await runtime.listWorkspaces()).map((w) => w.path)).toEqual([a]);
 		await runtime.close();
 		rmSync(b, { recursive: true });
-		runtime = await createNekoRuntime(options);
-		expect((await runtime.listWorkspaces()).map((w) => w.path).sort()).toEqual([a, b].sort());
-		expect((await runtime.listConversations()).some((s) => s.id === older.id)).toBe(false);
-		await runtime.close();
-		runtime = await createNekoRuntime(options);
-		expect((await runtime.listWorkspaces()).length).toBe(2);
+		await expect(createNekoRuntime(options)).rejects.toThrow("Unsupported session metadata");
+		expect(readFileSync(options.storagePath).length).toBeGreaterThan(0);
 	} finally {
 		await runtime.close();
 	}

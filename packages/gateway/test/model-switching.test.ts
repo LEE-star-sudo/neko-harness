@@ -1,3 +1,4 @@
+import { fauxProvider } from "../../../test/faux.ts";
 // spec: model-providers「会话级切换模型」——经网关契约 configure 切换某会话模型后，
 // 该会话下一次请求用新模型（faux 记录实际收到的 modelId），投影即时反映新值，其他会话不受影响。
 
@@ -11,7 +12,6 @@ import {
 	type FauxProviderHandle,
 	type FauxResponseFactory,
 	fauxAssistantMessage,
-	fauxProvider,
 	fauxText,
 } from "@earendil-works/pi-ai";
 import { ServerError } from "@earendil-works/pi-client";

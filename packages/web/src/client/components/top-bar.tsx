@@ -1,3 +1,4 @@
+import { sessionName } from "@neko-harness/core/session-display";
 import type { ConnPhase } from "../lib/store";
 import { useNekoState } from "../lib/store";
 import { folderName, Icon } from "./nav-primitives";
@@ -9,7 +10,8 @@ const phases: Record<ConnPhase, string> = {
 	error: "连接失败",
 };
 export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void; sidebarOpen?: boolean }) {
-	const { workspaceRoot, currentSessionId, operating } = useNekoState();
+	const { workspaceRoot, currentSessionId, operating, sessions } = useNekoState();
+	const current = sessions.find((session) => session.id === currentSessionId);
 	return (
 		<header className="nav-theme nav-topbar">
 			<button
@@ -27,7 +29,9 @@ export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void; s
 				<span className="nav-truncate">{folderName(workspaceRoot) || "工作区"}</span>
 			</span>
 			<span className="nav-muted">/</span>
-			<span className="nav-truncate">{currentSessionId ? `会话 ${currentSessionId}` : "新会话"}</span>
+			<span className="nav-truncate" title={current ? sessionName(current, "新会话") : undefined}>
+				{current ? sessionName(current, "新会话") : "新会话"}
+			</span>
 			<output className={`nav-connection ${props.conn === "ready" ? "is-connected" : ""}`}>
 				{operating ? "切换中…" : phases[props.conn]}
 			</output>

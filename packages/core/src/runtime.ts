@@ -27,6 +27,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import {
 	accessibleWorkspace,
 	executionWorkspace,
@@ -105,6 +106,12 @@ export type NekoConversationInfo = {
 	readonly archived: boolean;
 	readonly workspaceRoot: string;
 	readonly lastUsedAt: number;
+	readonly title: string;
+	readonly firstPromptPreview: string;
+	readonly createdAt: number;
+	readonly lastMessageAt: number | null;
+	readonly model: NekoModelRef | null;
+	readonly status: "idle" | "running" | "error";
 };
 
 /** A chat model offered by the runtime's Models registry, for frontend selectors. */
@@ -197,6 +204,9 @@ export type NekoRuntime = {
 
 	/** Every conversation of this storage, root included, with its soft-delete state. */
 	listConversations(): Promise<NekoConversationInfo[]>;
+	onDirectoryChange(listener: () => void): () => void;
+	namingUsage(id?: ConversationId): Promise<UsageState>;
+	globalUsage(): Promise<UsageState>;
 	listWorkspaces(): Promise<NekoWorkspace[]>;
 	addWorkspace(path: string): Promise<NekoWorkspace>;
 	touchConversation(id: ConversationId): Promise<void>;
@@ -266,6 +276,9 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		{
 			models,
 			registry,
+			conversationCreated: async (tx, record) => {
+				(await tx.doc(SessionMetadataDoc, record.id)).createdAt = Date.now();
+			},
 			env: ({ cwd }) => new NodeExecutionEnv({ cwd: executionWorkspace(cwd) }),
 		},
 		context,
@@ -285,7 +298,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	try {
 		for (const record of existing) {
 			const target = await harness.conversation(record.id, context);
-			if (target) savedWorkspace((await target.agent(context)).cwd);
+			if (target) {
+				savedWorkspace((await target.agent(context)).cwd);
+				if (!(await harness.snapshot(SessionMetadataDoc, record.id, context))?.createdAt)
+					throw new Error(
+						"Unsupported session metadata format; use a new storage file. Existing data was not deleted.",
+					);
+			}
 		}
 	} catch (error) {
 		await harness.close(context);
@@ -322,6 +341,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		}, context);
 	};
 	if (existing.length === 0) await touchConversation(conversation.id);
+	const metadata = new SessionMetadataManager(harness, storage, models, context);
+	if (existing.length === 0) await metadata.initialize(conversation.id);
+	for (const record of existing)
+		if (!(await harness.snapshot(ArchivedDoc, record.id, context))?.archived) await metadata.restore(record.id);
 	harness.resume();
 
 	const submitTo = async (
@@ -330,22 +353,32 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		submitOptions?: NekoSubmitOptions,
 	): Promise<Submission> => {
 		executionWorkspace((await target.agent(context)).cwd);
-		const result = await target.submit(
-			{
-				type: "input",
-				content,
-				...(submitOptions?.requestId !== undefined ? { requestId: submitOptions.requestId } : {}),
-				...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
-			},
-			context,
-		);
-
+		const requestId = submitOptions?.requestId ?? crypto.randomUUID();
+		await metadata.prepare(target.id, requestId, content);
+		let result: Submission;
+		try {
+			result = await target.submit(
+				{
+					type: "input",
+					content,
+					requestId,
+					...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
+				},
+				context,
+			);
+		} catch (error) {
+			await metadata.discard(target.id, requestId);
+			throw error;
+		}
 		await touchConversation(target.id);
+		await metadata.reconcile(target.id);
 		return result;
 	};
 
 	const waitAnswerOf = async (target: Conversation, submission: Submission): Promise<NekoAnswer> => {
 		const settled = await submission.wait(context);
+		await metadata.flush();
+		await metadata.reconcile(target.id);
 		if (settled.status === "done" && settled.type === "input") {
 			const entry = await target.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
 			const message = entry?.model?.[0];
@@ -382,7 +415,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return watchEvents(harness, target.id, context);
 		},
 		async usage() {
-			return (await harness.snapshot(UsageDoc, target.id, context)) ?? { models: {}, tools: {} };
+			return mergeUsage(
+				(await harness.snapshot(UsageDoc, target.id, context)) ?? { models: {}, tools: {} },
+				(await harness.snapshot(SessionMetadataDoc, target.id, context))?.namingUsage ?? { models: {}, tools: {} },
+			);
 		},
 		abort() {
 			return target.abort(context);
@@ -409,6 +445,21 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 
 	return {
 		context,
+		onDirectoryChange: (listener) => metadata.subscribe(listener),
+		async namingUsage(id = conversation.id) {
+			return structuredClone((await harness.snapshot(SessionMetadataDoc, id, context))!.namingUsage);
+		},
+		async globalUsage() {
+			let total: UsageState = { models: {}, tools: {} };
+			for (const record of await scanConversations()) {
+				total = mergeUsage(total, (await harness.snapshot(UsageDoc, record.id, context)) ?? { models: {}, tools: {} });
+				total = mergeUsage(
+					total,
+					(await harness.snapshot(SessionMetadataDoc, record.id, context))?.namingUsage ?? { models: {}, tools: {} },
+				);
+			}
+			return total;
+		},
 		touchConversation,
 		addWorkspace,
 		async listWorkspaces() {
@@ -420,6 +471,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			await registerWorkspace(savedWorkspace(agent.cwd));
 			const newest = await source.conversation.entries({}, 1, undefined, context);
 			const at = newest.items[0]?.id;
+			const sourceMetadata = at === undefined ? undefined : await harness.snapshot(SessionMetadataDoc, id, context);
 			const child =
 				at === undefined
 					? await harness.createConversation(
@@ -429,11 +481,24 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 							},
 							context,
 						)
-					: await source.conversation.fork(at, { ownership: { kind: "ownerless" } }, context);
+					: await source.conversation.fork(
+							at,
+							{
+								ownership: { kind: "ownerless" },
+								init: async (tx, childId) => {
+									const doc = await tx.doc(SessionMetadataDoc, childId);
+									doc.title = sourceMetadata!.title || sourceMetadata!.firstPromptPreview;
+									doc.firstPromptPreview = sourceMetadata!.firstPromptPreview;
+									doc.naming = "ready";
+								},
+							},
+							context,
+						);
 			await child.configure(
 				{ model: agent.model, thinkingLevel: agent.thinkingLevel, cwd: savedWorkspace(agent.cwd) },
 				context,
 			);
+			await metadata.initialize(child.id);
 			await touchConversation(child.id);
 			return makeSession(child);
 		},
@@ -466,7 +531,14 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				if (!archived) {
 					const target = await harness.conversation(record.id, context);
 					if (!target) continue;
+					const info = (await harness.snapshot(SessionMetadataDoc, record.id, context))!;
 					infos.push({
+						title: info.title,
+						firstPromptPreview: info.firstPromptPreview,
+						createdAt: info.createdAt,
+						lastMessageAt: info.lastMessageAt,
+						status: info.status,
+						model: (await target.agent(context)).model ?? null,
 						id: record.id,
 						archived: false,
 						workspaceRoot: savedWorkspace((await target.agent(context)).cwd),
@@ -489,11 +561,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				},
 				context,
 			);
+			await metadata.initialize(created.id);
 			await touchConversation(created.id);
 			return makeSession(created);
 		},
 		getConversation,
 		async archiveConversation(id) {
+			await metadata.archive(id);
 			await harness.commit(async (tx) => {
 				(await tx.doc(ArchivedDoc, id)).archived = true;
 			}, context);
@@ -532,7 +606,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		installExtension(extension) {
 			registry.install(extension);
 		},
-		close() {
+		async close() {
+			await metadata.close();
 			return harness.close(context);
 		},
 	};

@@ -8,7 +8,6 @@ import { createAppLayout } from "../src/layout.ts";
 const footer = () => {
 	const f = new StatusFooter();
 	f.setStats({
-		sessionId: "1",
 		cwd: "/projects/项目/neko-harness",
 		model: "deepseek/deepseek-flash",
 		thinkingLevel: "high",
@@ -56,11 +55,12 @@ it("keeps bottom rows, selection and help visible at supported sizes", async () 
 		let frame = renderLayoutFrame(root, width, height, () => {});
 		expect(frame.lines.map(stripTerminalSequences).join("\n")).toContain("Ready");
 		await panel.show(
-			"Models",
+			"Sessions",
 			async () =>
 				Array.from({ length: 30 }, (_, i) => ({
 					value: String(i),
-					label: `Model ${i}`,
+					label: `Session ${i} 自动命名与工作区排序标题`.repeat(4),
+					rightLabel: "2h",
 					description: "/very/long/path/".repeat(10),
 				})),
 			async () => {},
@@ -68,7 +68,7 @@ it("keeps bottom rows, selection and help visible at supported sizes", async () 
 		for (let i = 0; i < 29; i++) panel.handleInput("\x1b[B");
 		frame = renderLayoutFrame(root, width, height, () => {});
 		const plain = frame.lines.map(stripTerminalSequences).join("\n");
-		expect(plain).toContain("> Model 29");
+		expect(plain).toContain("> Session 29");
 		expect(plain).toContain("Esc Close");
 		expect(plain).toContain("Ready");
 		expect(frame.lines.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -120,7 +120,7 @@ it("bounds real multiline editing and slash completion without losing cursor or 
 	const draft = editor.getText(),
 		cursor = editor.getCursor();
 	await panel.show(
-		"Models",
+		"Sessions",
 		async () => [{ value: "a", label: "A" }],
 		async () => {},
 	);

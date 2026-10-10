@@ -5,7 +5,6 @@ import { labels } from "../labels.ts";
 import { theme } from "../theme.ts";
 
 export type FooterStats = {
-	readonly sessionId: string;
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;

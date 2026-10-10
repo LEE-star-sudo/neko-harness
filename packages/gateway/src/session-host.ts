@@ -6,7 +6,14 @@ import {
 	replicatedState,
 } from "@earendil-works/chord";
 import type { RoutedSessionAttachment, RoutedSessionHandle } from "@earendil-works/pi-server";
-import { type ChatView, type NekoRuntime, type NekoSession, projectChatView, totalUsage } from "@neko-harness/core";
+import {
+	type ChatView,
+	mergeUsage,
+	type NekoRuntime,
+	type NekoSession,
+	projectChatView,
+	totalUsage,
+} from "@neko-harness/core";
 import { NekoChat } from "./contract.ts";
 
 /**
@@ -25,9 +32,41 @@ export async function openNekoSessionHandle(options: {
 }): Promise<RoutedSessionHandle> {
 	const { runtime, session, modelLabel, onActivity, context } = options;
 	const view = await session.viewState();
-	const chatState = replicatedState<ChatView>(projectChatView(view.value, modelLabel));
-	const unsubscribe = view.subscribe((value) => {
-		chatState.replace(context, projectChatView(value, modelLabel));
+	let namingUsage = await runtime.namingUsage(session.id);
+	let disposed = false;
+	let revision = 0;
+	const project = () =>
+		projectChatView(
+			{
+				...view.value,
+				docs: {
+					...view.value.docs,
+					"pi.usage": mergeUsage(
+						(view.value.docs["pi.usage"] ?? {
+							models: {},
+							tools: {},
+						}) as import("@earendil-works/pi-durable").UsageState,
+						namingUsage,
+					),
+				},
+			},
+			modelLabel,
+		);
+	const chatState = replicatedState<ChatView>(project());
+	const stopMetadata = runtime.onDirectoryChange(() => {
+		const current = ++revision;
+		void runtime
+			.namingUsage(session.id)
+			.then((usage) => {
+				if (!disposed && current === revision) {
+					namingUsage = usage;
+					chatState.replace(context, project());
+				}
+			})
+			.catch(() => {});
+	});
+	const unsubscribe = view.subscribe(() => {
+		chatState.replace(context, project());
 	});
 
 	// 会话级 provider 由本句柄的所有 attachment 共享（等价 coding-agent worker 的 per-scope endpoint 模式）。
@@ -89,6 +128,8 @@ export async function openNekoSessionHandle(options: {
 			endpoints.clear();
 			provider.dispose();
 			unsubscribe();
+			disposed = true;
+			stopMetadata();
 			view.dispose();
 		},
 	};

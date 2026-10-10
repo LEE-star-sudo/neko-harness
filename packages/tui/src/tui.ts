@@ -39,7 +39,7 @@ import {
 	type ThemePreference,
 	theme,
 } from "./theme.ts";
-import { workspaceSessions } from "./workspace.ts";
+import { recentlyVisited, sessionPickerItems } from "./workspace.ts";
 
 export type NekoTuiOptions = {
 	/** 新会话工具的工作目录；默认 process.cwd()。 */
@@ -81,6 +81,7 @@ class NekoTuiApp {
 	readonly #notices = new Container();
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
+	#sessionPanelTimer: ReturnType<typeof setInterval> | undefined;
 	#sessionOperation = false;
 	#noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	readonly #editor: BoundedEditor;
@@ -117,7 +118,11 @@ class NekoTuiApp {
 		this.#editor = new BoundedEditor(this.#ui, getEditorTheme(), { paddingX: 1, autocompleteMaxVisible: 3 });
 		this.#panel = new PickerPanel(
 			() => this.#ui.requestRender(),
-			() => this.#ui.setFocus(this.#editor),
+			() => {
+				clearInterval(this.#sessionPanelTimer);
+				this.#sessionPanelTimer = undefined;
+				this.#ui.setFocus(this.#editor);
+			},
 		);
 		this.#editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd()));
 		this.#editor.onSubmit = (text) => {
@@ -174,7 +179,10 @@ class NekoTuiApp {
 		);
 		this.#ui.setFocus(this.#editor);
 
-		this.#directoryUnsubscribe = this.#gateway.client.directory.state.subscribe(() => this.#ui.requestRender());
+		this.#directoryUnsubscribe = this.#gateway.client.directory.state.subscribe(() => {
+			if (this.#sessionPanelTimer) this.#panel.update(this.sessionItems());
+			this.#ui.requestRender();
+		});
 		await this.switchSession(initialSessionId);
 		this.#ui.start();
 		this.#ui.requestRender(true);
@@ -182,6 +190,7 @@ class NekoTuiApp {
 		await this.#exited;
 		this.#viewUnsubscribe?.();
 		this.#directoryUnsubscribe?.();
+		clearInterval(this.#sessionPanelTimer);
 		this.#terminalSchemeUnsubscribe?.();
 		this.#closeOverlay();
 		clearTimeout(this.#noticeTimer);
@@ -298,7 +307,7 @@ class NekoTuiApp {
 	async archiveSession(): Promise<void> {
 		const current = this.#sessionId;
 		await this.#gateway.client.management.archive(current, BACKGROUND_CONTEXT);
-		const next = workspaceSessions(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).find(
+		const next = recentlyVisited(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).find(
 			(s) => s.id !== current,
 		);
 		if (next) await this.switchSession(next.id);
@@ -307,25 +316,27 @@ class NekoTuiApp {
 
 	// —— 会话浮层 ——
 
+	private sessionItems() {
+		return [
+			{ value: NEW_SESSION_VALUE, label: "+ New session", description: this.#options.cwd },
+			...sessionPickerItems(
+				this.#gateway.client.directory.state.value?.sessions ?? [],
+				this.#options.cwd!,
+				this.#sessionId,
+			),
+		];
+	}
 	openSessionsOverlay(): void {
 		if (this.#exitStarted || this.#panel.open) return;
 		void this.#panel.show(
-			"Sessions",
-			async () => [
-				{ value: NEW_SESSION_VALUE, label: "+ New session", description: this.#options.cwd },
-				...workspaceSessions(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).map(
-					(session) => ({
-						value: session.id,
-						label: `Session ${session.id}${session.id === this.#sessionId ? " (Current)" : ""}`,
-						description: `${session.workspaceRoot}${session.id === this.#sessionId && this.#lastView ? ` | ${usageText(this.#lastView.usage.input, this.#lastView.usage.output, this.#lastView.usage.cacheRead, this.#lastView.usage.cost)}` : ""}`,
-					}),
-				),
-			],
+			`Sessions · ${this.#options.cwd}`,
+			async () => this.sessionItems(),
 			async (value) => {
 				if (value === NEW_SESSION_VALUE) await this.createSession();
 				else if (value !== this.#sessionId) await this.switchSession(value);
 			},
 		);
+		this.#sessionPanelTimer = setInterval(() => this.#panel.update(this.sessionItems()), 60_000);
 		this.#ui.setFocus(this.#panel);
 	}
 
@@ -540,7 +551,6 @@ class NekoTuiApp {
 
 	#syncFooter(view: ChatView): void {
 		this.#footer.setStats({
-			sessionId: this.#sessionId,
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,
 			busy: this.#busyText,
@@ -665,7 +675,7 @@ export async function initialSessionId(gateway: NekoTuiGateway, cwd: string): Pr
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	const sessions = state.value?.sessions ?? [];
-	const first = workspaceSessions(sessions, cwd)[0];
+	const first = recentlyVisited(sessions, cwd)[0];
 	if (first !== undefined) return first.id;
 	return (await gateway.client.management.create({ ...(cwd !== undefined ? { cwd } : {}) }, BACKGROUND_CONTEXT)).id;
 }

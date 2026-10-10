@@ -35,3 +35,9 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 ## 工作区目录服务
 
 `neko.workspaces` 提供独立工作区复制状态、`add({ path })` 与 `browse({ path, query?, showHidden?, cursor? })`；宿主客户端可通过 `client.workspaces` 使用。添加按真实路径去重，空工作区不会随会话归档而消失。目录浏览仅列宿主单层文件夹，默认隐藏点号目录，每页最多 100 项；返回真实路径、父目录、子目录及下一页 cursor，筛选条件变化后应重新分页。浏览不上传文件、不修改宿主目录，仍沿用本地可信网关边界。
+
+## 标题与活动目录
+
+`neko.session-directory` 每个会话包含 `title`、`firstPromptPreview`、`createdAt`、`lastMessageAt`（空会话为 null）、`model`、`status`（idle/running/error），保留 `workspaceRoot` 与用于恢复选择的 `lastUsedAt`。Unix socket 和 WebSocket 使用相同字段。输入受理、回答完成、模型及运行状态改变、后台命名完成都会串行刷新目录；即使没有客户端 attach 该会话也会广播，流式 token 不逐个刷新目录。重连获取完整最新快照。聊天用量投影同步包含独立命名费用。
+
+本次契约要求前后端共同升级，不提供旧客户端兼容或历史元数据回填。

@@ -2,6 +2,7 @@ import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } f
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
 import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
+import { byMessage, byVisited } from "@neko-harness/core/session-display";
 import {
 	type NekoBrowseOptions,
 	NekoChat,
@@ -38,9 +39,7 @@ export type GatewayConnectionOptions = {
 	readonly retryMaxMs?: number;
 };
 export function workspaceSessions(sessions: readonly NekoSessionSummary[], path: string): NekoSessionSummary[] {
-	return sessions
-		.filter((s) => s.workspaceRoot === path)
-		.sort((a, b) => b.lastUsedAt - a.lastUsedAt || Number(b.id) - Number(a.id));
+	return sessions.filter((s) => s.workspaceRoot === path).sort(byMessage);
 }
 
 /** Single attachment, serialized navigation, and generation-guarded snapshots. */
@@ -151,7 +150,7 @@ export class GatewayConnection {
 		});
 	}
 	async #select(path: string, preferred: string | undefined, epoch: number): Promise<void> {
-		const sessions = workspaceSessions(this.#sessions, path);
+		const sessions = workspaceSessions(this.#sessions, path).sort(byVisited);
 		const target = sessions.find((s) => s.id === preferred) ?? sessions[0];
 		try {
 			if (target) await this.#attach(target.id, epoch);

@@ -91,3 +91,36 @@ describe("session directory", () => {
 		}
 	}, 30_000);
 });
+
+it("broadcasts background title and final-message time without requiring an attachment", async () => {
+	const unix = await connectUnix(),
+		ws = await connectWs();
+	try {
+		const { fauxAssistantMessage, fauxText } = await import("@earendil-works/pi-ai");
+		let finish!: (value: ReturnType<typeof fauxAssistantMessage>) => void;
+		target.faux.setResponses([
+			() =>
+				new Promise((r) => {
+					finish = r;
+				}),
+		]);
+		const chat = await unix.attach("1");
+		await chat.submit({ content: "Name this session", requestId: "naming" }, BACKGROUND_CONTEXT);
+		await waitFor(() => !!finish, "provider running");
+		await waitFor(() => ws.directory.state.value!.sessions[0]!.lastMessageAt !== null, "input metadata");
+		const sent = ws.directory.state.value!.sessions[0]!.lastMessageAt!;
+		await unix.detach();
+		finish(fauxAssistantMessage([fauxText("A complete answer")]));
+		await waitFor(() => ws.directory.state.value!.sessions[0]?.title === "Test session", "background title");
+		const info = ws.directory.state.value!.sessions[0]!;
+		expect(info.firstPromptPreview).toBe("Name this session");
+		expect(info.lastMessageAt).toBeGreaterThanOrEqual(sent);
+		expect(info.status).toBe("idle");
+		expect(unix.directory.state.value!.sessions[0]).toEqual(info);
+		await unix.attach("1");
+		expect(ws.directory.state.value!.sessions[0]!.lastMessageAt).toBe(info.lastMessageAt);
+	} finally {
+		await unix.close();
+		await ws.close();
+	}
+});

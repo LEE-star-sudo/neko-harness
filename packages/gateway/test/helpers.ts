@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type FauxProviderHandle, fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
+import { type FauxProviderHandle, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import { fauxProvider } from "../../../test/faux.ts";
 import { type NekoGateway, startGateway } from "../src/index.ts";
 
 export type TestGateway = {

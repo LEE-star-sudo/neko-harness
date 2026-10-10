@@ -12,6 +12,12 @@ import type { ChatView, NekoConversationChange, NekoModelInfo, NekoModelRef, Usa
 export type NekoSessionSummary = {
 	readonly workspaceRoot: string;
 	readonly lastUsedAt: number;
+	readonly title: string;
+	readonly firstPromptPreview: string;
+	readonly createdAt: number;
+	readonly lastMessageAt: number | null;
+	readonly model: { readonly provider: string; readonly modelId: string } | null;
+	readonly status: "idle" | "running" | "error";
 	readonly id: string;
 };
 

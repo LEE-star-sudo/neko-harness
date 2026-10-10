@@ -105,3 +105,74 @@ it("moves once per Kitty key press, allows repeat and ignores release", async ()
 	await tick();
 	expect(picked).toBe("2");
 });
+
+it("preserves selection by identity through live reorder at all supported widths", async () => {
+	let chosen = "";
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	await panel.show(
+		"Sessions",
+		async () => [
+			{ value: "a", label: "Alpha", rightLabel: "2m" },
+			{ value: "b", label: "Beta", rightLabel: "1h" },
+			{ value: "c", label: "Gamma", rightLabel: "1d" },
+		],
+		async (value) => {
+			chosen = value;
+		},
+	);
+	panel.handleInput("\x1b[B");
+	panel.update([
+		{ value: "b", label: "Updated Beta", rightLabel: "now" },
+		{ value: "c", label: "Gamma" },
+		{ value: "a", label: "Alpha" },
+	]);
+	for (const [width, height] of [
+		[120, 20],
+		[80, 12],
+		[60, 7],
+	]) {
+		panel.height = height!;
+		const rows = panel.render(width!);
+		expect(rows.join("\n")).toContain("> Updated Beta");
+		expect(rows.length).toBe(height!);
+	}
+	panel.handleInput("\r");
+	await tick();
+	expect(chosen).toBe("b");
+	panel.update([{ value: "x", label: "Should stay closed" }]);
+	expect(panel.open).toBe(false);
+});
+
+it("keeps search through updates and chooses the adjacent item when selection disappears", async () => {
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	let picked = "";
+	await panel.show(
+		"Sessions",
+		async () => [
+			{ value: "a", label: "Alpha", searchText: "shared" },
+			{ value: "b", label: "Beta", searchText: "shared" },
+			{ value: "c", label: "Gamma", searchText: "shared" },
+		],
+		async (v) => {
+			picked = v;
+		},
+	);
+	for (const c of "shared") panel.handleInput(c);
+	panel.handleInput("\x1b[B");
+	panel.update([
+		{ value: "a", label: "Updated Alpha", searchText: "shared" },
+		{ value: "c", label: "Gamma", searchText: "shared" },
+		{ value: "x", label: "Excluded" },
+	]);
+	expect(panel.render(80).join("\n")).toContain("> Gamma");
+	expect(panel.render(80).join("\n")).not.toContain("Excluded");
+	panel.handleInput("\r");
+	await tick();
+	expect(picked).toBe("c");
+});

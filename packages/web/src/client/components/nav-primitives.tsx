@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 export function Icon({
@@ -122,7 +122,7 @@ export function Popover(props: { anchor: HTMLElement; label: string; onClose: ()
 	const close = useRef(props.onClose);
 	close.current = props.onClose;
 	const [position, setPosition] = useState({ left: 8, top: 8 });
-	useEffect(() => {
+	useLayoutEffect(() => {
 		const panel = ref.current!;
 		const place = () => {
 			const rect = props.anchor.getBoundingClientRect();

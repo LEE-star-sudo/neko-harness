@@ -39,5 +39,5 @@ export {
 	type NekoSession,
 	type NekoSubmitOptions,
 } from "./runtime.ts";
-
+export { mergeUsage } from "./session-metadata.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

@@ -40,6 +40,12 @@ export async function createNekoServerServices(options: {
 			id: String(info.id),
 			workspaceRoot: info.workspaceRoot,
 			lastUsedAt: info.lastUsedAt,
+			title: info.title,
+			firstPromptPreview: info.firstPromptPreview,
+			createdAt: info.createdAt,
+			lastMessageAt: info.lastMessageAt,
+			model: info.model,
+			status: info.status,
 		}));
 
 	let revision = 1;
@@ -71,6 +77,9 @@ export async function createNekoServerServices(options: {
 		});
 	};
 
+	const unsubscribe = runtime.onDirectoryChange(() => {
+		void serialize(refreshNow).catch(() => {});
+	});
 	return {
 		host: {
 			attachClient(presentation) {
@@ -161,6 +170,7 @@ export async function createNekoServerServices(options: {
 		},
 		refresh: () => serialize(refreshNow),
 		async dispose() {
+			unsubscribe();
 			const releases = await Promise.allSettled([...attachments].map((attachment) => attachment.release(context)));
 			attachments.clear();
 			await mutationTail;

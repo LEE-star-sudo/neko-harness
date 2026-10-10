@@ -5,21 +5,24 @@ import {
 	matchesKey,
 	type SelectItem,
 	truncateToWidth,
+	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { labels } from "../labels.ts";
 import { style, theme } from "../theme.ts";
 
+export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string };
+
 /** A single searchable panel. Async generations cannot reopen a closed panel. */
 export class PickerPanel implements Component {
 	readonly search = new Input({ prompt: "Search: ", placeholder: "Type to filter" });
-	#items: readonly SelectItem[] = [];
+	#items: readonly PickerItem[] = [];
 	#index = 0;
 	#generation = 0;
 	#state: "closed" | "loading" | "ready" | "error" | "applying" = "closed";
 	#error = "";
 	#title = "";
-	#load: (() => Promise<readonly SelectItem[]>) | undefined;
+	#load: (() => Promise<readonly PickerItem[]>) | undefined;
 	#pick: ((value: string) => Promise<void>) | undefined;
 	height = 10;
 	readonly changed: () => void;
@@ -40,7 +43,7 @@ export class PickerPanel implements Component {
 	invalidate(): void {}
 	async show(
 		title: string,
-		load: () => Promise<readonly SelectItem[]>,
+		load: () => Promise<readonly PickerItem[]>,
 		pick: (value: string) => Promise<void>,
 	): Promise<void> {
 		if (this.open) return;
@@ -67,15 +70,26 @@ export class PickerPanel implements Component {
 		}
 		this.changed();
 	}
+	update(items: readonly PickerItem[]): void {
+		if (this.#state !== "ready") return;
+		const value = this.#filtered()[this.#index]?.value;
+		this.#items = items;
+		const filtered = this.#filtered();
+		const index = filtered.findIndex((item) => item.value === value);
+		this.#index = index < 0 ? Math.max(0, Math.min(this.#index, filtered.length - 1)) : index;
+		this.changed();
+	}
 	close(): void {
 		++this.#generation;
 		this.#state = "closed";
 		this.closed();
 		this.changed();
 	}
-	#filtered(): readonly SelectItem[] {
+	#filtered(): readonly PickerItem[] {
 		const query = this.search.getValue().toLowerCase();
-		return this.#items.filter((item) => `${item.label} ${item.description ?? ""}`.toLowerCase().includes(query));
+		return this.#items.filter((item) =>
+			`${item.label} ${item.description ?? ""} ${item.searchText ?? ""}`.toLowerCase().includes(query),
+		);
 	}
 	handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
@@ -135,8 +149,13 @@ export class PickerPanel implements Component {
 			const details = height >= 9 && selected?.description ? wrapTextWithAnsi(selected.description, w).slice(0, 2) : [];
 			const count = Math.max(1, available - details.length);
 			const start = Math.max(0, Math.min(this.#index - Math.floor(count / 2), items.length - count));
-			for (const [i, item] of items.slice(start, start + count).entries())
-				rows.push(start + i === this.#index ? theme.selection(`> ${item.label}`) : `  ${item.label}`);
+			for (const [i, item] of items.slice(start, start + count).entries()) {
+				const right = item.rightLabel ?? "";
+				const leftWidth = Math.max(1, w - 3 - visibleWidth(right));
+				const left = truncateToWidth(item.label, leftWidth, "...");
+				const label = right ? `${left}${" ".repeat(Math.max(1, leftWidth - visibleWidth(left) + 1))}${right}` : left;
+				rows.push(start + i === this.#index ? theme.selection(`> ${label}`) : `  ${label}`);
+			}
 			if (items.length === 0) rows.push(labels.noResults);
 			while (rows.length < height - 1 - details.length) rows.push("");
 			rows.push(...details.map((line) => theme.dim(line)));

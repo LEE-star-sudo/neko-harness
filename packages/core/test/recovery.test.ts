@@ -1,3 +1,4 @@
+import { fauxProvider } from "../../../test/faux.ts";
 // 2.2 持久化与崩溃恢复：两个 runtime 实例先后打开同一 SQLite 文件。
 // 实例 A 提交后在工具执行中"崩溃"（close 中止在飞调用）；实例 B 重开同一文件，
 // 断言 replay:"safe" 的工具重跑，未声明的工具以 interrupted 错误结果收场。
@@ -7,7 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type ToolExecutionResult, ToolResultEntry } from "@earendil-works/pi-durable";
 import { createNekoRuntime, type NekoRuntimeOptions } from "../src/index.ts";
 

@@ -1,8 +1,9 @@
+import { fauxProvider } from "../../../test/faux.ts";
 // 2.5 用量统计：一轮带工具调用的对话后，usage 按 provider/modelId 与工具名分组，
 // 且带 usage 的失败工具结果也计入。
 
 import { describe, expect, it } from "bun:test";
-import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type, type Usage } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall, Type, type Usage } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { createNekoRuntime } from "../src/index.ts";
 

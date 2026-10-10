@@ -1,23 +1,25 @@
+import { matchesSession, messageTime, relativeTime, sessionName } from "@neko-harness/core/session-display";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { appActions, reportError } from "../lib/bootstrap";
 import { workspaceSessions } from "../lib/gateway";
+import { useSessionTime } from "../lib/session-time";
 import { useNekoState } from "../lib/store";
 import { folderName, Icon, Modal, Popover, useMobile } from "./nav-primitives";
 import { WorkspacePicker } from "./workspace-picker";
 
 export function SessionList({ open, onClose }: { open: boolean; onClose: () => void }) {
 	const state = useNekoState();
+	const now = useSessionTime();
 	const mobile = useMobile();
 	const [menu, setMenu] = useState<{ anchor: HTMLElement; id?: string } | null>(null);
+	const menuSession = state.sessions.find((session) => session.id === menu?.id);
 	const [picker, setPicker] = useState(false);
 	const [archive, setArchive] = useState<string | null>(null);
 	const [archiveError, setArchiveError] = useState("");
 	const [query, setQuery] = useState("");
 	const disabled = state.phase !== "ready" || state.operating;
-	const sessions = workspaceSessions(state.sessions, state.workspaceRoot).filter((s) =>
-		`会话 ${s.id}`.includes(query.trim()),
-	);
+	const sessions = workspaceSessions(state.sessions, state.workspaceRoot).filter((s) => matchesSession(s, query));
 	const action = (operation: Promise<void>) => {
 		void operation
 			.then(() => {
@@ -84,16 +86,30 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 								className="nav-row nav-session-select"
 								disabled={disabled}
 								aria-current={session.id === state.currentSessionId ? "page" : undefined}
+								aria-label={`${sessionName(session, "新会话")} · ${new Date(messageTime(session)).toLocaleString("zh-CN")}`}
 								onClick={() => action(appActions.selectSession(session.id))}
 							>
 								<Icon name="chat" />
-								<span className="nav-truncate">会话 {session.id}</span>
+								<span className="nav-session-copy">
+									<span className="nav-truncate">{sessionName(session, "新会话")}</span>
+									<span className="nav-session-meta">
+										<time dateTime={new Date(messageTime(session)).toISOString()}>
+											{relativeTime(messageTime(session), now, "zh")}
+										</time>
+										{session.status === "running" ? " · 运行中" : session.status === "error" ? " · 出错" : ""}
+									</span>
+									<span className="nav-session-tooltip" role="tooltip">
+										{sessionName(session, "新会话")}
+										<br />
+										{new Date(messageTime(session)).toLocaleString("zh-CN")}
+									</span>
+								</span>
 							</button>
 							<button
 								type="button"
 								className="nav-icon nav-row-more"
 								disabled={disabled}
-								aria-label={`会话 ${session.id} 的操作`}
+								aria-label={`${sessionName(session, "新会话")}的操作`}
 								title="会话操作"
 								onClick={(e) => setMenu({ anchor: e.currentTarget, id: session.id })}
 							>
@@ -133,18 +149,26 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 			{menu && (
 				<Popover anchor={menu.anchor} label={menu.id ? "会话操作" : "选择工作区"} onClose={() => setMenu(null)}>
 					{menu.id ? (
-						<button
-							type="button"
-							className="nav-row"
-							onClick={() => {
-								setArchive(menu.id!);
-								setArchiveError("");
-								setMenu(null);
-							}}
-						>
-							<Icon name="archive" />
-							归档会话
-						</button>
+						<>
+							{menuSession && (
+								<div className="nav-session-details">
+									<strong>{sessionName(menuSession, "新会话")}</strong>
+									<small>{new Date(messageTime(menuSession)).toLocaleString("zh-CN")}</small>
+								</div>
+							)}
+							<button
+								type="button"
+								className="nav-row"
+								onClick={() => {
+									setArchive(menu.id!);
+									setArchiveError("");
+									setMenu(null);
+								}}
+							>
+								<Icon name="archive" />
+								归档会话
+							</button>
+						</>
 					) : (
 						<>
 							<div className="nav-section-label">工作区</div>
@@ -193,7 +217,14 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 			{archive && (
 				<Modal title="归档会话" locked={state.operating} onClose={() => setArchive(null)}>
 					<div className="nav-confirm">
-						<p>归档会话 {archive}？会话将从列表中隐藏，工作区和文件仍会保留。</p>
+						<p>
+							归档“
+							{sessionName(
+								state.sessions.find((s) => s.id === archive) ?? { title: "", firstPromptPreview: "" },
+								"新会话",
+							)}
+							”？会话将从列表中隐藏，工作区和文件仍会保留。
+						</p>
 						{archiveError && (
 							<p role="alert" className="nav-error">
 								{archiveError}
