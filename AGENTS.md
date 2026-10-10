@@ -33,7 +33,9 @@ npm run neko -- web        # 启动 Web UI（默认 http://127.0.0.1:8321）
 ## pi-durable 使用要点（与 README 出入时以 `reference/pi/packages/durable/src` 为准）
 
 - 每个异步调用都要 Chord `Context`；core 里默认 `BACKGROUND_CONTEXT`。
-- 存储：`openNodeSqliteStorage(path)`（自动建父目录）或 `MemoryStorage`。
-- 会话：`harness.root(context, { agent })` → `conversation.submit({ type: "input", content }, context)` → `submission.wait(context)`。
+- 存储：`openNodeSqliteStorage(path)`（自动建父目录）或 `MemoryStorage`；一个存储同时只被一个 Harness 打开。
+- 会话：`harness.root(context, { agent })` → `conversation.submit({ type: "input", content }, context)` → `submission.wait(context)`；同 `requestId` 重复提交幂等（含重开后）。
 - 前端渲染数据源：`conversation.viewState(context)` / `conversation.watch(context)` / `watchEvents(harness, id, context)`。
 - 用量：`harness.snapshot(UsageDoc, conversationId, context)` 或 `harness.usage(context)`（Session 总量）。
+- 会话目录：宿主侧无 `scanConversations`，用 `harness.commit(tx => tx.scanConversations({}, n, undefined), context)`；无删除 API（core 用 `app.neko.conversation` 文档做软删除）。
+- 已安装 1.1.0 与 reference 源码（更新）有差异，以 node_modules 类型为准：`ToolExecutionResult` 字段是 `content`（源码已改名 `output`）；`SessionFailed`/`StorageRequestError` 在 1.1.0 运行时未导出（errors 模块只有 `ReadAfterWrite`/`StorageRejected`/`ConversationBusy`）；ConversationId 是数字 brand（ROOT = 1），未知 id 的 `harness.conversation()` 返回 undefined，但对未知 id 做 `snapshot` 会抛 TypeError。

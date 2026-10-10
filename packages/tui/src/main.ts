@@ -1,4 +1,6 @@
 // neko TUI 入口：npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <path>] [--theme light|dark|auto]
+// 选项优先级：CLI flag > neko.config.json（向上查找，兜底 ~/.neko/neko.config.json）> 内置默认。
+import { loadNekoConfig } from "@neko-harness/core";
 import type { ThemePreference } from "./theme.ts";
 import { runTui } from "./tui.ts";
 
@@ -11,7 +13,8 @@ const USAGE = `用法: main.ts [--cwd <dir>] [--model <provider/modelId>] [--sto
   --theme <mode>    主题：light / dark / auto（默认 auto；也可用环境变量 NEKO_THEME，--theme 优先）
   -h, --help        显示此帮助
 
-需要环境变量 DEEPSEEK_API_KEY。`;
+配置文件 neko.config.json（从当前目录向上查找，兜底 ~/.neko/）可提供 defaultModel、
+storagePath、theme 等；CLI flag 始终优先。需要环境变量 DEEPSEEK_API_KEY。`;
 
 type CliOptions = {
 	cwd?: string;
@@ -79,7 +82,21 @@ function parseArgs(argv: readonly string[]): CliOptions {
 }
 
 try {
-	const options = parseArgs(process.argv.slice(2));
+	const cli = parseArgs(process.argv.slice(2));
+	// CLI flag 优先，其次 neko.config.json；未指定的项保持 undefined，由 runTui 用内置默认。
+	const config = await loadNekoConfig();
+	const options = {
+		...(cli.cwd !== undefined ? { cwd: cli.cwd } : {}),
+		...(cli.model !== undefined || config.defaultModel !== undefined
+			? { model: cli.model ?? config.defaultModel }
+			: {}),
+		...(cli.storagePath !== undefined || config.storagePath !== undefined
+			? { storagePath: cli.storagePath ?? config.storagePath }
+			: {}),
+		...(cli.theme !== undefined || config.theme !== undefined
+			? { theme: (cli.theme ?? config.theme) as ThemePreference }
+			: {}),
+	};
 	await runTui(options);
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));

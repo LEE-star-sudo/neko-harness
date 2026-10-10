@@ -1,7 +1,7 @@
 // neko web 入口：npx tsx packages/web/src/main.ts [--port <n>] [--host <ip>] [--cwd <dir>] [--model provider/modelId] [--storage <path>]
+// 选项优先级：CLI flag > neko.config.json（向上查找，兜底 ~/.neko/neko.config.json）> 内置默认。
 
-import type { NekoModelRef } from "@neko-harness/core";
-import { DEFAULT_MODEL } from "@neko-harness/core";
+import { DEFAULT_MODEL, loadNekoConfig, type NekoModelRef } from "@neko-harness/core";
 import { startWebServer } from "./server.ts";
 
 const USAGE = `用法: main.ts [--port <n>] [--host <ip>] [--cwd <dir>] [--model <provider/modelId>] [--storage <sqlite路径>]
@@ -14,7 +14,8 @@ const USAGE = `用法: main.ts [--port <n>] [--host <ip>] [--cwd <dir>] [--model
   --storage <path>  SQLite 存储文件（默认 ~/.neko/neko.sqlite）
   -h, --help        显示此帮助
 
-需要环境变量 DEEPSEEK_API_KEY。`;
+配置文件 neko.config.json（从当前目录向上查找，兜底 ~/.neko/）可提供 defaultModel、
+storagePath、gateway.host/port 等；CLI flag 始终优先。需要环境变量 DEEPSEEK_API_KEY。`;
 
 type CliOptions = {
 	port?: number;
@@ -85,7 +86,20 @@ function parseArgs(argv: readonly string[]): CliOptions {
 }
 
 try {
-	const options = parseArgs(process.argv.slice(2));
+	const cli = parseArgs(process.argv.slice(2));
+	// CLI flag 优先，其次 neko.config.json（gateway.host/port 段）；未指定的项保持 undefined。
+	const config = await loadNekoConfig();
+	const options = {
+		...(cli.port !== undefined || config.gateway?.port !== undefined ? { port: cli.port ?? config.gateway?.port } : {}),
+		...(cli.host !== undefined || config.gateway?.host !== undefined ? { host: cli.host ?? config.gateway?.host } : {}),
+		...(cli.cwd !== undefined ? { cwd: cli.cwd } : {}),
+		...(cli.model !== undefined || config.defaultModel !== undefined
+			? { model: cli.model ?? config.defaultModel }
+			: {}),
+		...(cli.storagePath !== undefined || config.storagePath !== undefined
+			? { storagePath: cli.storagePath ?? config.storagePath }
+			: {}),
+	};
 	const server = await startWebServer(options);
 	const model = options.model ?? DEFAULT_MODEL;
 	console.log(`neko web 已启动: ${server.url}  （模型 ${model.provider}/${model.modelId}）`);

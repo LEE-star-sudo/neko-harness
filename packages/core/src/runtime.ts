@@ -9,9 +9,12 @@ import {
 	type AgentEventStream,
 	AssistantEntry,
 	type Conversation,
+	type ConversationId,
 	type ConversationView,
 	type ConversationWatch,
 	createRegistry,
+	defineDoc,
+	type Extension,
 	Harness,
 	MemoryStorage,
 	type Submission,
@@ -50,6 +53,8 @@ export type NekoRuntimeOptions = {
 	readonly cwd?: string;
 	/** Extra pi-ai providers registered next to the built-in DeepSeek one. */
 	readonly providers?: readonly Provider[];
+	/** Extra extensions installed after CodingTools, e.g. custom tools; tests use this with the faux provider. */
+	readonly extensions?: readonly Extension[];
 };
 
 export type NekoSubmitOptions = {
@@ -62,15 +67,12 @@ export type NekoAnswer =
 	| { readonly status: "done"; readonly text: string }
 	| { readonly status: "unanswered"; readonly reason: string; readonly detail?: string };
 
-/** A running neko-harness runtime: one open storage, one root conversation. */
-export type NekoRuntime = {
-	/** Chord context bound to every runtime call. */
-	readonly context: Context;
-	/** The underlying pi-durable Harness, for callers that need more. */
-	readonly harness: Harness;
-	/** The root conversation. */
+/** One conversation of a runtime: the handle plus the per-session operations frontends subscribe to. */
+export type NekoSession = {
+	/** Conversation identity; compare by `id`. */
+	readonly id: ConversationId;
+	/** The underlying pi-durable conversation. */
 	readonly conversation: Conversation;
-
 	/** Durably admit user input; the returned submission settles when the run answers it. */
 	submit(content: string, options?: NekoSubmitOptions): Promise<Submission>;
 	/** Wait for a submission and extract the answer text. */
@@ -81,10 +83,72 @@ export type NekoRuntime = {
 	watch(): Promise<ConversationWatch>;
 	/** Coding-agent style agent events (message/tool deltas) for this conversation. */
 	events(): Promise<AgentEventStream>;
-	/** Token and cost totals of the root conversation's `pi.usage`. */
+	/** Token and cost totals of this conversation's `pi.usage`. */
 	usage(): Promise<UsageState>;
 	/** Withdraw queued inputs and abort the current run. */
 	abort(): Promise<void>;
+};
+
+/** Directory entry of `listConversations()`. */
+export type NekoConversationInfo = {
+	readonly id: ConversationId;
+	/** Archived conversations are hidden from listings and lookups (soft delete). */
+	readonly archived: boolean;
+};
+
+export type NekoCreateConversationOptions = {
+	readonly model?: NekoModelRef;
+	readonly thinkingLevel?: ModelThinkingLevel;
+	readonly cwd?: string;
+};
+
+/**
+ * Soft-delete marker stored per conversation. pi-durable 1.1.0 has no conversation
+ * deletion, so `archiveConversation` writes this document and listings filter on it.
+ */
+const ArchivedDoc = defineDoc<{ archived: boolean }>({
+	kind: "app.neko.conversation",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ archived: false }),
+});
+
+/** A running neko-harness runtime: one open storage and its conversations, root plus created ones. */
+export type NekoRuntime = {
+	/** Chord context bound to every runtime call. */
+	readonly context: Context;
+	/** The underlying pi-durable Harness, for callers that need more. */
+	readonly harness: Harness;
+	/** The root conversation. */
+	readonly conversation: Conversation;
+	/** The root session: same conversation, bundled per-session operations. */
+	readonly root: NekoSession;
+
+	/** Durably admit user input to the root conversation; the returned submission settles when the run answers it. */
+	submit(content: string, options?: NekoSubmitOptions): Promise<Submission>;
+	/** Wait for a submission on the root conversation and extract the answer text. */
+	waitAnswer(submission: Submission): Promise<NekoAnswer>;
+	/** The root conversation's structural view as a read-only Chord state, updated after every commit. */
+	viewState(id?: ConversationId): Promise<AttachedReplicatedState<ConversationView>>;
+	/** The structural view as a serialized exact-frame watch with bounded pending frames. */
+	watch(id?: ConversationId): Promise<ConversationWatch>;
+	/** Coding-agent style agent events (message/tool deltas). */
+	events(id?: ConversationId): Promise<AgentEventStream>;
+	/** Token and cost totals of a conversation's `pi.usage` (default: root). */
+	usage(id?: ConversationId): Promise<UsageState>;
+	/** Withdraw queued inputs and abort the current run (default: root). */
+	abort(id?: ConversationId): Promise<void>;
+
+	/** Every conversation of this storage, root included, with its soft-delete state. */
+	listConversations(): Promise<NekoConversationInfo[]>;
+	/** Create a new ownerless conversation; starts as a copy of the runtime's model/thinking/cwd choices. */
+	createConversation(options?: NekoCreateConversationOptions): Promise<NekoSession>;
+	/** Acquire a session by id; `undefined` for unknown or archived conversations. */
+	getConversation(id: ConversationId): Promise<NekoSession | undefined>;
+	/** Soft delete: hide the conversation from listings and lookups. pi-durable cannot delete conversations. */
+	archiveConversation(id: ConversationId): Promise<void>;
 	/** Close the Harness and its storage. */
 	close(): Promise<void>;
 };
@@ -120,6 +184,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 
 	const registry = createRegistry();
 	registry.install(CodingTools);
+	for (const extension of options.extensions ?? []) registry.install(extension);
 
 	const storage =
 		options.storage === "memory"
@@ -144,53 +209,131 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	});
 	harness.resume();
 
+	const submitTo = (target: Conversation, content: string, submitOptions?: NekoSubmitOptions): Promise<Submission> =>
+		target.submit(
+			{
+				type: "input",
+				content,
+				...(submitOptions?.requestId !== undefined ? { requestId: submitOptions.requestId } : {}),
+				...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
+			},
+			context,
+		);
+
+	const waitAnswerOf = async (target: Conversation, submission: Submission): Promise<NekoAnswer> => {
+		const settled = await submission.wait(context);
+		if (settled.status === "done" && settled.type === "input") {
+			const entry = await target.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
+			const message = entry?.model?.[0];
+			const text =
+				message?.role === "assistant"
+					? message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")
+					: "";
+			return { status: "done", text };
+		}
+		const detail = settled.status === "unanswered" ? settled.detail : undefined;
+		return {
+			status: "unanswered",
+			reason: settled.status === "unanswered" ? settled.reason : settled.status,
+			...(detail !== undefined ? { detail: typeof detail === "string" ? detail : JSON.stringify(detail) } : {}),
+		};
+	};
+
+	const makeSession = (target: Conversation): NekoSession => ({
+		id: target.id,
+		conversation: target,
+		submit(content, submitOptions) {
+			return submitTo(target, content, submitOptions);
+		},
+		waitAnswer(submission) {
+			return waitAnswerOf(target, submission);
+		},
+		viewState() {
+			return target.viewState(context);
+		},
+		watch() {
+			return target.watch(context);
+		},
+		events() {
+			return watchEvents(harness, target.id, context);
+		},
+		async usage() {
+			return (await harness.snapshot(UsageDoc, target.id, context)) ?? { models: {}, tools: {} };
+		},
+		abort() {
+			return target.abort(context);
+		},
+	});
+
+	const rootSession = makeSession(conversation);
+
+	const sessionFor = async (id?: ConversationId): Promise<NekoSession> => {
+		if (id === undefined || id === conversation.id) return rootSession;
+		const session = await getConversation(id);
+		if (session === undefined) throw new Error(`Conversation ${id} is not available (unknown or archived).`);
+		return session;
+	};
+
+	const getConversation = async (id: ConversationId): Promise<NekoSession | undefined> => {
+		// `conversation()` yields undefined for unknown ids; snapshot on an unknown id
+		// would reject, so only read the archive marker for conversations that exist.
+		const target = await harness.conversation(id, context);
+		if (target === undefined) return undefined;
+		const archived = (await harness.snapshot(ArchivedDoc, id, context))?.archived ?? false;
+		return archived ? undefined : makeSession(target);
+	};
+
 	return {
 		context,
 		harness,
 		conversation,
-		submit(content, submitOptions) {
-			return conversation.submit(
+		root: rootSession,
+		submit: rootSession.submit,
+		waitAnswer: rootSession.waitAnswer,
+		async viewState(id?: ConversationId) {
+			return (await sessionFor(id)).viewState();
+		},
+		async watch(id?: ConversationId) {
+			return (await sessionFor(id)).watch();
+		},
+		async events(id?: ConversationId) {
+			return (await sessionFor(id)).events();
+		},
+		async usage(id?: ConversationId) {
+			return (await sessionFor(id)).usage();
+		},
+		async abort(id?: ConversationId) {
+			await (await sessionFor(id)).abort();
+		},
+		async listConversations() {
+			// The directory hides archived conversations (soft-deleted).
+			const page = await harness.commit((tx) => tx.scanConversations({}, 1000, undefined), context);
+			const infos: NekoConversationInfo[] = [];
+			for (const record of page.items) {
+				const archived = (await harness.snapshot(ArchivedDoc, record.id, context))?.archived ?? false;
+				if (!archived) infos.push({ id: record.id, archived: false });
+			}
+			return infos;
+		},
+		async createConversation(createOptions) {
+			const created = await harness.createConversation(
 				{
-					type: "input",
-					content,
-					...(submitOptions?.requestId !== undefined ? { requestId: submitOptions.requestId } : {}),
-					...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
+					ownership: { kind: "ownerless" },
+					agent: {
+						model: createOptions?.model ?? model,
+						...(createOptions?.thinkingLevel !== undefined ? { thinkingLevel: createOptions.thinkingLevel } : {}),
+						...(createOptions?.cwd !== undefined ? { cwd: createOptions.cwd } : {}),
+					},
 				},
 				context,
 			);
+			return makeSession(created);
 		},
-		async waitAnswer(submission) {
-			const settled = await submission.wait(context);
-			if (settled.status === "done" && settled.type === "input") {
-				const entry = await conversation.commit((tx) => tx.entry(AssistantEntry, settled.answer), context);
-				const message = entry?.model?.[0];
-				const text =
-					message?.role === "assistant"
-						? message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")
-						: "";
-				return { status: "done", text };
-			}
-			const detail = settled.status === "unanswered" ? settled.detail : undefined;
-			return {
-				status: "unanswered",
-				reason: settled.status === "unanswered" ? settled.reason : settled.status,
-				...(detail !== undefined ? { detail: typeof detail === "string" ? detail : JSON.stringify(detail) } : {}),
-			};
-		},
-		viewState() {
-			return conversation.viewState(context);
-		},
-		watch() {
-			return conversation.watch(context);
-		},
-		events() {
-			return watchEvents(harness, conversation.id, context);
-		},
-		async usage() {
-			return (await harness.snapshot(UsageDoc, conversation.id, context)) ?? { models: {}, tools: {} };
-		},
-		abort() {
-			return conversation.abort(context);
+		getConversation,
+		async archiveConversation(id) {
+			await harness.commit(async (tx) => {
+				(await tx.doc(ArchivedDoc, id)).archived = true;
+			}, context);
 		},
 		close() {
 			return harness.close(context);
