@@ -49,6 +49,6 @@ const config = mergeNekoConfig(mergeNekoConfig(DEFAULT_NEKO_CONFIG, file), cliOv
 需要 `DEEPSEEK_API_KEY`：
 
 ```bash
-npx tsx packages/core/examples/chat.ts
-npx tsx packages/core/examples/coding-tools.ts
+bun --conditions=neko-source packages/core/examples/chat.ts
+bun --conditions=neko-source packages/core/examples/coding-tools.ts
 ```

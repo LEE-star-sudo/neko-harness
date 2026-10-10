@@ -4,11 +4,11 @@
 
 ## 结构
 
-**服务器侧（Node，仅静态托管 + 网关发现）：**
+**服务器侧（Bun，仅静态托管 + 网关发现）：**
 
 - `src/server.ts` — `startWebServer(options)`：确保 gateway 运行 + 静态托管 `dist/client` + `GET /api/info`（返回 `{ gatewayWs, serverId, socketPath }`）。
-- `src/gateway-spawn.ts` — `ensureNekoGateway(options)`：serverId/socket 确定后在 Unix socket 上探活（pi 握手 + 服务绑定，复用 gateway 的 `connectNekoGateway`）；不通则 spawn `tsx packages/gateway/src/main.ts` 子进程并轮询探活。socket 存在即复用既有网关（不 spawn 不代管）。
-- `src/main.ts` — CLI：`npx tsx packages/web/src/main.ts [--port 8322] [--gateway-port 8321] [--storage <path>] [--socket-path <path>] [--cwd <dir>] [--model <ref>]`。
+- `src/gateway-spawn.ts` — `ensureNekoGateway(options)`：serverId/socket 确定后在 Unix socket 上探活（pi 握手 + 服务绑定，复用 gateway 的 `connectNekoGateway`）；不通则 用当前 Bun 启动 gateway 子进程（源码用 main.ts，构建产物用 main.js）并轮询探活。socket 存在即复用既有网关（不 spawn 不代管）。
+- `src/main.ts` — CLI：`bun --conditions=neko-source packages/web/src/main.ts [--port 8322] [--gateway-port 8321] [--storage <path>] [--socket-path <path>] [--cwd <dir>] [--model <ref>]`。
 
 **客户端（`src/client/`，浏览器直连 pi 协议）：**
 
@@ -22,8 +22,8 @@
 ## 构建与运行
 
 ```bash
-npm run build --workspace @neko-harness/web   # tsc 服务端 → dist/ + vite 客户端 → dist/client/
-npx tsx packages/web/src/main.ts              # 起静态服务（自动 spawn gateway）
+bun run --cwd packages/web build   # tsc 服务端 → dist/ + vite 客户端 → dist/client/
+bun --conditions=neko-source packages/web/src/main.ts              # 起静态服务（自动 spawn gateway）
 ```
 
 需要 `DEEPSEEK_API_KEY`。浏览器访问打印的地址（默认 http://127.0.0.1:8322）。

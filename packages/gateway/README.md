@@ -18,9 +18,9 @@ const gateway = await startGateway({ port: 8321 }); // CLI > neko.config.json > 
 // gateway.socketPath / gateway.wsUrl / gateway.serverId
 ```
 
-独立启动：`npx tsx packages/gateway/src/main.ts [--port <n>] [--socket-path <path>] ...`（供 cli 的 `neko serve` 接入）。
+独立启动：`bun --conditions=neko-source packages/gateway/src/main.ts [--port <n>] [--socket-path <path>] ...`（供 cli 的 `neko serve` 接入）。
 
-Node 客户端（tui/脚本/测试复用）：`connectNekoGateway({ transport: "unix" | "ws", ... })`，见 `src/client.ts`。
+Bun 宿主客户端（tui/脚本/测试复用）：`connectNekoGateway({ transport: "unix" | "ws", ... })`，见 `src/client.ts`。
 
 ## 上游耦合面
 

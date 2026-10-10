@@ -1,4 +1,4 @@
-// neko TUI 入口：npx tsx packages/tui/src/main.ts [选项]
+// neko TUI 入口：bun --conditions=neko-source packages/tui/src/main.ts [选项]
 import type { ThemePreference } from "./theme.ts";
 import { runTui } from "./tui.ts";
 

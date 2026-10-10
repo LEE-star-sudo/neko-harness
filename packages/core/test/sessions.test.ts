@@ -1,8 +1,9 @@
 // core 会话管理 API：列出 / 创建 / 按 id 获取 / 归档（软删除），
 // 以及按会话 id 订阅 viewState/watch/events/usage。
+
+import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
 import { ROOT_CONVERSATION_ID } from "@earendil-works/pi-durable";
-import { describe, expect, it } from "vitest";
 import { createNekoRuntime } from "../src/index.ts";
 
 async function makeRuntime() {

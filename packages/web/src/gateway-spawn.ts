@@ -2,13 +2,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { NekoModelRef } from "@neko-harness/core";
-import { connectNekoGateway } from "@neko-harness/gateway";
+import { connectNekoGateway, gatewayCommand, stopGatewayProcess } from "@neko-harness/gateway";
 
 /**
  * 确保一个 neko gateway 在运行：serverId/socket 确定后先探活（Unix socket 上跑一遍
- * pi 握手 + 服务绑定），不通则 spawn gateway 子进程（tsx packages/gateway/src/main.ts）
+ * pi 握手 + 服务绑定），不通则 spawn gateway 子进程（Bun 源码或构建产物入口）
  * 并轮询探活直到就绪。socket 文件存在但无响应时直接 spawn——pi-server 的 Unix
  * listener 会识别并接管 stale socket。
  */
@@ -57,32 +56,39 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 
 	const child = spawnGatewayProcess(options, socketPath, serverId);
 	pipeChildLogs(child, options.onLog);
-	const timeoutAt = Date.now() + (options.spawnTimeoutMs ?? 30_000);
-	// 让子进程有机会打印启动错误再报错。
-	let lastError: unknown = new Error("gateway 未就绪");
-	while (Date.now() < timeoutAt) {
-		if (child.exitCode !== null) {
-			throw new Error(`neko gateway 子进程提前退出（code ${child.exitCode}），详见上方日志。地址可能被其他实例占用。`);
+	let spawnError: Error | undefined;
+	child.on("error", (error: Error) => {
+		spawnError = error;
+	});
+	try {
+		const timeoutAt = Date.now() + (options.spawnTimeoutMs ?? 30_000);
+		// 让子进程有机会打印启动错误再报错。
+		let lastError: unknown = new Error("gateway 未就绪");
+		while (Date.now() < timeoutAt) {
+			if (spawnError !== undefined) throw spawnError;
+			if (child.exitCode !== null || child.signalCode !== null) {
+				throw new Error(
+					`neko gateway 子进程提前退出（code ${child.exitCode}），详见上方日志。地址可能被其他实例占用。`,
+				);
+			}
+			try {
+				if (await probeGateway(socketPath, serverId)) return makeHandle(serverId, socketPath, host, port, child);
+			} catch (error) {
+				lastError = error;
+			}
+			await sleep(PROBE_INTERVAL_MS);
 		}
-		try {
-			if (await probeGateway(socketPath, serverId)) return makeHandle(serverId, socketPath, host, port, child);
-		} catch (error) {
-			lastError = error;
-		}
-		await sleep(PROBE_INTERVAL_MS);
+		throw new Error(
+			`等待 neko gateway 就绪超时（${options.spawnTimeoutMs ?? 30_000}ms）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
+		);
+	} catch (error) {
+		await stopGatewayProcess(child);
+		throw error;
 	}
-	stopChild(child);
-	throw new Error(
-		`等待 neko gateway 就绪超时（${options.spawnTimeoutMs ?? 30_000}ms）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
-	);
 }
 
 function spawnGatewayProcess(options: GatewayEnsureOptions, socketPath: string, serverId: string): ChildProcess {
-	// src/ 与 dist/ 下相对深度一致：packages/web/{src,dist} → 仓库根 / packages/gateway。
-	const tsxBin = fileURLToPath(new URL("../../../node_modules/.bin/tsx", import.meta.url));
-	const gatewayMain = fileURLToPath(new URL("../../gateway/src/main.ts", import.meta.url));
 	const args = [
-		gatewayMain,
 		"--host",
 		options.host ?? "127.0.0.1",
 		"--port",
@@ -96,7 +102,8 @@ function spawnGatewayProcess(options: GatewayEnsureOptions, socketPath: string, 
 		...(options.cwd !== undefined ? ["--cwd", options.cwd] : []),
 		...(options.model !== undefined ? ["--model", `${options.model.provider}/${options.model.modelId}`] : []),
 	];
-	return spawn(tsxBin, args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+	const command = gatewayCommand(args);
+	return spawn(command.binary, command.args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
 }
 
 function pipeChildLogs(child: ChildProcess, onLog: ((line: string) => void) | undefined): void {
@@ -137,28 +144,9 @@ function makeHandle(
 		wsUrl: `ws://${host}:${port}`,
 		spawned,
 		async close() {
-			if (spawned === null) return;
-			await new Promise<void>((resolve) => {
-				const timer = setTimeout(() => {
-					stopChild(spawned);
-					resolve();
-				}, 3_000);
-				spawned.once("exit", () => {
-					clearTimeout(timer);
-					resolve();
-				});
-				stopChildGracefully(spawned);
-			});
+			if (spawned !== null) await stopGatewayProcess(spawned);
 		},
 	};
-}
-
-function stopChildGracefully(child: ChildProcess): void {
-	if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-}
-
-function stopChild(child: ChildProcess): void {
-	if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
 }
 
 async function loadOrCreateServerId(nekoDir: string): Promise<string> {

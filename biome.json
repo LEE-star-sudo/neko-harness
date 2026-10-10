@@ -7,7 +7,6 @@
 			"packages/*/test/**/*.ts",
 			"packages/*/examples/**/*.ts",
 			"packages/web/vite.config.ts",
-			"vitest.config.ts",
 			"!reference"
 		]
 	},

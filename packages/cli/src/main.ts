@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,7 +24,7 @@ switch (command) {
 	case "web":
 	case "serve": {
 		// 子命令的 main 自行解析 process.argv.slice(2)，剥离子命令名后透传
-		process.argv = [process.argv[0] ?? "node", process.argv[1] ?? "neko", ...rest];
+		process.argv = [process.argv[0] ?? "bun", process.argv[1] ?? "neko", ...rest];
 		const pkg = command === "serve" ? "gateway" : command;
 		await import(entry(pkg));
 		break;

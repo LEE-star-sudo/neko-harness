@@ -1,9 +1,10 @@
 // 会话目录（spec: 会话目录 / 新会话广播 / 传输支持-浏览器连接）：
 // 目录随创建/归档实时推送给所有已连接前端（Unix socket 与 WebSocket 两端都要收到）。
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ServerError } from "@earendil-works/pi-client";
 import type { ChatView } from "@neko-harness/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
 import { cleanup, makeGateway, type TestGateway, waitFor } from "./helpers.ts";
 

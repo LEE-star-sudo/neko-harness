@@ -2,29 +2,29 @@
 
 ## 项目
 
-neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord 1.1.0，全部精确锁版本）的 agent harness monorepo。Node.js ≥ 22.19。设计决策见 `openspec/changes/bootstrap-neko-harness/design.md`。
+neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord 1.1.0，全部精确锁版本）的 agent harness monorepo。Bun 1.4.2。设计决策见 `openspec/changes/archive/2026-10-11-bootstrap-neko-harness/design.md`。
 
 ## 常用命令
 
 ```bash
-npm install                # 安装（建议加 --ignore-scripts）
-npm run build              # tsc 构建全部 workspace 包（web 含 vite build）
-npm test                   # vitest run（根 vitest.config.ts，别名指向各包 src）
-npm run check              # biome check . + tsc --noEmit
-npm run check:write        # biome check --write . + tsc --noEmit
+bun install --frozen-lockfile # 安装（按 bun.lock 安装）
+bun run build              # tsc 构建全部 workspace 包（web 含 vite build）
+bun run test               # Bun test（源码条件 + 文件隔离）
+bun run check              # biome check + 根/Web 客户端类型检查
+bun run check:write        # biome 修复 + 根/Web 客户端类型检查
 
-npm run neko -- tui        # 启动终端 UI（自动拉起 gateway；需 DEEPSEEK_API_KEY）
-npm run neko -- web        # 启动 Web UI（静态 8322，自动拉起 gateway WS 8321）
-npm run neko -- serve      # 仅启动 gateway（Unix socket + WebSocket）
-# 或构建后：node packages/cli/dist/main.js tui|web|serve（bin 名 neko）
+bun run neko tui        # 启动终端 UI（自动拉起 gateway；需 DEEPSEEK_API_KEY）
+bun run neko web        # 启动 Web UI（静态 8322，自动拉起 gateway WS 8321）
+bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
+# 或构建后：bun packages/cli/dist/main.js tui|web|serve（bin 名 neko）
 ```
 
-单个示例（需要 `DEEPSEEK_API_KEY`）：`npx tsx packages/core/examples/chat.ts`
+单个示例（需要 `DEEPSEEK_API_KEY`）：`bun --conditions=neko-source packages/core/examples/chat.ts`
 
 ## 约定
 
 - TypeScript strict + `noUncheckedIndexedAccess` + `erasableSyntaxOnly` + `verbatimModuleSyntax`（`tsconfig.base.json`，风格参照 `reference/pi`）。
-- 相对导入带 `.ts` 扩展名（`rewriteRelativeImportExtensions` 在构建时改写成 `.js`）；TS 运行用 tsx，构建用 tsc。
+- 相对导入带 `.ts` 扩展名（`rewriteRelativeImportExtensions` 在构建时改写成 `.js`）；TS 运行用 Bun，构建用 tsc。
 - Biome：tab 缩进、双引号、lineWidth 120（`biome.json`）。
 - 上游 pi 依赖为实验性包：只升版本不裹代码，升级走显式 OpenSpec 变更；core/gateway 做薄封装隔离上游类型。
 - 不要修改 `openspec/`（除非该变更本身要求）与 `reference/`（只读参考，已 gitignore）。

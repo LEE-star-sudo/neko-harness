@@ -13,7 +13,7 @@ import {
 import { createWsByteTransportFactory } from "./ws-listener.ts";
 
 /**
- * Node 客户端：经 pi-client 连接 neko 网关（Unix socket 或 WebSocket，同一 pi 协议与契约）。
+ * Bun 宿主客户端：经 pi-client 连接 neko 网关（Unix socket 或 WebSocket，同一 pi 协议与契约）。
  * 切换 attach 的会话 = detach 后重新 attach；断线不重连，直接新建连接（pi-client 语义）。
  */
 export type NekoGatewayAddress =

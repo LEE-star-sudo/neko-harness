@@ -1,11 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { isServerId } from "@earendil-works/pi-protocol";
 import { DEFAULT_STORAGE_PATH, loadNekoConfig, type NekoModelRef } from "@neko-harness/core";
-import { connectNekoGateway, type NekoGatewayClient } from "@neko-harness/gateway";
+import { connectNekoGateway, gatewayCommand, type NekoGatewayClient, stopGatewayProcess } from "@neko-harness/gateway";
 
 /**
  * TUI 的 gateway 接入层（design D3）：连接 Unix socket 上的网关；
@@ -39,7 +37,6 @@ const SERVER_ID_FILENAME = "gateway-server-id";
 const SOCKET_POLL_MS = 50;
 const CONNECT_RETRY_MS = 100;
 const CONNECT_RETRIES = 20;
-const KILL_TIMEOUT_MS = 5_000;
 
 export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Promise<NekoTuiGateway> {
 	// 与 gateway 的解析保持一致（CLI > neko.config.json > 默认）：socket 默认名依赖数据目录与 serverId 文件。
@@ -80,14 +77,28 @@ type SpawnPlan = {
 };
 
 async function spawnAndConnect(plan: SpawnPlan): Promise<NekoTuiGateway> {
-	const command = gatewayCommand(plan);
+	const command = gatewayCommand(gatewayArgs(plan));
 	const child = spawn(command.binary, command.args, { stdio: ["ignore", "pipe", "pipe"] });
 	const outputTail = captureOutput(child);
-	// spawn 本身的失败（tsx/入口缺失等）以 error 事件报告，不进入 exit 流程。
+	// spawn 本身的失败（Bun/入口缺失等）以 error 事件报告，不进入 exit 流程。
 	let spawnError: Error | undefined;
 	child.on("error", (error: Error) => {
 		spawnError = error;
 	});
+	try {
+		return await connectSpawned(plan, child, outputTail, () => spawnError);
+	} catch (error) {
+		await stopGatewayProcess(child);
+		throw error;
+	}
+}
+
+async function connectSpawned(
+	plan: SpawnPlan,
+	child: ChildProcess,
+	outputTail: OutputTail,
+	spawnError: () => Error | undefined,
+): Promise<NekoTuiGateway> {
 	let socketPath = plan.socketPath;
 
 	// 未显式指定 socket 时，serverId 由 gateway 生成：等文件出现后再算出 socket 路径。
@@ -98,7 +109,7 @@ async function spawnAndConnect(plan: SpawnPlan): Promise<NekoTuiGateway> {
 			plan.spawnTimeoutMs ?? 20_000,
 			child,
 			outputTail,
-			() => spawnError,
+			spawnError,
 		);
 		socketPath = join(plan.nekoDir, `${generated}.sock`);
 	}
@@ -109,19 +120,18 @@ async function spawnAndConnect(plan: SpawnPlan): Promise<NekoTuiGateway> {
 		plan.spawnTimeoutMs ?? 20_000,
 		child,
 		outputTail,
-		() => spawnError,
+		spawnError,
 	);
 
 	const serverId =
 		plan.fileServerId ?? serverIdFromSocketPath(socketPath) ?? readServerId(join(plan.nekoDir, SERVER_ID_FILENAME));
 	if (serverId === undefined) {
-		child.kill("SIGTERM");
 		throw new Error(`无法确定 gateway 的 serverId（socket: ${socketPath}）`);
 	}
 
 	let lastError: unknown;
 	for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
-		if (child.exitCode !== null || spawnError !== undefined) break;
+		if (child.exitCode !== null || spawnError() !== undefined) break;
 		try {
 			const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
 			return {
@@ -131,7 +141,7 @@ async function spawnAndConnect(plan: SpawnPlan): Promise<NekoTuiGateway> {
 				spawned: true,
 				async close() {
 					await client.close().catch(() => {});
-					await stopChild(child);
+					await stopGatewayProcess(child);
 				},
 			};
 		} catch (error) {
@@ -139,18 +149,14 @@ async function spawnAndConnect(plan: SpawnPlan): Promise<NekoTuiGateway> {
 			await sleep(CONNECT_RETRY_MS);
 		}
 	}
-	child.kill("SIGTERM");
 	throw new Error(
 		`gateway 已启动但连接失败：${lastError instanceof Error ? lastError.message : String(lastError)}\n${outputTail()}`,
 	);
 }
 
-/** dev（tsx 源码）与构建产物两种形态的 gateway 启动命令。 */
-function gatewayCommand(plan: SpawnPlan): { binary: string; args: string[] } {
-	const here = dirname(fileURLToPath(import.meta.url));
-	const isSource = basename(here) === "src";
-	const gatewayMain = join(here, "..", "..", "gateway", isSource ? "src" : "dist", isSource ? "main.ts" : "main.js");
-	const args = [
+/** CLI options shared by source and compiled gateway entrypoints. */
+function gatewayArgs(plan: SpawnPlan): string[] {
+	return [
 		"--port",
 		"0", // TUI 不需要 WS；随机端口避免与已有实例的无谓冲突（socket 冲突由单实例语义处理）。
 		"--storage",
@@ -158,10 +164,6 @@ function gatewayCommand(plan: SpawnPlan): { binary: string; args: string[] } {
 		...(plan.socketPath !== undefined ? ["--socket-path", plan.socketPath] : []),
 		...(plan.model !== undefined ? ["--model", `${plan.model.provider}/${plan.model.modelId}`] : []),
 	];
-	if (!isSource) return { binary: process.execPath, args: [gatewayMain, ...args] };
-	// 源码形态：经 tsx 运行 gateway 的 main.ts。
-	const require = createRequire(import.meta.url);
-	return { binary: process.execPath, args: [require.resolve("tsx/cli"), gatewayMain, ...args] };
 }
 
 function readServerId(file: string): string | undefined {
@@ -219,17 +221,6 @@ async function waitForValue<T>(
 		}
 		await sleep(SOCKET_POLL_MS);
 	}
-}
-
-async function stopChild(child: ChildProcess): Promise<void> {
-	if (child.exitCode !== null) return;
-	child.kill("SIGTERM");
-	const exited = await Promise.race([onceExit(child), sleep(KILL_TIMEOUT_MS).then(() => false as const)]);
-	if (exited === false && child.exitCode === null) child.kill("SIGKILL");
-}
-
-function onceExit(child: ChildProcess): Promise<true> {
-	return new Promise((resolve) => child.once("exit", () => resolve(true)));
 }
 
 function formatTail(tail: string): string {

@@ -1,8 +1,9 @@
 // 多前端 attach（spec: 双前端同步 / attach 幂等）：
 // Unix socket 与 WebSocket 两个客户端 attach 同一会话，一方提交，双方收到流式状态与回答。
+
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ChatView } from "@neko-harness/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
 import { cleanup, makeGateway, type TestGateway, waitFor } from "./helpers.ts";
 

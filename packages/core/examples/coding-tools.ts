@@ -1,7 +1,7 @@
 // 真实 DeepSeek API 验证 2：工具调用。让模型在 /tmp/neko-test 下创建 hello.txt 并读回内容，
 // 通过 agent events 流打印工具调用轨迹，最后核对磁盘上的真实文件内容。
 // 运行（需要 DEEPSEEK_API_KEY）:
-//   npx tsx packages/core/examples/coding-tools.ts
+//   bun --conditions=neko-source packages/core/examples/coding-tools.ts
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ToolResultEntry } from "@earendil-works/pi-durable";

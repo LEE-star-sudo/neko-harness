@@ -14,6 +14,7 @@ export {
 	type NekoGatewayOptions,
 	startGateway,
 } from "./gateway.ts";
+export { gatewayCommand, stopGatewayProcess } from "./process.ts";
 export {
 	createWsByteTransportFactory,
 	createWsListener,

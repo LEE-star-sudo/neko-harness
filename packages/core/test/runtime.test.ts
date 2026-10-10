@@ -1,5 +1,5 @@
+import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
 import { createNekoRuntime } from "../src/index.ts";
 
 describe("createNekoRuntime", () => {

@@ -8,7 +8,7 @@ gateway 子进程（退出时关停由本进程拉起的实例）。
 
 ```bash
 # 需要 DEEPSEEK_API_KEY
-npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <sqlite路径>] [--socket-path <path>] [--theme light|dark|auto]
+bun --conditions=neko-source packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <sqlite路径>] [--socket-path <path>] [--theme light|dark|auto]
 ```
 
 ## 用法

@@ -1,9 +1,10 @@
 // 2.4 配置层：查找（向上递归 + ~/.neko 兜底）、$ENV/${ENV} 插值、校验、
 // 优先级合并（CLI > 配置文件 > 默认值）。
+
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
 import {
 	DEFAULT_NEKO_CONFIG,
 	findNekoConfigFile,
@@ -13,15 +14,10 @@ import {
 } from "../src/index.ts";
 
 let directories: string[] = [];
-let home = "";
 
 afterEach(async () => {
 	for (const directory of directories) await rm(directory, { recursive: true, force: true });
 	directories = [];
-	if (home !== "") {
-		process.env.HOME = home;
-		home = "";
-	}
 });
 
 async function makeDir(): Promise<string> {
@@ -42,14 +38,30 @@ describe("neko.config.json (2.4)", () => {
 
 	it("falls back to ~/.neko/neko.config.json and returns {} when nothing is found", async () => {
 		const root = await makeDir();
-		home = process.env.HOME ?? "";
-		process.env.HOME = root;
-		expect(findNekoConfigFile(join(root, "nowhere"))).toBeUndefined();
-		expect(loadNekoConfig(join(root, "nowhere"))).toEqual({});
+		// Bun isolates process.env per test file; os.homedir reads the process-level HOME.
+		// A fresh process verifies the real startup environment without changing the parent.
+		const readConfig = () => {
+			const child = Bun.spawnSync(
+				[
+					process.execPath,
+					"--eval",
+					`
+				import { findNekoConfigFile, loadNekoConfig } from ${JSON.stringify(new URL("../src/config.ts", import.meta.url).pathname)};
+				console.log(JSON.stringify({ file: findNekoConfigFile(${JSON.stringify(join(root, "nowhere"))}), config: loadNekoConfig(${JSON.stringify(join(root, "nowhere"))}) }));
+			`,
+				],
+				{ env: { ...process.env, HOME: root } },
+			);
+			expect(child.exitCode).toBe(0);
+			return JSON.parse(child.stdout.toString());
+		};
+		expect(readConfig()).toEqual({ config: {} });
 		await mkdir(join(root, ".neko"), { recursive: true });
 		await writeFile(join(root, ".neko", "neko.config.json"), JSON.stringify({ storagePath: "/tmp/x.sqlite" }));
-		const config = loadNekoConfig(join(root, "nowhere"));
-		expect(config.storagePath).toBe("/tmp/x.sqlite");
+		expect(readConfig()).toEqual({
+			file: join(root, ".neko", "neko.config.json"),
+			config: { storagePath: "/tmp/x.sqlite" },
+		});
 	});
 
 	// biome-ignore lint/suspicious/noTemplateCurlyInString: naming the interpolation syntax under test
@@ -65,7 +77,7 @@ describe("neko.config.json (2.4)", () => {
 			"test.json",
 			{ MY_KEY: "secret", MY_DIR: "/data", MY_MODEL: "deepseek-flash" },
 		);
-		expect(config).toEqual({
+		expect<unknown>(config).toEqual({
 			apiKey: "secret",
 			storagePath: "/data/neko.sqlite",
 			nested: { modelId: "deepseek-flash" },
