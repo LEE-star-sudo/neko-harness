@@ -39,4 +39,6 @@ npm run neko -- serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 前端渲染数据源：`conversation.viewState(context)` / `conversation.watch(context)` / `watchEvents(harness, id, context)`。
 - 用量：`harness.snapshot(UsageDoc, conversationId, context)` 或 `harness.usage(context)`（Session 总量）。
 - 会话目录：宿主侧无 `scanConversations`，用 `harness.commit(tx => tx.scanConversations({}, n, undefined), context)`；无删除 API（core 用 `app.neko.conversation` 文档做软删除）。
+- 会话级配置：`conversation.configure({ model, thinkingLevel }, context)` 单次提交生效，从下一次请求起使用；`conversation.agent(context)` 返回解析后的生效值（thinkingLevel 一定有值）。
+- 扩展热替换：`registry.install(同名扩展)` 原地替换；已开始执行的工具调用沿原实现跑完，下一个 task phase/请求/调用才解析新代码（会话只存扩展名，重启后装回同名扩展即恢复）。
 - 已安装 1.1.0 与 reference 源码（更新）有差异，以 node_modules 类型为准：`ToolExecutionResult` 字段是 `content`（源码已改名 `output`）；`SessionFailed`/`StorageRequestError` 在 1.1.0 运行时未导出（errors 模块只有 `ReadAfterWrite`/`StorageRejected`/`ConversationBusy`）；ConversationId 是数字 brand（ROOT = 1），未知 id 的 `harness.conversation()` 返回 undefined，但对未知 id 做 `snapshot` 会抛 TypeError。

@@ -96,6 +96,30 @@ export type NekoConversationInfo = {
 	readonly archived: boolean;
 };
 
+/** A chat model offered by the runtime's Models registry, for frontend selectors. */
+export type NekoModelInfo = {
+	readonly provider: string;
+	readonly modelId: string;
+	readonly name: string;
+	readonly contextWindow: number;
+	/** Whether the model supports thinking/reasoning levels. */
+	readonly reasoning: boolean;
+};
+
+/** What one conversation currently runs with (resolved agent). */
+export type NekoAgentInfo = {
+	readonly model?: NekoModelRef;
+	readonly thinkingLevel: ModelThinkingLevel;
+	/** Names of the selected extensions, in effect order. */
+	readonly extensions: readonly string[];
+};
+
+/** Changes `configureConversation` applies to one conversation's agent. */
+export type NekoConversationChange = {
+	readonly model?: NekoModelRef;
+	readonly thinkingLevel?: ModelThinkingLevel;
+};
+
 export type NekoCreateConversationOptions = {
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
@@ -149,6 +173,17 @@ export type NekoRuntime = {
 	getConversation(id: ConversationId): Promise<NekoSession | undefined>;
 	/** Soft delete: hide the conversation from listings and lookups. pi-durable cannot delete conversations. */
 	archiveConversation(id: ConversationId): Promise<void>;
+	/** Change a conversation's model and/or thinking level; `false` when the conversation is unknown or archived. */
+	configureConversation(id: ConversationId, change: NekoConversationChange): Promise<boolean>;
+	/** Every chat model in the Models registry, for frontend model selectors. */
+	listModels(): NekoModelInfo[];
+	/** The conversation's resolved agent: effective model, thinking level, selected extension names. */
+	getAgent(id?: ConversationId): Promise<NekoAgentInfo>;
+	/**
+	 * Install an extension, replacing one with the same name in place (pi-durable reload semantics):
+	 * running work finishes on the code it started with; the next phase, request, or call uses the new code.
+	 */
+	installExtension(extension: Extension): void;
 	/** Close the Harness and its storage. */
 	close(): Promise<void>;
 };
@@ -334,6 +369,39 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			await harness.commit(async (tx) => {
 				(await tx.doc(ArchivedDoc, id)).archived = true;
 			}, context);
+		},
+		async configureConversation(id, change) {
+			const session = await getConversation(id);
+			if (session === undefined) return false;
+			await session.conversation.configure(
+				{
+					...(change.model !== undefined ? { model: change.model } : {}),
+					...(change.thinkingLevel !== undefined ? { thinkingLevel: change.thinkingLevel } : {}),
+				},
+				context,
+			);
+			return true;
+		},
+		listModels() {
+			return models.getModels().map((model) => ({
+				provider: model.provider,
+				modelId: model.id,
+				name: model.name,
+				contextWindow: model.contextWindow,
+				reasoning: model.reasoning,
+			}));
+		},
+		async getAgent(id?: ConversationId) {
+			const session = await sessionFor(id);
+			const agent = await session.conversation.agent(context);
+			return {
+				...(agent.model !== undefined ? { model: agent.model } : {}),
+				thinkingLevel: agent.thinkingLevel,
+				extensions: agent.extensions.map((extension) => extension.name),
+			};
+		},
+		installExtension(extension) {
+			registry.install(extension);
 		},
 		close() {
 			return harness.close(context);
