@@ -1,2 +1,1 @@
-// Placeholder: implemented in a later change.
-export {};
+export { type NekoTuiOptions, runTui } from "./tui.ts";
