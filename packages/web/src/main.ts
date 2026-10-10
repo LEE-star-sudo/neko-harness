@@ -1,36 +1,45 @@
-// neko web 入口：npx tsx packages/web/src/main.ts [--port <n>] [--host <ip>] [--cwd <dir>] [--model provider/modelId] [--storage <path>]
-// 选项优先级：CLI flag > neko.config.json（向上查找，兜底 ~/.neko/neko.config.json）> 内置默认。
+// neko web 入口：npx tsx packages/web/src/main.ts [选项]
+// 静态 HTTP（默认 8322）+ 确保 neko gateway 运行（不在则 spawn，默认 WS 8321）。
 
-import { DEFAULT_MODEL, loadNekoConfig, type NekoModelRef } from "@neko-harness/core";
+import type { NekoModelRef } from "@neko-harness/core";
+import { DEFAULT_MODEL } from "@neko-harness/core";
 import { startWebServer } from "./server.ts";
 
-const USAGE = `用法: main.ts [--port <n>] [--host <ip>] [--cwd <dir>] [--model <provider/modelId>] [--storage <sqlite路径>]
+const USAGE = `用法: main.ts [选项]
 
 选项:
-  --port <n>        监听端口（默认 8321）
-  --host <ip>       监听地址（默认 127.0.0.1，仅本机）
-  --cwd <dir>       会话工具的工作目录（默认当前目录）
-  --model <ref>     模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
-  --storage <path>  SQLite 存储文件（默认 ~/.neko/neko.sqlite）
-  -h, --help        显示此帮助
+  --port <n>           静态 HTTP 端口（默认 8322）
+  --host <ip>          静态 HTTP 地址（默认 127.0.0.1）
+  --gateway-port <n>   网关 WebSocket 端口（默认 8321）
+  --socket-path <path> 网关 Unix socket 路径（默认 <数据目录>/<serverId>.sock）
+  --server-id <id>     网关逻辑身份（默认读取/生成 <数据目录>/gateway-server-id）
+  --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
+  --cwd <dir>          会话工具的工作目录（默认当前目录）
+  --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
+  -h, --help           显示此帮助
 
-配置文件 neko.config.json（从当前目录向上查找，兜底 ~/.neko/）可提供 defaultModel、
-storagePath、gateway.host/port 等；CLI flag 始终优先。需要环境变量 DEEPSEEK_API_KEY。`;
+需要环境变量 DEEPSEEK_API_KEY（spawn 的 gateway 子进程继承本进程环境）。`;
 
 type CliOptions = {
 	port?: number;
 	host?: string;
+	gatewayPort?: number;
+	socketPath?: string;
+	serverId?: string;
+	storagePath?: string;
 	cwd?: string;
 	model?: NekoModelRef;
-	storagePath?: string;
 };
 
 function parseArgs(argv: readonly string[]): CliOptions {
 	let port: number | undefined;
 	let host: string | undefined;
+	let gatewayPort: number | undefined;
+	let socketPath: string | undefined;
+	let serverId: string | undefined;
+	let storagePath: string | undefined;
 	let cwd: string | undefined;
 	let model: NekoModelRef | undefined;
-	let storagePath: string | undefined;
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
 		const next = argv[i + 1];
@@ -45,6 +54,30 @@ function parseArgs(argv: readonly string[]): CliOptions {
 			case "--host":
 				if (next === undefined) throw new Error("--host 需要参数");
 				host = next;
+				i++;
+				break;
+			case "--gateway-port": {
+				if (next === undefined) throw new Error("--gateway-port 需要参数");
+				gatewayPort = Number(next);
+				if (!Number.isInteger(gatewayPort) || gatewayPort < 0 || gatewayPort > 65535) {
+					throw new Error(`--gateway-port 非法: ${next}`);
+				}
+				i++;
+				break;
+			}
+			case "--socket-path":
+				if (next === undefined) throw new Error("--socket-path 需要参数");
+				socketPath = next;
+				i++;
+				break;
+			case "--server-id":
+				if (next === undefined) throw new Error("--server-id 需要参数");
+				serverId = next;
+				i++;
+				break;
+			case "--storage":
+				if (next === undefined) throw new Error("--storage 需要参数");
+				storagePath = next;
 				i++;
 				break;
 			case "--cwd":
@@ -62,11 +95,6 @@ function parseArgs(argv: readonly string[]): CliOptions {
 				i++;
 				break;
 			}
-			case "--storage":
-				if (next === undefined) throw new Error("--storage 需要参数");
-				storagePath = next;
-				i++;
-				break;
 			case "-h":
 			case "--help":
 				console.log(USAGE);
@@ -79,30 +107,34 @@ function parseArgs(argv: readonly string[]): CliOptions {
 	return {
 		...(port !== undefined ? { port } : {}),
 		...(host !== undefined ? { host } : {}),
+		...(gatewayPort !== undefined ? { gatewayPort } : {}),
+		...(socketPath !== undefined ? { socketPath } : {}),
+		...(serverId !== undefined ? { serverId } : {}),
+		...(storagePath !== undefined ? { storagePath } : {}),
 		...(cwd !== undefined ? { cwd } : {}),
 		...(model !== undefined ? { model } : {}),
-		...(storagePath !== undefined ? { storagePath } : {}),
 	};
 }
 
 try {
-	const cli = parseArgs(process.argv.slice(2));
-	// CLI flag 优先，其次 neko.config.json（gateway.host/port 段）；未指定的项保持 undefined。
-	const config = await loadNekoConfig();
-	const options = {
-		...(cli.port !== undefined || config.gateway?.port !== undefined ? { port: cli.port ?? config.gateway?.port } : {}),
-		...(cli.host !== undefined || config.gateway?.host !== undefined ? { host: cli.host ?? config.gateway?.host } : {}),
-		...(cli.cwd !== undefined ? { cwd: cli.cwd } : {}),
-		...(cli.model !== undefined || config.defaultModel !== undefined
-			? { model: cli.model ?? config.defaultModel }
-			: {}),
-		...(cli.storagePath !== undefined || config.storagePath !== undefined
-			? { storagePath: cli.storagePath ?? config.storagePath }
-			: {}),
-	};
-	const server = await startWebServer(options);
+	const options = parseArgs(process.argv.slice(2));
+	const server = await startWebServer({
+		...(options.port !== undefined ? { port: options.port } : {}),
+		...(options.host !== undefined ? { host: options.host } : {}),
+		gateway: {
+			...(options.gatewayPort !== undefined ? { port: options.gatewayPort } : {}),
+			...(options.socketPath !== undefined ? { socketPath: options.socketPath } : {}),
+			...(options.serverId !== undefined ? { serverId: options.serverId } : {}),
+			...(options.storagePath !== undefined ? { storagePath: options.storagePath } : {}),
+			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+			...(options.model !== undefined ? { model: options.model } : {}),
+			onLog: (line) => console.log(`  [gateway] ${line}`),
+		},
+	});
 	const model = options.model ?? DEFAULT_MODEL;
-	console.log(`neko web 已启动: ${server.url}  （模型 ${model.provider}/${model.modelId}）`);
+	console.log(`neko web 已启动: ${server.url}`);
+	console.log(`  网关: ${server.gateway.wsUrl}（serverId: ${server.gateway.serverId}）`);
+	console.log(`  模型: ${model.provider}/${model.modelId}`);
 	console.log("按 Ctrl+C 停止。");
 	const shutdown = (): void => {
 		console.log("\n正在关闭…");

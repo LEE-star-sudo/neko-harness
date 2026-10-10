@@ -3,40 +3,36 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AttachedReplicatedState } from "@earendil-works/chord";
-import type { ConversationView } from "@earendil-works/pi-durable";
-import { createNekoRuntime, type NekoModelRef, type NekoRuntime } from "@neko-harness/core";
-import { WebSocket, WebSocketServer } from "ws";
-import { projectChatView } from "./project.ts";
-import type { ClientMessage, ServerMessage } from "./protocol.ts";
+import { DEFAULT_STORAGE_PATH } from "@neko-harness/core";
+import { ensureNekoGateway, type GatewayEnsureOptions, type GatewayHandle } from "./gateway-spawn.ts";
+
+/**
+ * neko web 服务器（静态托管形态）：确保 gateway 在运行（不在则 spawn 子进程），
+ * 浏览器经 /api/info 拿到 gateway WebSocket 地址后直连 pi 协议（design D3），
+ * 本进程只提供静态资源与网关发现信息。
+ */
 
 export type NekoWebOptions = {
-	/** 监听端口；默认 8321。传 0 则随机分配（以返回值为准）。 */
+	/** 静态 HTTP 监听端口；默认 8322。传 0 随机分配（以返回值为准）。 */
 	readonly port?: number;
-	/** 监听地址；默认 127.0.0.1（仅本机）。 */
 	readonly host?: string;
-	/** 会话工具的工作目录；默认 process.cwd()。 */
-	readonly cwd?: string;
-	/** SQLite 存储路径；默认 ~/.neko/neko.sqlite。 */
-	readonly storagePath?: string;
-	/** 运行模型；默认内置 DeepSeek 模型。 */
-	readonly model?: NekoModelRef;
 	/** 静态资源目录；默认 <packages/web>/dist/client（Vite 产物）。 */
 	readonly staticDir?: string;
+	/** 网关选项（默认 ~/.neko/neko.sqlite 数据目录）。 */
+	readonly gateway?: Omit<GatewayEnsureOptions, "storagePath"> & { readonly storagePath?: string };
 };
 
 export type NekoWebServer = {
 	readonly url: string;
 	readonly port: number;
+	readonly gateway: GatewayHandle;
 	close(): Promise<void>;
 };
 
-const DEFAULT_PORT = 8321;
+const DEFAULT_PORT = 8322;
 const DEFAULT_HOST = "127.0.0.1";
 /** src/ 与 dist/ 下都解析到 packages/web/dist/client。 */
 const DEFAULT_STATIC_DIR = fileURLToPath(new URL("../dist/client", import.meta.url));
-/** 同一 tick 内多次 commit 合并为一次广播。 */
-const BROADCAST_COALESCE_MS = 80;
 
 const MIME: Readonly<Record<string, string>> = {
 	".html": "text/html; charset=utf-8",
@@ -50,107 +46,19 @@ const MIME: Readonly<Record<string, string>> = {
 	".map": "application/json; charset=utf-8",
 };
 
-/**
- * 启动 neko web 服务器：一个进程同时托管 Vite 构建产物（静态资源 + /api/info）
- * 与 /ws WebSocket（桥接 core runtime 的 root conversation，v1 单会话）。
- */
 export async function startWebServer(options: NekoWebOptions = {}): Promise<NekoWebServer> {
-	const cwd = options.cwd ?? process.cwd();
-	const model: NekoModelRef = options.model ?? { provider: "deepseek", modelId: "deepseek-flash" };
-	const modelLabel = `${model.provider}/${model.modelId}`;
 	const staticDir = resolve(options.staticDir ?? DEFAULT_STATIC_DIR);
-
-	const runtime = await createNekoRuntime({
-		cwd,
-		...(options.storagePath !== undefined ? { storagePath: options.storagePath } : {}),
-		model,
-	});
-	try {
-		return await bind(runtime, { ...options, cwd, model, modelLabel, staticDir });
-	} catch (error) {
-		await runtime.close().catch(() => {});
-		throw error;
-	}
-}
-
-type BindOptions = NekoWebOptions & { cwd: string; model: NekoModelRef; modelLabel: string; staticDir: string };
-
-async function bind(runtime: NekoRuntime, options: BindOptions): Promise<NekoWebServer> {
-	const view: AttachedReplicatedState<ConversationView> = await runtime.viewState();
-	const sockets = new Set<WebSocket>();
-	let coalesceTimer: ReturnType<typeof setTimeout> | undefined;
-	let closed = false;
-
-	const broadcast = (message: ServerMessage): void => {
-		const data = JSON.stringify(message);
-		for (const socket of sockets) {
-			if (socket.readyState === WebSocket.OPEN) socket.send(data);
-		}
-	};
-	const currentView = () => projectChatView(view.value, options.modelLabel, options.cwd);
-	const scheduleBroadcast = (): void => {
-		if (coalesceTimer !== undefined || closed) return;
-		coalesceTimer = setTimeout(() => {
-			coalesceTimer = undefined;
-			if (!closed) broadcast({ type: "snapshot", view: currentView() });
-		}, BROADCAST_COALESCE_MS);
-	};
-	const unsubscribe = view.subscribe(scheduleBroadcast);
-
-	const wss = new WebSocketServer({ noServer: true });
-	wss.on("connection", (socket) => {
-		sockets.add(socket);
-		socket.send(JSON.stringify({ type: "hello", model: options.modelLabel, cwd: options.cwd } satisfies ServerMessage));
-		socket.send(JSON.stringify({ type: "snapshot", view: currentView() } satisfies ServerMessage));
-		socket.on("message", (raw) => {
-			let message: ClientMessage;
-			try {
-				message = JSON.parse(String(raw)) as ClientMessage;
-			} catch {
-				return;
-			}
-			if (message.type === "submit") {
-				if (typeof message.content !== "string" || message.content.trim() === "") return;
-				runtime.submit(message.content).catch((error: unknown) => {
-					broadcast({
-						type: "notice",
-						level: "error",
-						text: error instanceof Error ? error.message : String(error),
-					});
-				});
-			} else if (message.type === "abort") {
-				runtime.abort().catch((error: unknown) => {
-					broadcast({
-						type: "notice",
-						level: "error",
-						text: error instanceof Error ? error.message : String(error),
-					});
-				});
-			}
-		});
-		socket.on("close", () => sockets.delete(socket));
-		socket.on("error", () => sockets.delete(socket));
+	const gateway = await ensureNekoGateway({
+		...(options.gateway ?? {}),
+		storagePath: options.gateway?.storagePath ?? DEFAULT_STORAGE_PATH,
 	});
 
 	const server: Server = createServer((request, response) => {
-		void handleHttp(request, response, {
-			staticDir: options.staticDir,
-			model: options.modelLabel,
-			cwd: options.cwd,
-		}).catch((error: unknown) => {
+		void handleHttp(request, response, { staticDir, gateway }).catch((error: unknown) => {
 			if (!response.headersSent) response.writeHead(500);
 			response.end(error instanceof Error ? error.message : String(error));
 		});
 	});
-	server.on("upgrade", (request, socket, head) => {
-		const path = request.url === undefined ? "" : new URL(request.url, "http://localhost").pathname;
-		if (path !== "/ws") {
-			socket.destroy();
-			return;
-		}
-		wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request));
-	});
-
 	const port = options.port ?? DEFAULT_PORT;
 	const host = options.host ?? DEFAULT_HOST;
 	await new Promise<void>((resolveListen, rejectListen) => {
@@ -163,19 +71,12 @@ async function bind(runtime: NekoRuntime, options: BindOptions): Promise<NekoWeb
 	return {
 		url: `http://${host}:${actualPort}`,
 		port: actualPort,
+		gateway,
 		async close() {
-			if (closed) return;
-			closed = true;
-			if (coalesceTimer !== undefined) clearTimeout(coalesceTimer);
-			unsubscribe();
-			for (const socket of sockets) socket.terminate();
-			sockets.clear();
-			await new Promise<void>((resolveClose) => wss.close(() => resolveClose()));
 			await new Promise<void>((resolveClose, rejectClose) => {
 				server.close((error) => (error ? rejectClose(error) : resolveClose()));
 			});
-			view.dispose();
-			await runtime.close();
+			await gateway.close();
 		},
 	};
 }
@@ -183,12 +84,18 @@ async function bind(runtime: NekoRuntime, options: BindOptions): Promise<NekoWeb
 async function handleHttp(
 	request: IncomingMessage,
 	response: ServerResponse,
-	info: { staticDir: string; model: string; cwd: string },
+	info: { staticDir: string; gateway: GatewayHandle },
 ): Promise<void> {
 	const url = new URL(request.url ?? "/", "http://localhost");
 	if (url.pathname === "/api/info") {
 		response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-		response.end(JSON.stringify({ model: info.model, cwd: info.cwd }));
+		response.end(
+			JSON.stringify({
+				gatewayWs: info.gateway.wsUrl,
+				serverId: info.gateway.serverId,
+				socketPath: info.gateway.socketPath,
+			}),
+		);
 		return;
 	}
 	if (request.method !== "GET" && request.method !== "HEAD") {

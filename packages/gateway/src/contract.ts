@@ -45,6 +45,8 @@ export interface NekoSessionManagement {
 	archive(sessionId: string, context: Context): Promise<void>;
 	attach(sessionId: string, context: Context): Promise<void>;
 	detach(context: Context): Promise<void>;
+	/** 从会话当前状态分叉出新会话（pi-durable conversation.fork）；空会话退化为新建。 */
+	fork(sessionId: string, context: Context): Promise<NekoSessionSummary>;
 }
 
 export const NekoSessionManagement = defineService<NekoSessionManagement>("neko.session-management");
@@ -52,6 +54,8 @@ export const NekoSessionManagement = defineService<NekoSessionManagement>("neko.
 export type NekoSubmitInput = {
 	readonly content: string;
 	readonly requestId?: string;
+	/** 忙碌时 admission 策略：steer 插入当前工具轮后；followUp 排队等当前 run 结束。缺省由 pi-durable 排队。 */
+	readonly whenBusy?: "steer" | "followUp";
 };
 
 /**

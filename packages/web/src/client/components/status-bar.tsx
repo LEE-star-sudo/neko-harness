@@ -1,4 +1,4 @@
-import type { UsageTotals } from "../../protocol";
+import type { UsageTotals } from "@neko-harness/core";
 
 function formatTokens(tokens: number): string {
 	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;

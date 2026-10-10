@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { startNekoWeb } from "./lib/ws-client";
+import { startNekoApp } from "./lib/bootstrap";
 import { ChatPage } from "./pages/chat-page";
 import { SettingsPage } from "./pages/settings-page";
 import "./styles.css";
@@ -22,7 +22,7 @@ declare module "@tanstack/react-router" {
 
 const queryClient = new QueryClient();
 
-startNekoWeb();
+startNekoApp();
 
 const container = document.getElementById("root");
 if (container !== null) {

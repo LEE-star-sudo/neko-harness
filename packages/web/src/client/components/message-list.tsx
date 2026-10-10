@@ -1,5 +1,5 @@
+import type { ChatItem, ChatView, StreamingView } from "@neko-harness/core";
 import { useEffect, useRef, useState } from "react";
-import type { ChatItem, ChatView, StreamingView } from "../../protocol";
 import { Markdown } from "./markdown";
 import { ThinkingBlock } from "./thinking";
 import { ToolCard } from "./tool-card";

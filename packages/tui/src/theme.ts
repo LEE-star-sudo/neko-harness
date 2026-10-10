@@ -175,6 +175,14 @@ const italicText = sgr({ italic: true });
 const strikethroughText = sgr({ strikethrough: true });
 const underlineText = sgr({ underline: true });
 
+/** 无色 SGR 属性助手（不随主题变化）。 */
+export const style = {
+	bold: boldText,
+	italic: italicText,
+	strikethrough: strikethroughText,
+	underline: underlineText,
+};
+
 export function getMarkdownTheme(): MarkdownTheme {
 	return {
 		heading: (text) => theme.accent(boldText(text)),

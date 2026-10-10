@@ -13,9 +13,10 @@ npm test                   # vitest run（根 vitest.config.ts，别名指向各
 npm run check              # biome check . + tsc --noEmit
 npm run check:write        # biome check --write . + tsc --noEmit
 
-npm run neko -- tui        # 启动终端 UI（需 DEEPSEEK_API_KEY）
-npm run neko -- web        # 启动 Web UI（默认 http://127.0.0.1:8321）
-# 或构建后：node packages/cli/dist/main.js tui|web（bin 名 neko）
+npm run neko -- tui        # 启动终端 UI（自动拉起 gateway；需 DEEPSEEK_API_KEY）
+npm run neko -- web        # 启动 Web UI（静态 8322，自动拉起 gateway WS 8321）
+npm run neko -- serve      # 仅启动 gateway（Unix socket + WebSocket）
+# 或构建后：node packages/cli/dist/main.js tui|web|serve（bin 名 neko）
 ```
 
 单个示例（需要 `DEEPSEEK_API_KEY`）：`npx tsx packages/core/examples/chat.ts`

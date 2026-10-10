@@ -1,80 +1,64 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { Container, Markdown, MouseRegion, Spacer, Text } from "@earendil-works/pi-tui";
+import { Container, Markdown, MouseRegion, Spacer, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, theme } from "../theme.ts";
 
 const THINKING_COLLAPSED_LABEL = "Thinking…（点击展开）";
 
+export type AssistantContent = {
+	readonly thinking: string;
+	readonly text: string;
+	/** 回答被中断/出错/截断时的提示行；无则为 null。 */
+	readonly note: string | null;
+};
+
 /**
  * 助手消息：text 用 Markdown；thinking 默认折叠为一行弱化斜体，点击展开/收起；
- * 中止/错误/截断在内容后给出提示。
+ * note（中止/错误/截断提示）在内容后给出。
  */
 export class AssistantMessageComponent extends Container {
-	#lastMessage: AssistantMessage | undefined;
+	#lastContent: AssistantContent | undefined;
 	#isStreaming = false;
 	#thinkingExpanded = false;
 
-	constructor(message?: AssistantMessage, isStreaming = false) {
+	constructor(content?: AssistantContent, isStreaming = false) {
 		super();
-		if (message !== undefined) this.updateContent(message, isStreaming);
+		if (content !== undefined) this.updateContent(content, isStreaming);
 	}
 
-	updateContent(message: AssistantMessage, isStreaming = this.#isStreaming): void {
-		this.#lastMessage = message;
+	updateContent(content: AssistantContent, isStreaming = this.#isStreaming): void {
+		this.#lastContent = content;
 		this.#isStreaming = isStreaming;
 		this.#rebuild();
 	}
 
 	setThinkingExpanded(expanded: boolean): void {
 		this.#thinkingExpanded = expanded;
-		if (this.#lastMessage !== undefined) this.#rebuild();
+		if (this.#lastContent !== undefined) this.#rebuild();
 	}
 
 	#rebuild(): void {
-		const message = this.#lastMessage;
+		const content = this.#lastContent;
 		this.clear();
-		if (message === undefined) return;
+		if (content === undefined) return;
 
-		let thinkingRun: string[] = [];
-		const flushThinking = (): void => {
-			const blocks = thinkingRun;
-			thinkingRun = [];
-			const text = blocks.join("\n\n").trim();
-			if (text === "") return;
+		if (content.thinking.trim() !== "") {
 			const expanded = this.#thinkingExpanded;
 			const thinkingComponent = expanded
-				? new Markdown(text, 1, 0, getMarkdownTheme(), { color: theme.thinking, italic: true })
+				? new Markdown(content.thinking.trim(), 1, 0, getMarkdownTheme(), { color: theme.thinking, italic: true })
 				: new Text(theme.thinking(THINKING_COLLAPSED_LABEL), 1, 0);
 			this.addChild(
-				new MouseRegion(thinkingComponent, (event) => {
+				new MouseRegion(thinkingComponent, (event: TuiMouseEvent) => {
 					if (event.type !== "click" || event.button !== "left") return undefined;
 					this.setThinkingExpanded(!expanded);
 					return { handled: true };
 				}),
 			);
-		};
-
-		for (const block of message.content) {
-			if (block.type === "thinking") {
-				if (block.thinking.trim() !== "") thinkingRun.push(block.thinking);
-				continue;
-			}
-			flushThinking();
-			if (block.type === "text" && block.text.trim() !== "") {
-				this.addChild(new Markdown(block.text.trim(), 1, 0, getMarkdownTheme()));
-			}
 		}
-		flushThinking();
-
-		const hasToolCalls = message.content.some((block) => block.type === "toolCall");
-		if (message.stopReason === "length") {
+		if (content.text.trim() !== "") {
+			this.addChild(new Markdown(content.text.trim(), 1, 0, getMarkdownTheme()));
+		}
+		if (content.note !== null) {
 			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.error("回答在完成前被截断。"), 1, 0));
-		} else if (!hasToolCalls && message.stopReason === "aborted") {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.error("已中止。"), 1, 0));
-		} else if (!hasToolCalls && message.stopReason === "error") {
-			this.addChild(new Spacer(1));
-			this.addChild(new Text(theme.error(`出错：${message.errorMessage ?? "未知错误"}`), 1, 0));
+			this.addChild(new Text(theme.error(content.note), 1, 0));
 		}
 	}
 }

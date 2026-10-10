@@ -5,10 +5,11 @@ import { fileURLToPath } from "node:url";
 const USAGE = `用法: neko <command> [options]
 
 命令:
-  tui     启动终端交互界面
-  web     启动 Web 服务器（托管 Web UI + WebSocket）
+  tui     启动终端交互界面（自动拉起 gateway）
+  web     启动 Web UI 静态托管（自动拉起 gateway）
+  serve   仅启动 gateway（Unix socket + WebSocket）
 
-两个命令的选项透传，详见 neko tui --help / neko web --help。
+各命令的选项透传，详见 neko <command> --help。
 需要环境变量 DEEPSEEK_API_KEY。`;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,10 +21,12 @@ const [command, ...rest] = process.argv.slice(2);
 
 switch (command) {
 	case "tui":
-	case "web": {
+	case "web":
+	case "serve": {
 		// 子命令的 main 自行解析 process.argv.slice(2)，剥离子命令名后透传
 		process.argv = [process.argv[0] ?? "node", process.argv[1] ?? "neko", ...rest];
-		await import(entry(command));
+		const pkg = command === "serve" ? "gateway" : command;
+		await import(entry(pkg));
 		break;
 	}
 	case undefined:

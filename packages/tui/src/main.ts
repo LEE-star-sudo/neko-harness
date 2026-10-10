@@ -1,25 +1,25 @@
-// neko TUI 入口：npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <path>] [--theme light|dark|auto]
-// 选项优先级：CLI flag > neko.config.json（向上查找，兜底 ~/.neko/neko.config.json）> 内置默认。
-import { loadNekoConfig } from "@neko-harness/core";
+// neko TUI 入口：npx tsx packages/tui/src/main.ts [选项]
 import type { ThemePreference } from "./theme.ts";
 import { runTui } from "./tui.ts";
 
-const USAGE = `用法: main.ts [--cwd <dir>] [--model <provider/modelId>] [--storage <sqlite路径>] [--theme light|dark|auto]
+const USAGE = `用法: main.ts [--cwd <dir>] [--model <provider/modelId>] [--storage <sqlite路径>] [--socket-path <path>] [--theme light|dark|auto]
 
 选项:
-  --cwd <dir>       会话工具的工作目录（默认当前目录）
-  --model <ref>     模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
-  --storage <path>  SQLite 存储文件（默认 ~/.neko/neko.sqlite）
-  --theme <mode>    主题：light / dark / auto（默认 auto；也可用环境变量 NEKO_THEME，--theme 优先）
-  -h, --help        显示此帮助
+  --cwd <dir>          新会话工具的工作目录（默认当前目录）
+  --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash；透传给拉起的 gateway）
+  --storage <path>     存储文件（默认 ~/.neko/neko.sqlite 同规则；解析 socket 位置并透传给 gateway）
+  --socket-path <path> gateway Unix socket 路径（默认按配置/数据目录解析）
+  --theme <mode>       主题：light / dark / auto（默认 auto；也可用环境变量 NEKO_THEME，--theme 优先）
+  -h, --help           显示此帮助
 
-配置文件 neko.config.json（从当前目录向上查找，兜底 ~/.neko/）可提供 defaultModel、
-storagePath、theme 等；CLI flag 始终优先。需要环境变量 DEEPSEEK_API_KEY。`;
+无 gateway 时自动拉起 gateway 子进程；退出时关停由本进程拉起的 gateway。
+需要环境变量 DEEPSEEK_API_KEY。`;
 
 type CliOptions = {
 	cwd?: string;
 	model?: { provider: string; modelId: string };
 	storagePath?: string;
+	socketPath?: string;
 	theme?: ThemePreference;
 };
 
@@ -32,6 +32,7 @@ function parseArgs(argv: readonly string[]): CliOptions {
 	let cwd: string | undefined;
 	let model: { provider: string; modelId: string } | undefined;
 	let storagePath: string | undefined;
+	let socketPath: string | undefined;
 	let theme: ThemePreference | undefined;
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -57,6 +58,11 @@ function parseArgs(argv: readonly string[]): CliOptions {
 				storagePath = next;
 				i++;
 				break;
+			case "--socket-path":
+				if (next === undefined) throw new Error("--socket-path 需要参数");
+				socketPath = next;
+				i++;
+				break;
 			case "--theme":
 				if (next === undefined) throw new Error("--theme 需要参数");
 				theme = parseTheme(next);
@@ -77,26 +83,13 @@ function parseArgs(argv: readonly string[]): CliOptions {
 		...(cwd !== undefined ? { cwd } : {}),
 		...(model !== undefined ? { model } : {}),
 		...(storagePath !== undefined ? { storagePath } : {}),
+		...(socketPath !== undefined ? { socketPath } : {}),
 		...(theme !== undefined ? { theme } : {}),
 	};
 }
 
 try {
-	const cli = parseArgs(process.argv.slice(2));
-	// CLI flag 优先，其次 neko.config.json；未指定的项保持 undefined，由 runTui 用内置默认。
-	const config = await loadNekoConfig();
-	const options = {
-		...(cli.cwd !== undefined ? { cwd: cli.cwd } : {}),
-		...(cli.model !== undefined || config.defaultModel !== undefined
-			? { model: cli.model ?? config.defaultModel }
-			: {}),
-		...(cli.storagePath !== undefined || config.storagePath !== undefined
-			? { storagePath: cli.storagePath ?? config.storagePath }
-			: {}),
-		...(cli.theme !== undefined || config.theme !== undefined
-			? { theme: (cli.theme ?? config.theme) as ThemePreference }
-			: {}),
-	};
+	const options = parseArgs(process.argv.slice(2));
 	await runTui(options);
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));

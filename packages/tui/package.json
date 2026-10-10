@@ -15,7 +15,9 @@
 	"dependencies": {
 		"@earendil-works/pi-ai": "1.1.0",
 		"@earendil-works/pi-durable": "1.1.0",
+		"@earendil-works/pi-protocol": "1.1.0",
 		"@earendil-works/pi-tui": "1.1.0",
-		"@neko-harness/core": "*"
+		"@neko-harness/core": "*",
+		"@neko-harness/gateway": "*"
 	}
 }

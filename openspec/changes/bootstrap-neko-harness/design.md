@@ -60,7 +60,7 @@ packages/
 
 gateway 以 `RoutedServerServiceHost` 托管 durable Session，attachment 语义（幂等 attach、断连延迟释放、`{serverId, sessionId, attachmentId}` 路由）直接继承，不自研协议。WebSocket 传输按 `pi-client` 的 `ByteTransportFactory` 契约实现一个薄适配层。
 
-**v1 偏差（用户决策 2026-10-10）**：第一版只做对话 + 内置工具，`neko tui` / `neko web` 各自在进程内直接挂 core runtime；Web 端用 web 包内的极简 WebSocket 快照协议（submit/abort + 全量 ChatView 快照）代替 pi-server 网关。pi-server 网关、多前端 attach、Unix socket 移至后续变更实现，gateway 包暂为占位。
+**实施记录（2026-10-11）**：v1 曾以 web 包进程内 WS 桥代替网关；现网关已按本决策落地——pi-server 宿主、Unix socket 与 WebSocket 跑同一 pi 协议帧（WS 连接适配为 `ByteConnection`），TUI 经 Unix socket、浏览器经 WS（pi-client + CBOR）直连同一 gateway，`neko tui`/`neko web` 在 socket 不在时自动拉起 gateway 子进程。契约见 `packages/gateway/src/contract.ts`（`neko.session-directory` / `neko.session-management` / `neko.chat`）。
 
 **风险**：pi-server 是实验性包、API 可能变 → 锁版本 + 将路由代码收敛在 gateway 包内，升级时只动一处。
 

@@ -32,7 +32,10 @@ export async function openNekoSessionHandle(options: {
 	provider.provide(NekoChat, {
 		view: chatState,
 		submit: async (input) => {
-			await session.submit(input.content, { ...(input.requestId !== undefined ? { requestId: input.requestId } : {}) });
+			await session.submit(input.content, {
+				...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+				...(input.whenBusy !== undefined ? { whenBusy: input.whenBusy } : {}),
+			});
 		},
 		abort: () => session.abort(),
 		usage: async () => {

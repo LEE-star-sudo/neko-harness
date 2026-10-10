@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
-import { storeActions } from "../lib/store";
-import { sendMessage } from "../lib/ws-client";
+import { appActions } from "../lib/bootstrap";
 
 const MAX_HEIGHT = 160;
 
@@ -19,18 +18,13 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 	const submit = (): void => {
 		const content = value.trim();
 		if (content === "" || props.busy) return;
-		if (!sendMessage({ type: "submit", content })) {
-			storeActions.notice({ level: "error", text: "连接未就绪，消息未发送。" });
-			return;
-		}
+		appActions.submit(content);
 		setValue("");
 		requestAnimationFrame(resize);
 	};
 
 	const abort = (): void => {
-		if (!sendMessage({ type: "abort" })) {
-			storeActions.notice({ level: "error", text: "连接未就绪，无法中止。" });
-		}
+		appActions.abort();
 	};
 
 	return (

@@ -7,6 +7,7 @@ import {
 } from "@earendil-works/chord";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { RoutedServerServiceAttachment, RoutedServerServiceHost } from "@earendil-works/pi-server";
+import { SessionNotFoundError } from "@earendil-works/pi-server";
 import type { NekoRuntime } from "@neko-harness/core";
 import {
 	type NekoDirectoryState,
@@ -92,6 +93,20 @@ export async function createNekoServerServices(options: {
 						}),
 					attach: (sessionId) => serialize(() => presentation.attachSession(sessionId, context)),
 					detach: () => serialize(() => presentation.detachSession(context)),
+					fork: (sessionId) =>
+						serialize(async () => {
+							const source = await runtime.getConversation(toConversationId(sessionId));
+							if (source === undefined) throw new SessionNotFoundError(`Unknown session: ${sessionId}`);
+							// fork 需要父会话的一个可见条目：取最新一条；空会话没有可分叉的历史，退化为新建。
+							const newest = await source.conversation.entries({}, 1, undefined, context);
+							const at = newest.items[0]?.id;
+							const forked =
+								at === undefined
+									? await runtime.createConversation()
+									: await source.conversation.fork(at, { ownership: { kind: "ownerless" } }, context);
+							await refreshNow();
+							return { id: String(forked.id) };
+						}),
 				});
 				const endpoint = createRemoteServiceEndpoint(provider);
 				let released = false;
