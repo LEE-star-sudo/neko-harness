@@ -1,5 +1,7 @@
 /** Product language is English; conversation and tool payloads are never translated. */
-export const commands = [
+import type { SlashCommand } from "@earendil-works/pi-tui";
+
+export const commands: SlashCommand[] = [
 	{ name: "compact", description: "Compact context (/compact optional instructions)" },
 	{ name: "exit", description: "Exit neko TUI" },
 	{ name: "sessions", description: "Switch or create a session" },

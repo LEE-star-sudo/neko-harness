@@ -100,6 +100,7 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 					submit: async (input, context) => facade.submit(input, context),
 					abort: async (context) => facade.abort(context),
 					usage: async (context) => facade.usage(context),
+					skills: async (context) => facade.skills(context),
 					configure: async (change, context) => facade.configure(change, context),
 				};
 				return chat;

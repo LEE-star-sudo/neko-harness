@@ -243,6 +243,7 @@ export async function openNekoSessionHandle(options: {
 				await onActivity();
 			},
 			abort: () => session.abort(),
+			skills: () => runtime.listSkills(session.id),
 			usage: async () => {
 				const usage = totalUsage(await session.usage());
 				return {

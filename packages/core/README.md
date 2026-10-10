@@ -33,6 +33,18 @@ runtime 暴露（根会话便捷方法 + 会话管理）：
 - `root` → 根会话 `NekoSession`（id + conversation + 上述按会话操作打包）
 - `listConversations()` → 会话目录（不含已归档）；`createConversation(opts?)` → 新 `NekoSession`；`getConversation(id)` → 按 id 获取（未知或已归档返回 undefined）；`archiveConversation(id)` → 软删除（pi-durable 1.1.0 无删除能力，写 `app.neko.conversation` 文档标记）
 
+## 系统提示词与项目上下文
+
+内置 `neko-prompt` 扩展按五节组装系统提示词：`preamble`（角色定义）、`rules`（按本次请求启用的工具拼接的规则，去重）、`project_context`、`skills`、`cwd`。节随 pi-durable 的 `pi.system` 增量 patch 进入上下文，空节自动省略。
+
+项目上下文注入两级 AGENTS.md：`~/.agents/AGENTS.md`（用户级，在前）与 `<workspace>/AGENTS.md`（项目级，在后），各渲染为一个 `<project_instructions path="…">` 块；不向父目录遍历，不识别其他文件名，不扫描 `.neko` 目录。
+
+Skills 扫描 `~/.agents/skills/<name>/SKILL.md` 与 `<workspace>/.agents/skills/<name>/SKILL.md`，解析 YAML frontmatter（`name` 缺省回落目录名、`description` 必填、`disable-model-invocation` 的技能不进提示词），同名技能项目级覆盖用户级。提示词只注入 name/description/location 元数据，正文由模型用 `read` 工具按需加载。
+
+`/skill:<name> [args]` 显式调用技能：纯文本输入以 `/skill:` 开头时在提交准入层展开为 `<skill name location>` 块（正文去 frontmatter，args 追加），未知技能名原样透传，所有前端与 `disable-model-invocation` 技能同样生效。`runtime.listSkills(id?)` 返回当前会话工作区的技能列表（gateway 会话级 `chat.skills()`），供前端补全。
+
+AGENTS.md 与 skills 每次加载按工作区重读，不依赖 mtime/ctime/size 指纹；同一次提示词各节共享读取结果。文件修改、删除和权限恢复在下一次加载生效。缺失文件正常省略，读取或解析失败输出仅含路径与原因的诊断并跳过，不阻断请求；同一工作区持续存在的相同诊断不会重复输出。超过 64 KiB 的 AGENTS.md 提示体积风险但保留全文；历史压缩不能缩短系统指令。
+
 ## 配置层
 
 ```ts

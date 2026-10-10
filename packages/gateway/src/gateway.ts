@@ -35,6 +35,8 @@ export type NekoGatewayOptions = {
 	readonly cwd?: string;
 	readonly providers?: readonly Provider[];
 	readonly extensions?: readonly Extension[];
+	/** 用户级提示词资源根（`<home>/.agents`）；测试覆盖用。 */
+	readonly promptHome?: string;
 	// —— 网关监听地址 ——
 	readonly host?: string;
 	/** WebSocket 端口；0 = 随机分配；null = 禁用 WS 传输。 */
@@ -92,6 +94,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.providers !== undefined ? { providers: options.providers } : {}),
 		...(options.extensions !== undefined ? { extensions: options.extensions } : {}),
+		...(options.promptHome !== undefined ? { promptHome: options.promptHome } : {}),
 	});
 	try {
 		return await bindGateway(runtime, {

@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AttachedReplicatedState, Context } from "@earendil-works/chord";
@@ -43,6 +44,9 @@ import {
 } from "./credentials.ts";
 import { ImageMetadataDoc, imageKey, trackImageMetadata } from "./image-metadata.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
+import { expandSkillCommand } from "./prompt/invoke.ts";
+import { createNekoPrompt } from "./prompt/prompt.ts";
+import { createResourceLoader } from "./prompt/resources.ts";
 import { ImageTools } from "./read-image.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import { createWebSearchTools } from "./web-search.ts";
@@ -87,6 +91,8 @@ export type NekoRuntimeOptions = {
 	readonly providers?: readonly Provider[];
 	/** Extra extensions installed after CodingTools, e.g. custom tools; tests use this with the faux provider. */
 	readonly extensions?: readonly Extension[];
+	/** User-level resources root for the prompt extension (`<home>/.agents`); defaults to the OS home. Tests override for isolation. */
+	readonly promptHome?: string;
 };
 
 export type NekoSubmitOptions = {
@@ -150,6 +156,14 @@ export type NekoModelInfo = {
 	readonly reasoning: boolean;
 	readonly supportedThinkingLevels: readonly ModelThinkingLevel[];
 	readonly thinkingLevelAdjustments: Record<ModelThinkingLevel, ModelThinkingLevel>;
+};
+
+/** One skill offered by a conversation's workspace, for frontend completion. */
+export type NekoSkillInfo = {
+	readonly name: string;
+	readonly description: string;
+	/** Absolute path of the SKILL.md file. */
+	readonly location: string;
 };
 
 /** What one conversation currently runs with (resolved agent). */
@@ -255,6 +269,8 @@ export type NekoRuntime = {
 	removeCredential(provider: CredentialProviderId): Promise<void>;
 	/** The conversation's resolved agent: effective model, thinking level, selected extension names. */
 	getAgent(id?: ConversationId): Promise<NekoAgentInfo>;
+	/** Skills available to a conversation's workspace (user level + workspace level, project winning). */
+	listSkills(id?: ConversationId): Promise<NekoSkillInfo[]>;
 	/**
 	 * Install an extension, replacing one with the same name in place (pi-durable reload semantics):
 	 * running work finishes on the code it started with; the next phase, request, or call uses the new code.
@@ -315,6 +331,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return process.env.TAVILY_API_KEY || undefined;
 		}),
 	);
+	const loadResources = createResourceLoader(options.promptHome);
+	registry.install(createNekoPrompt(loadResources));
 	for (const extension of options.extensions ?? []) registry.install(extension);
 
 	const storage =
@@ -424,6 +442,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			const duplicate =
 				submitOptions?.requestId !== undefined &&
 				(await storage.submissionByRequest(target.id, submitOptions.requestId, context));
+			if (!duplicate && typeof content === "string" && content.startsWith("/skill:")) {
+				const { skills } = await loadResources(savedWorkspace(agent.cwd));
+				content = await expandSkillCommand(content, skills, (path) => readFile(path, "utf8"));
+			}
 			if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
 				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
 			}
@@ -786,6 +808,12 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				cwd: savedWorkspace(agent.cwd),
 				extensions: agent.extensions.map((extension) => extension.name),
 			};
+		},
+		async listSkills(id?: ConversationId) {
+			const session = await sessionFor(id);
+			const agent = await session.conversation.agent(context);
+			const { skills } = await loadResources(savedWorkspace(agent.cwd));
+			return skills.map((skill) => ({ name: skill.name, description: skill.description, location: skill.filePath }));
 		},
 		installExtension(extension) {
 			registry.install(extension);

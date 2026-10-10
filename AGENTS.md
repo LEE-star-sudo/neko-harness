@@ -31,6 +31,13 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 不要提交 lockfile 之外的意外文件；不主动 git commit。
 - 真实 API key 只从环境变量读取，不打印、不落盘。
 
+## 提示词与技能
+
+- 系统提示词由 core 的 `neko-prompt` 扩展按五节组装：`preamble` / `rules` / `project_context` / `skills` / `cwd`（`packages/core/src/prompt/`）。
+- 项目指令注入两级 AGENTS.md：`~/.agents/AGENTS.md` 与 `<workspace>/AGENTS.md`；不向上遍历、不识别其他文件名。
+- Skills 目录：`~/.agents/skills/<name>/SKILL.md` 与 `<workspace>/.agents/skills/<name>/SKILL.md`（YAML frontmatter，同名项目级优先）；提示词只注入元数据，正文由模型用 read 工具自取；每次加载重读，同一次提示词各节共享结果，改文件下一请求生效。
+- 显式调用：`/skill:<name> [args]` 在 core 准入层展开为 `<skill>` 用户消息（未知技能透传）；前端经 `chat.skills()` 取列表做补全，不本地展开。
+
 ## pi-durable 使用要点（与 README 出入时以 `reference/pi/packages/durable/src` 为准）
 
 - 每个异步调用都要 Chord `Context`；core 里默认 `BACKGROUND_CONTEXT`。

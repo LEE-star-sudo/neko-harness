@@ -7,6 +7,7 @@ import type {
 	NekoConversationChange,
 	NekoModelInfo,
 	NekoModelRef,
+	NekoSkillInfo,
 	UsageTotals,
 } from "@neko-harness/core";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
@@ -94,6 +95,8 @@ export interface NekoChat {
 	submit(input: NekoSubmitInput, context: Context): Promise<void>;
 	abort(context: Context): Promise<void>;
 	usage(context: Context): Promise<UsageTotals>;
+	/** 当前会话工作区可用的技能列表（两级合并，含禁用模型调用的技能），供前端 `/skill:` 补全。 */
+	skills(context: Context): Promise<readonly NekoSkillInfo[]>;
 	/** 会话级切换模型/thinkingLevel；从下一次请求起生效。会话未知或已归档时抛远程错误。 */
 	configure(change: NekoConversationChange, context: Context): Promise<void>;
 }

@@ -1,4 +1,4 @@
-import type { NekoConversationChange, NekoModelRef } from "@neko-harness/core";
+import type { NekoConversationChange, NekoModelRef, NekoSkillInfo } from "@neko-harness/core";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { NekoBrowseOptions } from "./contract.ts";
@@ -88,6 +88,9 @@ export const appActions = {
 	},
 	compact(instructions: string, sessionId?: string): Promise<void> {
 		return requireConnection().compact(instructions, sessionId);
+	},
+	listSkills(sessionId: string, signal: AbortSignal): Promise<readonly NekoSkillInfo[]> {
+		return requireConnection().listSkills(sessionId, signal);
 	},
 	image(entryId: number, contentIndex: number, sessionId?: string) {
 		return requireConnection().image(entryId, contentIndex, sessionId);

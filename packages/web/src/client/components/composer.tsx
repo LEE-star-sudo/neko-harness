@@ -1,8 +1,10 @@
+import type { NekoSkillInfo } from "@neko-harness/core";
 import { replaceMention } from "@neko-harness/core/file-mentions";
 import { compactInstructions, type ImageFile } from "@neko-harness/core/image-transfer";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { appActions } from "../lib/bootstrap";
+import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { ComposerSuggestions } from "./composer-suggestions";
 import { useFileMentions } from "./file-mentions";
@@ -47,6 +49,9 @@ function SessionComposer(props: Props & { sessionId: string }) {
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState("");
 	const [menu, setMenu] = useState(false);
+	const [skills, setSkills] = useState<readonly NekoSkillInfo[]>([]);
+	const [commandSelected, setCommandSelected] = useState(0);
+	const [skillStatus, setSkillStatus] = useState("");
 	const commandId = useId();
 	const [drag, setDrag] = useState(false);
 	const textarea = useRef<HTMLTextAreaElement>(null);
@@ -105,6 +110,32 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		},
 		[],
 	);
+	useEffect(() => {
+		setSkills([]);
+		setCommandSelected(0);
+		if (!menu) return;
+		if (props.sessionId.startsWith("none:")) {
+			setSkillStatus("新建会话后可选择工作区技能");
+			return;
+		}
+		if (phase !== "ready" || operating) {
+			setSkillStatus("等待会话连接…");
+			return;
+		}
+		const controller = new AbortController();
+		setSkillStatus("正在加载技能…");
+		void appActions
+			.listSkills(props.sessionId, controller.signal)
+			.then((list) => {
+				if (controller.signal.aborted) return;
+				setSkills(list);
+				setSkillStatus(list.length ? "" : "当前工作区暂无可用技能");
+			})
+			.catch(() => {
+				if (!controller.signal.aborted) setSkillStatus("技能加载失败，请关闭菜单后重试");
+			});
+		return () => controller.abort();
+	}, [props.sessionId, phase, operating, menu]);
 	const mentions = useFileMentions(textarea, workspaceRoot, phase === "ready" && !operating, (item, token) => {
 		const before = current.current;
 		if (item.kind === "file" && /\.(png|jpe?g|webp)$/i.test(item.path)) {
@@ -255,8 +286,12 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			setPending(false);
 		}
 	};
-	const acceptCommand = () => {
-		edit({ text: "/compact " });
+	const menuItems = commandSuggestions(draft.text, skills);
+	const selectedCommand = Math.min(commandSelected, Math.max(0, menuItems.length - 1));
+	const acceptCommand = (index = selectedCommand) => {
+		const item = menuItems[index];
+		if (!item) return;
+		edit({ text: `${item.label} ` });
 		setMenu(false);
 		textarea.current?.focus();
 	};
@@ -326,9 +361,10 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						anchor={textarea}
 						id={commandId}
 						title="输入命令"
-						items={[{ key: "compact", label: "/compact", description: "压缩上下文（可附加要求）" }]}
-						selected={0}
-						onSelect={() => {}}
+						items={menuItems}
+						selected={selectedCommand}
+						onSelect={setCommandSelected}
+						message={skillStatus || (menuItems.length ? undefined : "没有匹配的命令或技能")}
 						onAccept={acceptCommand}
 					/>
 				)}
@@ -362,18 +398,30 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						placeholder="输入消息，@ 引用文件，/ 命令"
 						aria-autocomplete="list"
 						aria-controls={mentions.controls ?? (menu ? commandId : undefined)}
-						aria-activedescendant={mentions.active ?? (menu ? `${commandId}-0` : undefined)}
-						onClick={() => mentions.refresh()}
+						aria-activedescendant={
+							mentions.active ?? (menu && menuItems.length ? `${commandId}-${selectedCommand}` : undefined)
+						}
+						onClick={(e) => {
+							mentions.refresh();
+							setMenu(isCommandQuery(e.currentTarget.value));
+						}}
 						onBlur={() => {
 							mentions.close();
 							setMenu(false);
 						}}
-						onCompositionStart={() => mentions.close()}
-						onCompositionEnd={() => mentions.refresh()}
+						onCompositionStart={() => {
+							mentions.close();
+							setMenu(false);
+						}}
+						onCompositionEnd={(e) => {
+							mentions.refresh();
+							setMenu(isCommandQuery(e.currentTarget.value));
+						}}
 						className="focus-neko max-h-40 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-[15px] text-ink-900"
 						onChange={(e) => {
 							edit({ text: e.target.value });
-							setMenu(/^\/[a-z]*$/.test(e.target.value));
+							setCommandSelected(0);
+							setMenu(!(e.nativeEvent as InputEvent).isComposing && isCommandQuery(e.target.value));
 							if (!(e.nativeEvent as InputEvent).isComposing) mentions.refresh();
 							e.target.style.height = "auto";
 							e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
@@ -393,15 +441,21 @@ function SessionComposer(props: Props & { sessionId: string }) {
 								setMenu(false);
 							} else if (menu && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
 								e.preventDefault();
+								setCommandSelected(
+									Math.max(0, Math.min(menuItems.length - 1, selectedCommand + (e.key === "ArrowDown" ? 1 : -1))),
+								);
 							} else if (menu && e.key === "Tab") {
-								if (!e.shiftKey) {
+								if (!e.shiftKey && menuItems.length) {
 									e.preventDefault();
 									acceptCommand();
 								} else setMenu(false);
 							} else if (e.key === "Enter" && !e.shiftKey) {
 								e.preventDefault();
-								if (menu) acceptCommand();
-								else void submit();
+								if (menu && menuItems.length) acceptCommand();
+								else {
+									setMenu(false);
+									void submit();
+								}
 							}
 						}}
 					/>

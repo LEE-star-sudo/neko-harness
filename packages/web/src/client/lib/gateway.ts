@@ -1,7 +1,7 @@
 import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
-import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
+import type { ChatView, NekoConversationChange, NekoModelInfo, NekoSkillInfo } from "@neko-harness/core";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
@@ -299,6 +299,10 @@ export class GatewayConnection {
 	}
 	abort(): void {
 		if (this.ready) void this.#chat!.abort(CONTEXT).catch((e: unknown) => this.#error(e));
+	}
+	async listSkills(sessionId: string, signal: AbortSignal): Promise<readonly NekoSkillInfo[]> {
+		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话未就绪");
+		return this.#chat!.skills(withAbortSignal(signal, CONTEXT));
 	}
 	async listModels(): Promise<readonly NekoModelInfo[]> {
 		return this.#models?.list(CONTEXT) ?? [];

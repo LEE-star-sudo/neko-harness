@@ -51,6 +51,7 @@ export {
 	type NekoRuntime,
 	type NekoRuntimeOptions,
 	type NekoSession,
+	type NekoSkillInfo,
 	type NekoSubmitOptions,
 } from "./runtime.ts";
 export { mergeUsage } from "./session-metadata.ts";

@@ -78,6 +78,7 @@ type ItemEntry =
  * neko.session-directory / neko.session-management。
  */
 class NekoTuiApp {
+	readonly #commands = [...commands];
 	readonly #gateway: NekoTuiGateway;
 	readonly #options: NekoTuiOptions;
 	readonly #ui: TuiAltScreen;
@@ -149,7 +150,7 @@ class NekoTuiApp {
 			save: (provider, key) => this.#gateway.client.credentials.save({ provider, key }, BACKGROUND_CONTEXT),
 			remove: (provider) => this.#gateway.client.credentials.remove({ provider }, BACKGROUND_CONTEXT),
 		});
-		const complete = fileCompletion(commands, options.cwd ?? process.cwd(), (text) => this.addNotice(text));
+		const complete = fileCompletion(this.#commands, options.cwd ?? process.cwd(), (text) => this.addNotice(text));
 		const original = complete.applyCompletion.bind(complete);
 		complete.applyCompletion = (lines, line, col, item, prefix) => {
 			const result = original(lines, line, col, item, prefix);
@@ -496,6 +497,7 @@ class NekoTuiApp {
 		const facade = await this.#gateway.client.attach(id);
 		this.#chatFacade = facade;
 		this.#sessionId = id;
+		void this.#refreshSkills(facade);
 		this.#editor.setText(this.#texts.get(id) ?? "");
 		this.#resetTranscript();
 		const view = facade.view;
@@ -505,6 +507,19 @@ class NekoTuiApp {
 		});
 		this.#syncEditorBorder();
 		this.#ui.requestRender(true);
+	}
+
+	/** 拉取当前会话的技能列表进补全命令表（数组与 fileCompletion 共享，原地更新即生效）。 */
+	async #refreshSkills(facade: ChatFacade): Promise<void> {
+		this.#commands.splice(0, this.#commands.length, ...commands);
+		try {
+			const skills = await facade.skills(BACKGROUND_CONTEXT);
+			if (facade !== this.#chatFacade) return;
+			for (const skill of skills)
+				this.#commands.push({ name: `skill:${skill.name}`, description: skill.description, argumentHint: "[args]" });
+		} catch {
+			/* completion keeps the static commands */
+		}
 	}
 
 	async #manage(operation: () => Promise<void>): Promise<void> {
