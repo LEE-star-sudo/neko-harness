@@ -2,6 +2,7 @@ import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } f
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
 import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
+import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
 import {
@@ -86,13 +87,13 @@ export class GatewayConnection {
 	get managementReady() {
 		return this.#connected && !this.#operating;
 	}
-	async saveCredential(key: string): Promise<void> {
+	async saveCredential(provider: CredentialProviderId, key: string): Promise<void> {
 		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
-		await this.#credentials.save({ key }, CONTEXT);
+		await this.#credentials.save({ provider, key }, CONTEXT);
 	}
-	async removeCredential(): Promise<void> {
+	async removeCredential(provider: CredentialProviderId): Promise<void> {
 		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
-		await this.#credentials.remove(CONTEXT);
+		await this.#credentials.remove({ provider }, CONTEXT);
 	}
 	async start(): Promise<void> {
 		this.#options.events.onPhase("connecting");

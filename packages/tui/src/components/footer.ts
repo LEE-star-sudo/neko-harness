@@ -5,6 +5,7 @@ import { labels } from "../labels.ts";
 import { theme } from "../theme.ts";
 
 export type FooterStats = {
+	readonly contextUsage?: { tokens: number | null; window: number; percent: number | null };
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;
@@ -39,15 +40,35 @@ export class StatusFooter implements Component {
 					? labels.busyHints
 					: labels.idleHints;
 		const compactHints = s.canAbort && !s.busy ? "Esc: stop" : s.busy ? labels.busyCompact : labels.idleCompact;
-		const compactUsage = s.usageText.replace(/ Cache: \S+/, "");
-		const second = this.panelOpen
-			? hints
-			: visibleWidth(s.usageText) + hints.length + 3 <= space
-				? `${s.usageText} | ${hints}`
-				: visibleWidth(compactUsage) + compactHints.length + 3 <= space
-					? `${compactUsage} | ${compactHints}`
-					: compactHints;
-		return [` ${first}`, ` ${theme.dim(second)}`].map((line) => truncateToWidth(line, width));
+		const context = s.contextUsage;
+		const contextText =
+			context && context.window > 0
+				? `Ctx ${context.percent === null ? "?" : `${context.percent.toFixed(1)}%`}/${formatTokens(context.window)}`
+				: "";
+		const usage = [contextText, s.usageText].filter(Boolean).join(" | ");
+		const cache = s.usageText.match(/Cache: \S+/)?.[0] ?? "";
+		const essentials = [contextText, cache].filter(Boolean).join(" | ");
+		const shortContext = contextText.split("/")[0] ?? "";
+		const shortEssentials = [shortContext, cache].filter(Boolean).join(" | ");
+		const minimalHints = this.panelOpen ? labels.close : s.canAbort || s.busy ? "Esc Stop" : "/ Cmds";
+		const candidates = this.panelOpen
+			? [`${essentials} | ${hints}`, `${shortEssentials} | ${hints}`, hints]
+			: [
+					`${usage} | ${hints}`,
+					`${usage} | ${compactHints}`,
+					`${usage} | ${minimalHints}`,
+					`${essentials} | ${compactHints}`,
+					`${essentials} | ${minimalHints}`,
+					`${shortEssentials} | ${minimalHints}`,
+					minimalHints,
+				];
+		const second = candidates.find((line) => visibleWidth(line) <= space) ?? minimalHints;
+		const shownContext = second.includes(contextText) ? contextText : shortContext;
+		const contextLabel =
+			context && context.percent !== null && context.percent > 90 ? theme.error(shownContext) : theme.dim(shownContext);
+		return [` ${first}`, ` ${theme.dim(second).replace(shownContext, contextLabel)}`].map((line) =>
+			truncateToWidth(line, width),
+		);
 	}
 }
 export function usageText(input: number, output: number, cacheRead: number, costTotal: number): string {

@@ -67,6 +67,7 @@ export async function openNekoSessionHandle(options: {
 				},
 			},
 			modelLabel,
+			{ models: runtime.listModels(), contextEntries: view.value.entries },
 		);
 	};
 	const chatState = replicatedState<ChatView>(project());

@@ -17,6 +17,27 @@ describe("createNekoRuntime", () => {
 		}
 	});
 
+	it("exposes the tavily runtime override as the active source without persisting it", async () => {
+		const original = process.env.TAVILY_API_KEY;
+		delete process.env.TAVILY_API_KEY;
+		try {
+			const runtime = await createNekoRuntime({
+				credentials: new MemoryCredentialStore(),
+				storage: "memory",
+				tavilyApiKey: "test-tavily-override",
+			});
+			try {
+				expect((await runtime.credentialStatus("tavily")).source).toBe("runtime");
+				expect(process.env.TAVILY_API_KEY).toBeUndefined();
+				expect((await runtime.getAgent()).extensions).toContain("neko-web-search");
+			} finally {
+				await runtime.close();
+			}
+		} finally {
+			if (original !== undefined) process.env.TAVILY_API_KEY = original;
+		}
+	});
+
 	it("answers an input end to end on a memory runtime", async () => {
 		const faux = fauxProvider();
 		faux.setResponses([fauxAssistantMessage([fauxText("2")])]);

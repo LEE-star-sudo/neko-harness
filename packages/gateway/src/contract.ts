@@ -10,7 +10,15 @@
 import type { Context, ReplicatedState } from "@earendil-works/chord";
 import { defineService } from "@earendil-works/chord";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ChatView, NekoConversationChange, NekoModelInfo, NekoModelRef, UsageTotals } from "@neko-harness/core";
+import type {
+	ChatView,
+	CredentialProviderId,
+	CredentialStatus,
+	NekoConversationChange,
+	NekoModelInfo,
+	NekoModelRef,
+	UsageTotals,
+} from "@neko-harness/core";
 
 /** 目录条目：非归档会话（含 root），id 为十进制字符串形式的 ConversationId。 */
 export type NekoSessionSummary = {
@@ -122,10 +130,13 @@ export interface NekoWorkspaces {
 }
 export const NekoWorkspaces = defineService<NekoWorkspaces>("neko.workspaces");
 
-export type NekoCredentialState = import("@neko-harness/core").CredentialStatus & { revision: number };
+export type NekoCredentialState = {
+	readonly revision: number;
+	readonly statuses: Record<CredentialProviderId, CredentialStatus>;
+};
 export interface NekoCredentials {
 	readonly state: ReplicatedState<NekoCredentialState>;
-	save(input: { key: string }, context: Context): Promise<void>;
-	remove(context: Context): Promise<void>;
+	save(input: { provider: CredentialProviderId; key: string }, context: Context): Promise<void>;
+	remove(input: { provider: CredentialProviderId }, context: Context): Promise<void>;
 }
 export const NekoCredentials = defineService<NekoCredentials>("neko.credentials");

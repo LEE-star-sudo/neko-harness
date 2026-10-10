@@ -34,11 +34,18 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { CompactionManager } from "./compaction.ts";
-import { type CredentialStatus, FileCredentialStore, MemoryCredentialStore } from "./credentials.ts";
+import {
+	type CredentialProviderId,
+	type CredentialStatus,
+	credentialProvider,
+	FileCredentialStore,
+	MemoryCredentialStore,
+} from "./credentials.ts";
 import { ImageMetadataDoc, imageKey, trackImageMetadata } from "./image-metadata.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
 import { ImageTools } from "./read-image.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
+import { createWebSearchTools } from "./web-search.ts";
 import {
 	accessibleWorkspace,
 	executionWorkspace,
@@ -67,6 +74,8 @@ export type NekoRuntimeOptions = {
 	readonly storagePath?: string;
 	/** Explicit in-memory DeepSeek override; never persisted or written to process.env. */
 	readonly apiKey?: string;
+	/** Explicit in-memory Tavily override for the web-search tools; never persisted or written to process.env. */
+	readonly tavilyApiKey?: string;
 	readonly credentials?: CredentialStore;
 	readonly credentialsPath?: string;
 	/** Model the root conversation runs with; default the built-in DeepSeek chat model. */
@@ -241,9 +250,9 @@ export type NekoRuntime = {
 	configureConversation(id: ConversationId, change: NekoConversationChange): Promise<boolean>;
 	/** Every chat model in the Models registry, for frontend model selectors. */
 	listModels(): NekoModelInfo[];
-	credentialStatus(): Promise<CredentialStatus>;
-	saveCredential(key: string): Promise<void>;
-	removeCredential(): Promise<void>;
+	credentialStatus(provider: CredentialProviderId): Promise<CredentialStatus>;
+	saveCredential(provider: CredentialProviderId, key: string): Promise<void>;
+	removeCredential(provider: CredentialProviderId): Promise<void>;
 	/** The conversation's resolved agent: effective model, thinking level, selected extension names. */
 	getAgent(id?: ConversationId): Promise<NekoAgentInfo>;
 	/**
@@ -271,10 +280,17 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		(options.storage === "memory" && !options.credentialsPath
 			? new MemoryCredentialStore()
 			: new FileCredentialStore(options.credentialsPath));
-	const runtimeKey = options.apiKey?.trim();
-	const effectiveCredentials: CredentialStore = runtimeKey
+	const runtimeKeys = new Map<CredentialProviderId, string>();
+	const deepseekKey = options.apiKey?.trim();
+	if (deepseekKey) runtimeKeys.set("deepseek", deepseekKey);
+	const tavilyKey = options.tavilyApiKey?.trim();
+	if (tavilyKey) runtimeKeys.set("tavily", tavilyKey);
+	const effectiveCredentials: CredentialStore = runtimeKeys.size
 		? {
-				read: async (id) => (id === "deepseek" ? { type: "api_key", key: runtimeKey } : credentials.read(id)),
+				read: async (id) => {
+					const override = runtimeKeys.get(id as CredentialProviderId);
+					return override !== undefined ? { type: "api_key", key: override } : credentials.read(id);
+				},
 				list: () => credentials.list(),
 				modify: (id, fn) => credentials.modify(id, fn),
 				delete: (id) => credentials.delete(id),
@@ -292,6 +308,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const registry = createRegistry();
 	registry.install(CodingTools);
 	registry.install(ImageTools);
+	registry.install(
+		createWebSearchTools(async () => {
+			const saved = await effectiveCredentials.read("tavily");
+			if (saved?.type === "api_key" && saved.key) return saved.key;
+			return process.env.TAVILY_API_KEY || undefined;
+		}),
+	);
 	for (const extension of options.extensions ?? []) registry.install(extension);
 
 	const storage =
@@ -694,17 +717,27 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				return true;
 			});
 		},
-		async credentialStatus() {
-			const saved = await credentials.read("deepseek");
+		async credentialStatus(provider) {
+			const spec = credentialProvider(provider);
+			const saved = await credentials.read(spec.id);
 			const savedConfigured = saved?.type === "api_key" && Boolean(saved.key);
-			const environmentConfigured = Boolean(process.env.DEEPSEEK_API_KEY);
+			const environmentConfigured = Boolean(process.env[spec.envVar]);
 			return {
 				savedConfigured,
 				environmentConfigured,
-				source: runtimeKey ? "runtime" : savedConfigured ? "saved" : environmentConfigured ? "environment" : "none",
+				source: runtimeKeys.has(spec.id)
+					? "runtime"
+					: savedConfigured
+						? "saved"
+						: environmentConfigured
+							? "environment"
+							: spec.keyless
+								? "keyless"
+								: "none",
 			};
 		},
-		async saveCredential(key) {
+		async saveCredential(provider, key) {
+			const spec = credentialProvider(provider);
 			if (
 				typeof key !== "string" ||
 				!key.trim() ||
@@ -713,14 +746,15 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			)
 				throw new Error("Enter a valid API key.");
 			try {
-				await credentials.modify("deepseek", async () => ({ type: "api_key", key: key.trim() }));
+				await credentials.modify(spec.id, async () => ({ type: "api_key", key: key.trim() }));
 			} catch {
 				throw new Error("Cannot save API key.");
 			}
 		},
-		async removeCredential() {
+		async removeCredential(provider) {
+			const spec = credentialProvider(provider);
 			try {
-				await credentials.delete("deepseek");
+				await credentials.delete(spec.id);
 			} catch {
 				throw new Error("Cannot remove API key.");
 			}

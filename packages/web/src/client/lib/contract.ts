@@ -1,7 +1,15 @@
 import type { Context, ReplicatedState } from "@earendil-works/chord";
 import { defineService } from "@earendil-works/chord";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ChatView, NekoConversationChange, NekoModelInfo, NekoModelRef, UsageTotals } from "@neko-harness/core";
+import type {
+	ChatView,
+	CredentialStatus,
+	NekoConversationChange,
+	NekoModelInfo,
+	NekoModelRef,
+	UsageTotals,
+} from "@neko-harness/core";
+import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 
 /**
  * neko 网关应用层服务契约的浏览器镜像（packages/gateway/src/contract.ts 的逐字拷贝，
@@ -108,10 +116,13 @@ export interface NekoWorkspaces {
 }
 export const NekoWorkspaces = defineService<NekoWorkspaces>("neko.workspaces");
 
-export type NekoCredentialState = import("@neko-harness/core").CredentialStatus & { revision: number };
+export type NekoCredentialState = {
+	readonly revision: number;
+	readonly statuses: Record<CredentialProviderId, CredentialStatus>;
+};
 export interface NekoCredentials {
 	readonly state: ReplicatedState<NekoCredentialState>;
-	save(input: { key: string }, context: Context): Promise<void>;
-	remove(context: Context): Promise<void>;
+	save(input: { provider: CredentialProviderId; key: string }, context: Context): Promise<void>;
+	remove(input: { provider: CredentialProviderId }, context: Context): Promise<void>;
 }
 export const NekoCredentials = defineService<NekoCredentials>("neko.credentials");

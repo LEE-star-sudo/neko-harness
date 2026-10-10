@@ -3,7 +3,7 @@ import type { ConversationView, LiveState, ToolSlot, UsageState } from "@earendi
 import type { CompactionRecord } from "./compaction.ts";
 import { imageKey } from "./image-metadata.ts";
 import type { ImageInfo } from "./images.ts";
-import type { NekoModelRef } from "./runtime.ts";
+import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import { savedWorkspace } from "./workspace.ts";
 
 /**
@@ -25,6 +25,8 @@ export type UsageTotals = {
 
 /** 前端渲染所需的会话视图投影。 */
 export type ChatView = {
+	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
+	contextUsage?: { tokens: number | null; window: number; percent: number | null };
 	compaction?: { active: NonNullable<LiveState["compactions"]>; latest: CompactionRecord | null };
 	/** 模型标签，如 "deepseek/deepseek-flash"；pi.agent 有显式模型时取自它（切换后立即更新）。 */
 	model: string;
@@ -196,12 +198,23 @@ type AgentDocView = {
 };
 
 /** ConversationView → 前端投影 ChatView（服务器每次 commit 后调用）。 */
-export function projectChatView(view: ConversationView, modelLabel: string): ChatView {
+export function projectChatView(
+	view: ConversationView,
+	modelLabel: string,
+	options: { models?: readonly NekoModelInfo[]; contextEntries?: ConversationView["entries"] } = {},
+): ChatView {
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	const usage = totalUsage((view.docs["pi.usage"] ?? { models: {}, tools: {} }) as UsageState);
 	// pi.agent 随每次 configure 提交进视图：投影同步读出生效模型/thinkingLevel，无竞态。
 	const agent = view.docs["pi.agent"] as AgentDocView | undefined;
 	const agentModel = agent?.model ?? null;
+
+	const contextWindow =
+		options.models?.find(
+			(m) =>
+				`${m.provider}/${m.modelId}` === (agentModel ? `${agentModel.provider}/${agentModel.modelId}` : modelLabel),
+		)?.contextWindow ?? 0;
+	const tokens = contextTokens(options.contextEntries ?? view.entries);
 
 	// 先按 callId 收集工具结果（pi.tool-result entry），再按序展开条目。
 	const results = new Map<string, Extract<ChatItem, { type: "tool" }>>();
@@ -317,6 +330,11 @@ export function projectChatView(view: ConversationView, modelLabel: string): Cha
 					: "Thinking...";
 
 	return {
+		contextUsage: {
+			tokens,
+			window: contextWindow,
+			percent: tokens !== null && contextWindow > 0 ? (tokens / contextWindow) * 100 : null,
+		},
 		compaction: {
 			active: [...(live.compactions ?? [])],
 			latest: (view.docs["app.neko.compaction"]?.latest as CompactionRecord | null) ?? null,
@@ -407,4 +425,18 @@ function projectStreaming(live: LiveState): StreamingView | null {
 		}
 	}
 	return { thinking, text, toolCalls };
+}
+
+/** Match Pi durable's footer: use the latest successful answer after the newest compaction. */
+export function contextTokens(entries: ConversationView["entries"]): number | null {
+	const compacted = entries.reduce((id, entry) => (entry.kind === "pi.compaction" ? Math.max(id, entry.id) : id), 0);
+	for (let i = entries.length - 1; i >= 0; i--) {
+		const entry = entries[i]!;
+		const message = entry.model?.[0];
+		if (entry.id < compacted || entry.kind !== "pi.assistant" || message?.role !== "assistant") continue;
+		if (message.stopReason === "aborted" || message.stopReason === "error") continue;
+		const usage = message.usage;
+		return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
+	}
+	return null;
 }

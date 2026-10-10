@@ -47,17 +47,18 @@ it("boots without a key, preserves input state and uses Pi capabilities and defa
 			model: { provider: "deepseek", modelId: "deepseek-v4-pro" },
 		});
 		expect((await runtime.getAgent()).thinkingLevel).toBe("high");
-		await runtime.saveCredential("test-saved");
-		expect((await runtime.credentialStatus()).source).toBe("saved");
+		await runtime.saveCredential("deepseek", "test-saved");
+		expect((await runtime.credentialStatus("deepseek")).source).toBe("saved");
 		process.env.DEEPSEEK_API_KEY = "test-env";
-		expect(await runtime.credentialStatus()).toEqual({
+		expect(await runtime.credentialStatus("deepseek")).toEqual({
 			savedConfigured: true,
 			environmentConfigured: true,
 			source: "saved",
 		});
-		await expect(runtime.saveCredential("  ")).rejects.toThrow();
-		await runtime.removeCredential();
-		expect((await runtime.credentialStatus()).source).toBe("environment");
+		await expect(runtime.saveCredential("deepseek", "  ")).rejects.toThrow();
+		await expect(runtime.credentialStatus("unknown" as never)).rejects.toThrow("Unknown credential provider");
+		await runtime.removeCredential("deepseek");
+		expect((await runtime.credentialStatus("deepseek")).source).toBe("environment");
 	} finally {
 		await runtime.close();
 		if (old === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -72,8 +73,8 @@ it("does not mutate the environment for explicit runtime keys", async () => {
 		apiKey: "test-override",
 	});
 	try {
-		await runtime.saveCredential("test-saved");
-		expect((await runtime.credentialStatus()).source).toBe("runtime");
+		await runtime.saveCredential("deepseek", "test-saved");
+		expect((await runtime.credentialStatus("deepseek")).source).toBe("runtime");
 		expect(process.env.DEEPSEEK_API_KEY).toBe(before);
 	} finally {
 		await runtime.close();
@@ -104,17 +105,17 @@ it("resolves saved, rotated and environment keys on actual Pi requests without n
 	) as typeof fetch;
 	const runtime = await createNekoRuntime({ storage: "memory" });
 	try {
-		await runtime.saveCredential("test-saved");
+		await runtime.saveCredential("deepseek", "test-saved");
 		const first = await runtime.submit("first", { requestId: "first" });
 		await runtime.waitAnswer(first);
 		for (let i = 0; i < 100 && !(await runtime.listConversations())[0]?.title; i++) await Bun.sleep(10);
 		expect(requests[0]!.auth).toBe("Bearer test-saved");
 		expect(requests[0]!.body.reasoning_effort).toBe("high");
 		expect(requests[1]!.body.thinking).toEqual({ type: "disabled" });
-		await runtime.saveCredential("test-rotated");
+		await runtime.saveCredential("deepseek", "test-rotated");
 		await runtime.waitAnswer(await runtime.submit("second"));
 		expect(requests.at(-1)!.auth).toBe("Bearer test-rotated");
-		await runtime.removeCredential();
+		await runtime.removeCredential("deepseek");
 		await runtime.waitAnswer(await runtime.submit("third"));
 		expect(requests.at(-1)!.auth).toBe("Bearer test-environment");
 		delete process.env.DEEPSEEK_API_KEY;
@@ -127,6 +128,53 @@ it("resolves saved, rotated and environment keys on actual Pi requests without n
 		globalThis.fetch = originalFetch;
 		if (old === undefined) delete process.env.DEEPSEEK_API_KEY;
 		else process.env.DEEPSEEK_API_KEY = old;
+	}
+});
+
+it("manages per-provider credentials independently, with keyless fallback for tavily", async () => {
+	const old = process.env.TAVILY_API_KEY;
+	delete process.env.TAVILY_API_KEY;
+	const runtime = await createNekoRuntime({ storage: "memory" });
+	try {
+		expect(await runtime.credentialStatus("tavily")).toEqual({
+			savedConfigured: false,
+			environmentConfigured: false,
+			source: "keyless",
+		});
+		await runtime.saveCredential("tavily", "test-tavily");
+		expect((await runtime.credentialStatus("tavily")).source).toBe("saved");
+		expect((await runtime.credentialStatus("deepseek")).savedConfigured).toBe(false);
+		process.env.TAVILY_API_KEY = "test-tavily-env";
+		expect(await runtime.credentialStatus("tavily")).toEqual({
+			savedConfigured: true,
+			environmentConfigured: true,
+			source: "saved",
+		});
+		await runtime.removeCredential("tavily");
+		expect((await runtime.credentialStatus("tavily")).source).toBe("environment");
+		delete process.env.TAVILY_API_KEY;
+		expect((await runtime.credentialStatus("tavily")).source).toBe("keyless");
+	} finally {
+		await runtime.close();
+		if (old === undefined) delete process.env.TAVILY_API_KEY;
+		else process.env.TAVILY_API_KEY = old;
+	}
+});
+
+it("applies the tavily runtime override without persisting or touching the environment", async () => {
+	const before = process.env.TAVILY_API_KEY;
+	const runtime = await createNekoRuntime({
+		storage: "memory",
+		credentials: new MemoryCredentialStore(),
+		tavilyApiKey: "test-tavily-override",
+	});
+	try {
+		expect((await runtime.credentialStatus("tavily")).source).toBe("runtime");
+		await runtime.saveCredential("tavily", "test-saved");
+		expect((await runtime.credentialStatus("tavily")).source).toBe("runtime");
+		expect(process.env.TAVILY_API_KEY).toBe(before);
+	} finally {
+		await runtime.close();
 	}
 });
 

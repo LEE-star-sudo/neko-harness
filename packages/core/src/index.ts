@@ -11,7 +11,11 @@ export {
 	parseNekoConfig,
 } from "./config.ts";
 export {
+	CREDENTIAL_PROVIDERS,
+	type CredentialProviderId,
+	type CredentialProviderSpec,
 	type CredentialStatus,
+	credentialProvider,
 	DEFAULT_CREDENTIALS_PATH,
 	FileCredentialStore,
 	MemoryCredentialStore,

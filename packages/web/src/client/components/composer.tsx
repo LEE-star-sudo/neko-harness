@@ -30,15 +30,11 @@ function Thumbnail({ file }: { file: File }) {
 }
 function SessionComposer(props: Props & { sessionId: string }) {
 	const { credentials, view, models } = useNekoState();
+	const active = view?.compaction?.active ?? [];
 	if (!drafts.has(props.sessionId))
 		drafts.set(props.sessionId, { text: "", files: [], requestId: crypto.randomUUID() });
 	const draft = useSyncExternalStore(subscribeDrafts, () => drafts.get(props.sessionId)!);
 
-	const [now, setNow] = useState(Date.now);
-	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(timer);
-	}, []);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState("");
 	const [menu, setMenu] = useState(false);
@@ -54,7 +50,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		for (const listener of draftListeners) listener();
 	};
 	const edit = (next: Partial<Draft>) => update({ ...current.current, ...next, requestId: crypto.randomUUID() });
-	const missingKey = view?.agent.model?.provider === "deepseek" && credentials?.source === "none";
+	const missingKey = view?.agent.model?.provider === "deepseek" && credentials?.statuses.deepseek.source === "none";
 	const model = models.find(
 		(m) => m.provider === view?.agent.model?.provider && m.modelId === view?.agent.model?.modelId,
 	);
@@ -162,28 +158,6 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			setPending(false);
 		}
 	};
-	const active = view?.compaction?.active ?? [];
-	const latest = view?.compaction?.latest;
-	const compaction = active.length
-		? active.some((c) => c.retry)
-			? "压缩重试中"
-			: active.some((c) => c.blocking)
-				? "等待上下文压缩"
-				: "正在压缩上下文"
-		: latest?.phase === "waiting-to-apply"
-			? "等待应用压缩摘要"
-			: latest && now - latest.at < 10000
-				? (
-						{
-							applied: "上下文已压缩",
-							nothing: "暂无可压缩内容",
-							skipped: "已跳过过期摘要",
-							cancelled: "压缩已取消",
-							failed: "压缩失败，可重试",
-							summarizing: "正在压缩上下文",
-						} as Record<string, string>
-					)[latest.phase]
-				: null;
 	return (
 		<section
 			aria-label="消息输入"
@@ -213,8 +187,6 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						</Link>
 					</p>
 				)}
-				{props.busy && props.status && <p className="text-xs text-ink-500">{props.status}</p>}
-				{compaction && <output className="mb-1 text-sm text-ink-500">{compaction}</output>}
 				{noVision && <p className="text-sm text-sakura-700">当前模型不支持图片，请切换模型或移除附件。</p>}
 				{!model?.input.includes("image") && view?.items.some((i) => i.type === "user" && i.images?.length) && (
 					<p className="text-xs text-ink-500">当前模型无法查看历史原图，仍可使用已有文字分析。</p>

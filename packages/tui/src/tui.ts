@@ -146,8 +146,8 @@ class NekoTuiApp {
 		this.#login = new LoginPanel({
 			changed: () => this.#ui.requestRender(),
 			closed: () => this.#ui.setFocus(this.#editor),
-			save: (key) => this.#gateway.client.credentials.save({ key }, BACKGROUND_CONTEXT),
-			remove: () => this.#gateway.client.credentials.remove(BACKGROUND_CONTEXT),
+			save: (provider, key) => this.#gateway.client.credentials.save({ provider, key }, BACKGROUND_CONTEXT),
+			remove: (provider) => this.#gateway.client.credentials.remove({ provider }, BACKGROUND_CONTEXT),
 		});
 		const complete = new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd());
 		const original = complete.applyCompletion.bind(complete);
@@ -360,7 +360,7 @@ class NekoTuiApp {
 		if (chat === undefined) return;
 		if (
 			this.#lastView?.agent.model?.provider === "deepseek" &&
-			this.#gateway.client.credentials.state.value?.source === "none"
+			this.#gateway.client.credentials.state.value?.statuses.deepseek.source === "none"
 		) {
 			this.#editor.setText(text);
 			this.addNotice("Configure DeepSeek with /login before sending.", true);
@@ -888,6 +888,7 @@ class NekoTuiApp {
 							"waiting-to-apply": "Applying summary",
 						}[view.compaction.latest.phase]
 					: undefined,
+			contextUsage: view.contextUsage,
 			usageText: usageText(view.usage.input, view.usage.output, view.usage.cacheRead, view.usage.cost),
 			cwd: view.cwd,
 		});

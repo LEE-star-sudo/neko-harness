@@ -174,3 +174,25 @@ it("preserves image fallback, editor and compaction stop hints at all supported 
 		expect(frame.lines.length).toBe(height);
 	}
 });
+
+it("keeps context occupancy visible ahead of cumulative usage at narrow widths", () => {
+	const f = new StatusFooter();
+	for (const percent of [null, 12.3, 95]) {
+		f.setStats({
+			cwd: "/projects/neko",
+			model: "deepseek/flash",
+			thinkingLevel: "high",
+			busy: undefined,
+			usageText: "In: 100k Out: 20k Cache: 80k $0.1234",
+			contextUsage: { tokens: null, window: 1000000, percent },
+		});
+		for (const width of [40, 60, 80, 120]) {
+			const lines = f.render(width);
+			expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+			expect(lines.map(stripTerminalSequences).join("\n")).toContain("Cache: 80k");
+			expect(lines.map(stripTerminalSequences).join("\n")).toContain(
+				percent === null ? "Ctx ?/" : `Ctx ${percent.toFixed(1)}%/`,
+			);
+		}
+	}
+});

@@ -18,6 +18,11 @@
 			"neko-source": "./src/image-transfer.ts",
 			"types": "./dist/image-transfer.d.ts",
 			"import": "./dist/image-transfer.js"
+		},
+		"./credential-providers": {
+			"neko-source": "./src/credential-providers.ts",
+			"types": "./dist/credential-providers.d.ts",
+			"import": "./dist/credential-providers.js"
 		}
 	},
 	"scripts": {

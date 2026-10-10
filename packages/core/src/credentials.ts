@@ -3,10 +3,17 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 
+export {
+	CREDENTIAL_PROVIDERS,
+	type CredentialProviderId,
+	type CredentialProviderSpec,
+	credentialProvider,
+} from "./credential-providers.ts";
+
 export type CredentialStatus = {
 	savedConfigured: boolean;
 	environmentConfigured: boolean;
-	source: "saved" | "environment" | "runtime" | "none";
+	source: "saved" | "environment" | "runtime" | "keyless" | "none";
 };
 export const DEFAULT_CREDENTIALS_PATH = join(homedir(), ".neko", "credentials.json");
 

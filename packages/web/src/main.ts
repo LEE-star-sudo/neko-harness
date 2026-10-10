@@ -3,6 +3,7 @@
 
 import type { NekoModelRef } from "@neko-harness/core";
 import { DEFAULT_MODEL } from "@neko-harness/core";
+import { openBrowser } from "./open-browser.ts";
 import { startWebServer } from "./server.ts";
 
 const USAGE = `用法: main.ts [选项]
@@ -16,11 +17,13 @@ const USAGE = `用法: main.ts [选项]
   --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
   --cwd <dir>          会话工具的工作目录（默认当前目录）
   --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
+  --no-open           不自动打开浏览器（适用于远程或无桌面环境）
   -h, --help           显示此帮助
 
 可在 Web 设置页配置 Key；gateway 子进程也会继承 DEEPSEEK_API_KEY。`;
 
 type CliOptions = {
+	open: boolean;
 	port?: number;
 	host?: string;
 	gatewayPort?: number;
@@ -32,6 +35,7 @@ type CliOptions = {
 };
 
 function parseArgs(argv: readonly string[]): CliOptions {
+	let open = true;
 	let port: number | undefined;
 	let host: string | undefined;
 	let gatewayPort: number | undefined;
@@ -44,6 +48,9 @@ function parseArgs(argv: readonly string[]): CliOptions {
 		const arg = argv[i];
 		const next = argv[i + 1];
 		switch (arg) {
+			case "--no-open":
+				open = false;
+				break;
 			case "--port": {
 				if (next === undefined) throw new Error("--port 需要参数");
 				port = Number(next);
@@ -105,6 +112,7 @@ function parseArgs(argv: readonly string[]): CliOptions {
 		}
 	}
 	return {
+		open,
 		...(port !== undefined ? { port } : {}),
 		...(host !== undefined ? { host } : {}),
 		...(gatewayPort !== undefined ? { gatewayPort } : {}),
@@ -148,6 +156,11 @@ try {
 	};
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
+	if (options.open) {
+		void openBrowser(server.url).catch(() => {
+			console.warn(`无法自动打开浏览器，请手动访问: ${server.url}`);
+		});
+	}
 } catch (error) {
 	console.error(error instanceof Error ? error.message : String(error));
 	process.exitCode = 1;

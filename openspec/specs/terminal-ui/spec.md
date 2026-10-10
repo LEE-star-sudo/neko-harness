@@ -112,14 +112,19 @@ TUI `/sessions` 与 `/session` SHALL 使用相同的当前工作区会话列表�
 - **WHEN** 面板保持打开且时间经过
 - **THEN** 时间文字自动刷新但不移动选中项；关闭面板后停止其定时刷新
 
-### Requirement: DeepSeek 登录配置
+### Requirement: 登录配置
 
-TUI SHALL 提供 `/login` 面板，以英语显示环境变量配置状态、生效来源、遮罩密钥输入、保存、移除保存值及 https://platform.deepseek.com/api_keys 引导入口。密钥 MUST 通过独立输入收集，不作为命令参数或聊天内容。面板 SHALL 保留输入和状态栏，取消后恢复聊天草稿与焦点。
+TUI SHALL 提供 `/login` 面板，支持在受支持的 provider（DeepSeek、Tavily）之间切换，以英语显示所选 provider 的环境变量配置状态、生效来源（含 keyless 等受限来源）、遮罩密钥输入、保存、移除保存值及对应申请链接引导入口。密钥 MUST 通过独立输入收集，不作为命令参数或聊天内容。面板 SHALL 保留输入和状态栏，取消后恢复聊天草稿与焦点。
 
 #### Scenario: 首次配置
 
 - **WHEN** 未配置 Key 的用户启动 TUI 并执行 /login
 - **THEN** 可输入并保存 Key，成功后清除敏感输入并更新状态，无需重启即可对话
+
+#### Scenario: 切换 provider
+
+- **WHEN** 用户在 /login 面板中从 DeepSeek 切换到 Tavily
+- **THEN** 面板显示 Tavily 的环境变量状态与生效来源（未配置时为 keyless 受限），未保存的输入被清除
 
 #### Scenario: 取消和失败
 

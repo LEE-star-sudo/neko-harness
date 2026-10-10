@@ -10,7 +10,7 @@ const USAGE = `用法: neko <command> [options]
   serve   仅启动 gateway（Unix socket + WebSocket）
 
 各命令的选项透传，详见 neko <command> --help。
-可通过 TUI /login、Web 设置页或 DEEPSEEK_API_KEY 配置凭据。`;
+可通过 TUI /login、Web 设置页或 DEEPSEEK_API_KEY / TAVILY_API_KEY 配置凭据。`;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const isSource = path.basename(here) === "src";

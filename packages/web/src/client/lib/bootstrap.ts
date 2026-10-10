@@ -1,4 +1,5 @@
 import type { NekoConversationChange, NekoModelRef } from "@neko-harness/core";
+import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { NekoBrowseOptions } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
@@ -64,11 +65,11 @@ function notReady(): void {
 }
 
 export const appActions = {
-	saveCredential(key: string) {
-		return requireConnection().saveCredential(key);
+	saveCredential(provider: CredentialProviderId, key: string) {
+		return requireConnection().saveCredential(provider, key);
 	},
-	removeCredential() {
-		return requireConnection().removeCredential();
+	removeCredential(provider: CredentialProviderId) {
+		return requireConnection().removeCredential(provider);
 	},
 	configure(change: NekoConversationChange, sessionId: string) {
 		const current = requireConnection();

@@ -8,6 +8,7 @@ import {
 import type { ConversationId } from "@earendil-works/pi-durable";
 import type { RoutedServerServiceAttachment, RoutedServerServiceHost } from "@earendil-works/pi-server";
 import type { NekoRuntime } from "@neko-harness/core";
+import { CREDENTIAL_PROVIDERS } from "@neko-harness/core";
 import {
 	type NekoCredentialState,
 	NekoCredentials,
@@ -51,7 +52,11 @@ export async function createNekoServerServices(options: {
 		}));
 
 	let revision = 1;
-	const credentials = replicatedState<NekoCredentialState>({ revision: 1, ...(await runtime.credentialStatus()) });
+	const readStatuses = async (): Promise<NekoCredentialState["statuses"]> =>
+		Object.fromEntries(
+			await Promise.all(CREDENTIAL_PROVIDERS.map(async (spec) => [spec.id, await runtime.credentialStatus(spec.id)])),
+		) as NekoCredentialState["statuses"];
+	const credentials = replicatedState<NekoCredentialState>({ revision: 1, statuses: await readStatuses() });
 	const workspaces = replicatedState<NekoWorkspaceState>({ revision, workspaces: await runtime.listWorkspaces() });
 	const directory = replicatedState<NekoDirectoryState>({ revision, sessions: await list() });
 	const attachments = new Set<RoutedServerServiceAttachment>();
@@ -98,16 +103,16 @@ export async function createNekoServerServices(options: {
 				const updateCredentials = (operation: () => Promise<void>) =>
 					serialize(async () => {
 						await operation();
-						const status = await runtime.credentialStatus();
+						const statuses = await readStatuses();
 						credentials.change(context, (draft) => {
-							Object.assign(draft, status);
+							Object.assign(draft, { statuses });
 							draft.revision++;
 						});
 					});
 				provider.provide(NekoCredentials, {
 					state: credentials,
-					save: (input) => updateCredentials(() => runtime.saveCredential(input.key)),
-					remove: () => updateCredentials(() => runtime.removeCredential()),
+					save: (input) => updateCredentials(() => runtime.saveCredential(input.provider, input.key)),
+					remove: (input) => updateCredentials(() => runtime.removeCredential(input.provider)),
 				});
 				provider.provide(NekoWorkspaces, {
 					state: workspaces,

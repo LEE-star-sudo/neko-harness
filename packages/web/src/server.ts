@@ -70,7 +70,7 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 	const actualPort = typeof address === "object" && address !== null ? address.port : port;
 
 	return {
-		url: `http://${host}:${actualPort}`,
+		url: `http://${host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "[::1]" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${actualPort}`,
 		port: actualPort,
 		gateway,
 		async close() {
