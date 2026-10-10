@@ -1,5 +1,6 @@
 import { Composer } from "../components/composer";
 import { MessageList } from "../components/message-list";
+import { StatusBar } from "../components/status-bar";
 import { TopBar } from "../components/top-bar";
 import { useServerInfo } from "../lib/api";
 import { useNekoState } from "../lib/store";
@@ -13,7 +14,7 @@ export function ChatPage() {
 
 	return (
 		<div className="flex h-dvh flex-col bg-base">
-			<TopBar model={model} usage={view?.usage ?? null} busy={busy} status={status} conn={conn} />
+			<TopBar conn={conn} />
 			{notice !== null && (
 				<div
 					className={`border-b px-4 py-1.5 text-center text-xs ${
@@ -27,6 +28,7 @@ export function ChatPage() {
 				</div>
 			)}
 			<MessageList view={view} busy={busy} />
+			<StatusBar model={model} usage={view?.usage ?? null} busy={busy} status={status} />
 			<Composer busy={busy} status={status} />
 		</div>
 	);

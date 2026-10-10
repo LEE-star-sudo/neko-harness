@@ -134,10 +134,26 @@ body {
 	background-color: var(--color-sakura-300);
 }
 
-:focus-visible {
-	outline: 2px solid var(--color-tianyi-500);
-	outline-offset: 2px;
-	border-radius: 4px;
+/*
+ * 可聚焦元素的 focus 样式：不用浏览器默认 outline，统一柔和的樱花粉 ring
+ * （sakura-500 4px + 2px 基底色内环，随圆角、不裁切）。sakura-500 对浅色底
+ * 非文本对比度 ≥3:1（1.4.11 AA）。所有交互元素加 .focus-neko。
+ */
+.focus-neko {
+	outline: none;
+}
+
+.focus-neko:focus-visible {
+	box-shadow:
+		0 0 0 2px var(--color-base),
+		0 0 0 4px var(--color-sakura-500);
+}
+
+@media (forced-colors: active) {
+	.focus-neko:focus-visible {
+		outline: 2px solid Highlight;
+		box-shadow: none;
+	}
 }
 
 input,
@@ -264,8 +280,9 @@ button {
 .md pre {
 	margin: 0.6rem 0;
 	padding: 0.75rem 0.9rem;
-	background-color: var(--color-ink-900);
-	color: #f5f3f6;
+	background-color: var(--color-tianyi-50);
+	color: var(--color-ink-900);
+	border: 1px solid var(--color-tianyi-200);
 	border-radius: 0.75rem;
 	overflow-x: auto;
 	font-size: 0.85rem;

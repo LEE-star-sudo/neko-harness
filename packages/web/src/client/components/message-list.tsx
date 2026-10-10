@@ -24,6 +24,9 @@ function AssistantBody({ thinking, text }: { thinking: string; text: string }) {
 }
 
 function AssistantRow({ item }: { item: Extract<ChatItem, { type: "assistant" }> }) {
+	// 只有工具调用、没有文本/thinking/提示时不渲染气泡（工具卡片独立成行）；
+	// 流式期间文本从无到有，出现时再渲染，不会闪烁。
+	if (item.text.trim() === "" && item.thinking.trim() === "" && item.note === null) return null;
 	return (
 		<div className="chat-row flex justify-start">
 			<div className="bubble-assistant max-w-[85%] space-y-1.5 px-4 py-2.5 sm:max-w-[75%]">
@@ -164,7 +167,7 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 						setShowJump(false);
 						scrollToBottom(true);
 					}}
-					className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-sakura-300 bg-surface px-3.5 py-1.5 text-xs font-medium text-sakura-800 shadow-lift hover:bg-sakura-50"
+					className="focus-neko absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-sakura-300 bg-surface px-3.5 py-1.5 text-xs font-medium text-sakura-800 shadow-lift hover:bg-sakura-50"
 				>
 					回到底部 ↓
 				</button>

@@ -11,7 +11,7 @@ export function ThinkingBlock({ text }: { text: string }) {
 				onClick={() => {
 					setOpen(!open);
 				}}
-				className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-ink-600 italic"
+				className="focus-neko flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-xs text-ink-600 italic"
 			>
 				<span aria-hidden>{open ? "▾" : "▸"}</span>
 				思考过程…

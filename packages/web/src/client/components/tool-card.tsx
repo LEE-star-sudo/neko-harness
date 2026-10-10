@@ -36,7 +36,7 @@ export function ToolCard(props: ToolCardProps) {
 				onClick={() => {
 					if (hasBody) setExpanded(!expanded);
 				}}
-				className="flex w-full items-center gap-2 px-3 py-2 text-left"
+				className="focus-neko flex w-full items-center gap-2 px-3 py-2 text-left"
 			>
 				<span aria-hidden className="text-tianyi-500">
 					⚡

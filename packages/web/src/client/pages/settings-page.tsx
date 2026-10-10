@@ -5,7 +5,7 @@ export function SettingsPage() {
 	return (
 		<div className="flex h-dvh flex-col bg-base">
 			<header className="flex items-center gap-3 border-b border-sakura-200/70 bg-surface/80 px-4 py-2.5 backdrop-blur">
-				<Link to="/" className="text-sakura-700 no-underline hover:text-sakura-800">
+				<Link to="/" className="focus-neko rounded-lg text-sakura-700 no-underline hover:text-sakura-800">
 					← 返回
 				</Link>
 				<span className="text-lg font-bold text-sakura-800">设置</span>

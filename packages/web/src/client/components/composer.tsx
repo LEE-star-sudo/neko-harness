@@ -43,7 +43,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 					placeholder={
 						props.busy ? `${props.status ?? "运行中"}（可插话排队或中止）` : "输入消息，Enter 发送，Shift+Enter 换行"
 					}
-					className="max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-[15px] text-ink-900 placeholder:text-ink-400"
+					className="focus-neko max-h-40 min-h-[2.5rem] flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-[15px] text-ink-900 placeholder:text-ink-400"
 					onChange={(event) => {
 						setValue(event.target.value);
 						resize();
@@ -60,7 +60,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 					<button
 						type="button"
 						onClick={abort}
-						className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-sakura-700 px-4 text-sm font-semibold text-white shadow-soft hover:bg-sakura-800"
+						className="focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-sakura-700 px-4 text-sm font-semibold text-white shadow-soft hover:bg-sakura-800"
 					>
 						<span aria-hidden>■</span>
 						中止
@@ -70,7 +70,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 						type="button"
 						onClick={submit}
 						disabled={value.trim() === ""}
-						className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-sakura-700 px-4 text-sm font-semibold text-white shadow-soft hover:bg-sakura-800 disabled:cursor-not-allowed disabled:opacity-40"
+						className="focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-sakura-700 px-4 text-sm font-semibold text-white shadow-soft hover:bg-sakura-800 disabled:cursor-not-allowed disabled:opacity-40"
 					>
 						<span aria-hidden>➤</span>
 						发送
