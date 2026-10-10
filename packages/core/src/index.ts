@@ -10,6 +10,20 @@ export {
 	parseNekoConfig,
 } from "./config.ts";
 export {
+	type ChatItem,
+	type ChatView,
+	projectChatView,
+	type StreamingToolCall,
+	type StreamingView,
+	summarizeToolCall,
+	type ToolSummary,
+	toolResultText,
+	totalUsage,
+	truncateMiddle,
+	type UsageTotals,
+	userText,
+} from "./projection.ts";
+export {
 	createNekoRuntime,
 	DEFAULT_MODEL,
 	DEFAULT_STORAGE_PATH,
