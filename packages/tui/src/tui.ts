@@ -1,21 +1,15 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
-	Box,
 	CombinedAutocompleteProvider,
 	Container,
-	Editor,
-	Loader,
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
-	type SelectItem,
-	SelectList,
 	Spacer,
 	Text,
 	TruncatedText,
 	TuiAltScreen,
-	VStack,
 } from "@earendil-works/pi-tui";
 import type {
 	ChatItem,
@@ -25,23 +19,27 @@ import type {
 	StreamingToolCall,
 	StreamingView,
 } from "@neko-harness/core";
+import { normalizeWorkspace } from "@neko-harness/core";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
+import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
+import { PickerPanel } from "./components/picker.ts";
 import { type ToolCardState, ToolExecutionComponent } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
 import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
+import { commands } from "./labels.ts";
+import { createAppLayout, usableSize } from "./layout.ts";
 import {
 	getActiveThemeMode,
 	getEditorTheme,
-	getSelectListTheme,
 	setActiveTheme,
-	style,
 	type ThemeMode,
 	type ThemePreference,
 	theme,
 } from "./theme.ts";
+import { workspaceSessions } from "./workspace.ts";
 
 export type NekoTuiOptions = {
 	/** 新会话工具的工作目录；默认 process.cwd()。 */
@@ -60,7 +58,6 @@ type ChatFacade = Awaited<ReturnType<NekoTuiGateway["client"]["attach"]>>;
 
 const EXIT_COMMANDS = new Set(["/exit", "/quit"]);
 const SESSIONS_COMMANDS = new Set(["/sessions", "/session"]);
-const MAX_NOTICES = 3;
 const NEW_SESSION_VALUE = "__new__";
 /** /think 接受的 thinking level（pi-ai ModelThinkingLevel）。 */
 const THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -82,16 +79,17 @@ class NekoTuiApp {
 	readonly #ui: TuiAltScreen;
 	readonly #chat = new Container();
 	readonly #notices = new Container();
-	readonly #statusBox = new Container();
-	readonly #editor: Editor;
+	readonly #terminal = new ProcessTerminal();
+	readonly #panel: PickerPanel;
+	#sessionOperation = false;
+	#noticeTimer: ReturnType<typeof setTimeout> | undefined;
+	readonly #editor: BoundedEditor;
 	readonly #footer = new StatusFooter();
 
 	#chatFacade: ChatFacade | undefined;
 	#sessionId = "";
-	#directoryIds: string[] = [];
 	#viewUnsubscribe: (() => void) | undefined;
 	#directoryUnsubscribe: (() => void) | undefined;
-	#overlayHandle: { hide(): void } | undefined;
 
 	/** 已渲染条目 key 序列（前缀比较检测重建）。 */
 	#renderedKeys: string[] = [];
@@ -99,10 +97,8 @@ class NekoTuiApp {
 	#toolCards = new Map<string, ToolExecutionComponent>();
 	#streamingComp: AssistantMessageComponent | undefined;
 	#transcript: ScrollView | undefined;
-	#loader: Loader | undefined;
 	#busyText: string | undefined;
 	#lastView: ChatView | undefined;
-	#noticeCount = 0;
 	#applying = false;
 	#applyQueued = false;
 	#terminalSchemeUnsubscribe: (() => void) | undefined;
@@ -117,21 +113,13 @@ class NekoTuiApp {
 		this.#themePreference = themePreference;
 		// 首帧前的临时主题：auto 先用 COLORFGBG（无则浅色），OSC 11 应答后再修正。
 		setActiveTheme(themePreference === "auto" ? (detectColorFgBgMode() ?? "light") : themePreference);
-		this.#ui = new TuiAltScreen(new ProcessTerminal());
-		this.#editor = new Editor(this.#ui, getEditorTheme(), { paddingX: 1 });
-		this.#editor.setAutocompleteProvider(
-			new CombinedAutocompleteProvider(
-				[
-					{ name: "exit", description: "退出 neko TUI" },
-					{ name: "sessions", description: "会话列表（切换/新建）" },
-					{ name: "model", description: "切换当前会话的模型" },
-					{ name: "think", description: "设置 thinking level（/think high）" },
-					{ name: "fork", description: "分叉当前会话" },
-					{ name: "archive", description: "归档当前会话" },
-				],
-				options.cwd ?? process.cwd(),
-			),
+		this.#ui = new TuiAltScreen(this.#terminal);
+		this.#editor = new BoundedEditor(this.#ui, getEditorTheme(), { paddingX: 1, autocompleteMaxVisible: 3 });
+		this.#panel = new PickerPanel(
+			() => this.#ui.requestRender(),
+			() => this.#ui.setFocus(this.#editor),
 		);
+		this.#editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd()));
 		this.#editor.onSubmit = (text) => {
 			this.submit(text);
 		};
@@ -139,13 +127,22 @@ class NekoTuiApp {
 			this.#resolveExit = resolve;
 		});
 		this.#ui.addInputListener((data) => {
+			if (!usableSize(this.#terminal.columns, this.#terminal.rows)) {
+				if (matchesKey(data, "ctrl+c")) this.exit();
+				return { consume: true };
+			}
+			if (this.#panel.open) {
+				// Let focused-component dispatch filter key releases before handling panel input.
+				return undefined;
+			}
+			if (this.#sessionOperation) return { consume: true };
 			if (matchesKey(data, "ctrl+c")) {
 				if (this.#busyText !== undefined) this.abort();
 				else this.exit();
 				return { consume: true };
 			}
 			// 会话浮层打开时把 Escape 留给浮层（SelectList 取消）。
-			if (this.#overlayHandle === undefined && matchesKey(data, "escape") && this.#busyText !== undefined) {
+			if (matchesKey(data, "escape") && this.#busyText !== undefined) {
 				this.abort();
 				return { consume: true };
 			}
@@ -165,25 +162,19 @@ class NekoTuiApp {
 		const content = new Container();
 		content.addChild(this.#chat);
 		this.#transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });
-		const dock = new VStack([
-			{ component: this.#notices, shrink: 1, minSize: 0 },
-			{ component: this.#statusBox, shrink: 1, minSize: 0 },
-			{ component: this.#editor, shrink: 1, minSize: 3 },
-			{ component: this.#footer, shrink: 1, minSize: 0 },
-		]);
 		this.#ui.setLayoutRoot(
-			new VStack([
-				// 不设 basis：无高度约束的整文档渲染（退出时打印回主屏）取 intrinsic 全高，
-				// 有高度约束的布局帧再按 grow/shrink 分配。
-				{ component: this.#transcript, grow: 1, shrink: 1, minSize: 1 },
-				{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
-			]),
+			createAppLayout({
+				transcript: this.#transcript,
+				panel: this.#panel,
+				editor: this.#editor,
+				footer: this.#footer,
+				notices: this.#notices,
+				panelOpen: () => this.#panel.open,
+			}),
 		);
 		this.#ui.setFocus(this.#editor);
 
-		this.#directoryUnsubscribe = this.#gateway.client.directory.state.subscribe((value) => {
-			this.#directoryIds = value.sessions.map((session) => session.id);
-		});
+		this.#directoryUnsubscribe = this.#gateway.client.directory.state.subscribe(() => this.#ui.requestRender());
 		await this.switchSession(initialSessionId);
 		this.#ui.start();
 		this.#ui.requestRender(true);
@@ -193,7 +184,7 @@ class NekoTuiApp {
 		this.#directoryUnsubscribe?.();
 		this.#terminalSchemeUnsubscribe?.();
 		this.#closeOverlay();
-		this.#loader?.stop();
+		clearTimeout(this.#noticeTimer);
 		this.#ui.stop();
 	}
 
@@ -223,11 +214,11 @@ class NekoTuiApp {
 			return;
 		}
 		if (trimmed === "/fork") {
-			void this.forkSession().catch((error: unknown) => this.addNotice(messageOf(error), true));
+			void this.#manage(() => this.forkSession());
 			return;
 		}
 		if (trimmed === "/archive") {
-			void this.archiveSession().catch((error: unknown) => this.addNotice(messageOf(error), true));
+			void this.#manage(() => this.archiveSession());
 			return;
 		}
 		const chat = this.#chatFacade;
@@ -280,6 +271,17 @@ class NekoTuiApp {
 		this.#ui.requestRender(true);
 	}
 
+	async #manage(operation: () => Promise<void>): Promise<void> {
+		if (this.#sessionOperation) return;
+		this.#sessionOperation = true;
+		try {
+			await operation();
+		} catch (error) {
+			this.addNotice(`Session operation failed: ${messageOf(error)}`, true);
+		} finally {
+			this.#sessionOperation = false;
+		}
+	}
 	async createSession(): Promise<void> {
 		const created = await this.#gateway.client.management.create(
 			{ ...(this.#options.cwd !== undefined ? { cwd: this.#options.cwd } : {}) },
@@ -296,134 +298,97 @@ class NekoTuiApp {
 	async archiveSession(): Promise<void> {
 		const current = this.#sessionId;
 		await this.#gateway.client.management.archive(current, BACKGROUND_CONTEXT);
-		// 目录刷新经订阅异步到达：等它（或短暂超时）后挑下一个会话；没有了就新建。
-		const remaining = await this.#waitDirectory((ids) => (ids.length > 0 ? ids : undefined), 3_000);
-		const next = (remaining ?? this.#directoryIds).find((id) => id !== current);
-		if (next !== undefined) await this.switchSession(next);
+		const next = workspaceSessions(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).find(
+			(s) => s.id !== current,
+		);
+		if (next) await this.switchSession(next.id);
 		else await this.createSession();
-	}
-
-	async #waitDirectory(
-		pick: (ids: string[]) => string[] | undefined,
-		timeoutMs: number,
-	): Promise<string[] | undefined> {
-		const start = Date.now();
-		for (;;) {
-			const value = this.#directoryIds;
-			const picked = value.length > 0 ? pick(value) : undefined;
-			if (picked !== undefined) return picked;
-			if (Date.now() - start > timeoutMs) return undefined;
-			await new Promise((resolve) => setTimeout(resolve, 50));
-		}
 	}
 
 	// —— 会话浮层 ——
 
 	openSessionsOverlay(): void {
-		if (this.#overlayHandle !== undefined || this.#exitStarted) return;
-		const items: SelectItem[] = [
-			{ value: NEW_SESSION_VALUE, label: "＋ 新建会话" },
-			...[...this.#directoryIds]
-				.sort((left, right) => Number(right) - Number(left))
-				.map((id) => ({
-					value: id,
-					label: `会话 ${id}${id === this.#sessionId ? "（当前）" : ""}`,
-					description: id === this.#sessionId ? "当前 attach 的会话" : undefined,
-				})),
-		];
-		const pick = (value: string): void => {
-			this.#closeOverlay();
-			if (value === NEW_SESSION_VALUE) {
-				void this.createSession().catch((error: unknown) => this.addNotice(messageOf(error), true));
-			} else if (value !== this.#sessionId) {
-				void this.switchSession(value).catch((error: unknown) => this.addNotice(messageOf(error), true));
-			}
-		};
-		this.#overlayHandle = this.#ui.showOverlay(new PickerOverlay("会话", items, pick, () => this.#closeOverlay()), {
-			maxHeight: "60%",
-		});
-	}
-
-	/** /model：模型选择浮层（neko.models 列表 + neko.chat.configure，仅当前会话，下一次请求生效）。 */
-	async openModelOverlay(): Promise<void> {
-		if (this.#overlayHandle !== undefined || this.#exitStarted) return;
-		let models: readonly NekoModelInfo[];
-		try {
-			models = await this.#gateway.client.listModels();
-		} catch (error: unknown) {
-			this.addNotice(`读取模型列表失败：${messageOf(error)}`, true);
-			return;
-		}
-		if (models.length === 0) {
-			this.addNotice("模型目录为空", true);
-			return;
-		}
-		const current = this.#lastView?.agent.model;
-		const currentKey = current === null || current === undefined ? null : `${current.provider}/${current.modelId}`;
-		// 当前模型置顶（pi 惯例），其余保持注册表顺序。
-		const sorted = [...models].sort(
-			(left, right) => Number(keyOf(right) === currentKey) - Number(keyOf(left) === currentKey),
+		if (this.#exitStarted || this.#panel.open) return;
+		void this.#panel.show(
+			"Sessions",
+			async () => [
+				{ value: NEW_SESSION_VALUE, label: "+ New session", description: this.#options.cwd },
+				...workspaceSessions(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).map(
+					(session) => ({
+						value: session.id,
+						label: `Session ${session.id}${session.id === this.#sessionId ? " (Current)" : ""}`,
+						description: `${session.workspaceRoot}${session.id === this.#sessionId && this.#lastView ? ` | ${usageText(this.#lastView.usage.input, this.#lastView.usage.output, this.#lastView.usage.cacheRead, this.#lastView.usage.cost)}` : ""}`,
+					}),
+				),
+			],
+			async (value) => {
+				if (value === NEW_SESSION_VALUE) await this.createSession();
+				else if (value !== this.#sessionId) await this.switchSession(value);
+			},
 		);
-		const items: SelectItem[] = sorted.map((model) => {
-			const key = keyOf(model);
-			const parts = [`${model.provider}/${model.modelId}`, `${formatContextWindow(model.contextWindow)} 上下文`];
-			if (model.reasoning) parts.push("支持 thinking");
-			return {
-				value: key,
-				label: `${model.name}${key === currentKey ? "（当前）" : ""}`,
-				description: parts.join(" · "),
-			};
-		});
-		const pick = (value: string): void => {
-			this.#closeOverlay();
-			const selected = models.find((model) => keyOf(model) === value);
-			if (selected === undefined || value === currentKey) return;
-			this.configureModel({ provider: selected.provider, modelId: selected.modelId });
-		};
-		this.#overlayHandle = this.#ui.showOverlay(new PickerOverlay("模型", items, pick, () => this.#closeOverlay()), {
-			maxHeight: "60%",
-		});
-		this.#ui.requestRender();
+		this.#ui.setFocus(this.#panel);
 	}
 
-	configureModel(model: NekoModelRef): void {
+	async openModelOverlay(): Promise<void> {
+		if (this.#exitStarted || this.#panel.open) return;
 		const chat = this.#chatFacade;
-		if (chat === undefined) return;
-		chat.configure({ model }, BACKGROUND_CONTEXT).catch((error: unknown) => {
-			this.addNotice(`切换模型失败：${messageOf(error)}`, true);
-		});
+		const current = this.#lastView?.agent.model;
+		const currentKey = current ? `${current.provider}/${current.modelId}` : null;
+		let models: readonly NekoModelInfo[] = [];
+		const ready = this.#panel.show(
+			"Models",
+			async () => {
+				models = await this.#gateway.client.listModels();
+				return [...models]
+					.sort((a, b) => Number(keyOf(b) === currentKey) - Number(keyOf(a) === currentKey))
+					.map((model) => ({
+						value: keyOf(model),
+						label: `${model.name}${keyOf(model) === currentKey ? " (Current)" : ""}`,
+						description: `${keyOf(model)} | ${formatContextWindow(model.contextWindow)} context${model.reasoning ? " | Thinking" : ""}`,
+					}));
+			},
+			async (value) => {
+				const selected = models.find((m) => keyOf(m) === value);
+				if (selected && value !== currentKey)
+					await chat?.configure(
+						{ model: { provider: selected.provider, modelId: selected.modelId } },
+						BACKGROUND_CONTEXT,
+					);
+			},
+		);
+		this.#ui.setFocus(this.#panel);
+		await ready;
 	}
 
 	configureThinking(raw: string): void {
 		const level = THINKING_LEVELS.find((candidate) => candidate === raw);
 		if (level === undefined) {
-			this.addNotice(`/think 需要 level：${THINKING_LEVELS.join(" / ")}`, true);
+			this.addNotice(`/think requires a level: ${THINKING_LEVELS.join(" / ")}`, true);
 			return;
 		}
 		const chat = this.#chatFacade;
 		if (chat === undefined) return;
 		chat.configure({ thinkingLevel: level }, BACKGROUND_CONTEXT).catch((error: unknown) => {
-			this.addNotice(`设置 thinking level 失败：${messageOf(error)}`, true);
+			this.addNotice(`Failed to set thinking level: ${messageOf(error)}`, true);
 		});
 	}
 
 	#closeOverlay(): void {
-		this.#overlayHandle?.hide();
-		this.#overlayHandle = undefined;
+		if (this.#panel.open) this.#panel.close();
 		this.#ui.setFocus(this.#editor);
 	}
 
 	// —— 视图渲染 ——
 
 	addNotice(text: string, isError = false): void {
-		this.#noticeCount++;
+		clearTimeout(this.#noticeTimer);
+		this.#noticeTimer = setTimeout(() => {
+			this.#notices.clear();
+			this.#ui.requestRender();
+		}, 5000);
+		this.#notices.clear();
 		this.#notices.addChild(new TruncatedText(isError ? theme.error(text) : theme.dim(text), 1, 0));
-		while (this.#noticeCount > MAX_NOTICES) {
-			const first = this.#notices.children[0];
-			if (first === undefined) break;
-			this.#notices.removeChild(first);
-			this.#noticeCount--;
-		}
+
 		this.#ui.requestRender();
 	}
 
@@ -564,22 +529,8 @@ class NekoTuiApp {
 		this.#streamingComp.updateContent({ thinking: streaming.thinking, text: streaming.text, note: null }, true);
 	}
 
-	#syncBusy(view: ChatView, force = false): void {
-		const busy = view.busy ? (view.status ?? "思考中…") : undefined;
-		if (!force && busy === this.#busyText) {
-			if (this.#loader !== undefined && busy !== undefined) this.#loader.setMessage(busy);
-			this.#syncEditorBorder();
-			return;
-		}
-		this.#busyText = busy;
-		this.#loader?.stop();
-		this.#loader = undefined;
-		this.#statusBox.clear();
-		if (busy !== undefined) {
-			this.#loader = new Loader(this.#ui, theme.accent, theme.dim, busy);
-			this.#statusBox.addChild(this.#loader);
-			this.#loader.start();
-		}
+	#syncBusy(view: ChatView): void {
+		this.#busyText = view.busy ? (view.status ?? "Thinking...") : undefined;
 		this.#syncEditorBorder();
 	}
 
@@ -605,9 +556,6 @@ class NekoTuiApp {
 		this.#streamingComp = undefined;
 		this.#renderedKeys = [];
 		this.#busyText = undefined;
-		this.#loader?.stop();
-		this.#loader = undefined;
-		this.#statusBox.clear();
 	}
 
 	// —— 主题 ——
@@ -632,7 +580,7 @@ class NekoTuiApp {
 		setActiveTheme(mode);
 		this.#ui.invalidate();
 		if (this.#lastView !== undefined) {
-			this.#syncBusy(this.#lastView, true);
+			this.#syncBusy(this.#lastView);
 			this.#syncFooter(this.#lastView);
 		}
 		this.#ui.requestRender(true);
@@ -682,32 +630,6 @@ function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * 选择浮层（会话/模型共用）：标题 + SelectList + 提示。浮层获得焦点后输入路由到浮层组件本身，
- * 必须由这里把按键转发给 SelectList（Container 默认不向子组件分发输入）。
- */
-class PickerOverlay extends Container {
-	readonly #list: SelectList;
-
-	constructor(title: string, items: readonly SelectItem[], onPick: (value: string) => void, onClose: () => void) {
-		super();
-		const box = new Box(2, 1);
-		box.addChild(new Text(style.bold(title), 0, 0));
-		box.addChild(new Spacer(1));
-		this.#list = new SelectList([...items], Math.min(items.length, 10), getSelectListTheme());
-		this.#list.onSelect = (item) => onPick(item.value);
-		this.#list.onCancel = onClose;
-		box.addChild(this.#list);
-		box.addChild(new Spacer(1));
-		box.addChild(new Text(theme.dim("↑↓ 选择 · Enter 确认 · Esc 关闭"), 0, 0));
-		this.addChild(box);
-	}
-
-	handleInput(data: string): void {
-		this.#list.handleInput(data);
-	}
-}
-
 function keyOf(model: NekoModelInfo): string {
 	return `${model.provider}/${model.modelId}`;
 }
@@ -718,6 +640,7 @@ function formatContextWindow(tokens: number): string {
 
 /** 打开 neko 终端界面；用户退出（/exit 或 Ctrl+C）后 resolve。 */
 export async function runTui(options: NekoTuiOptions = {}): Promise<void> {
+	options = { ...options, cwd: normalizeWorkspace(options.cwd) };
 	const gateway = await connectToGateway({
 		...(options.socketPath !== undefined ? { socketPath: options.socketPath } : {}),
 		...(options.storagePath !== undefined ? { storagePath: options.storagePath } : {}),
@@ -725,7 +648,7 @@ export async function runTui(options: NekoTuiOptions = {}): Promise<void> {
 		configDir: options.cwd,
 	});
 	try {
-		const initial = await initialSessionId(gateway, options.cwd);
+		const initial = await initialSessionId(gateway, options.cwd!);
 		const app = new NekoTuiApp(gateway, options, options.theme ?? "auto");
 		await app.run(initial);
 	} finally {
@@ -734,15 +657,15 @@ export async function runTui(options: NekoTuiOptions = {}): Promise<void> {
 }
 
 /** 初始会话：目录里最早创建的（root 最小 id）；目录为空则新建。 */
-async function initialSessionId(gateway: NekoTuiGateway, cwd: string | undefined): Promise<string> {
+export async function initialSessionId(gateway: NekoTuiGateway, cwd: string): Promise<string> {
 	const state = gateway.client.directory.state;
 	const start = Date.now();
 	while (state.value === undefined) {
-		if (Date.now() - start > 5_000) throw new Error("会话目录水合超时");
+		if (Date.now() - start > 5_000) throw new Error("Timed out loading sessions");
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	const sessions = state.value?.sessions ?? [];
-	const first = [...sessions].sort((left, right) => Number(left.id) - Number(right.id))[0];
+	const first = workspaceSessions(sessions, cwd)[0];
 	if (first !== undefined) return first.id;
 	return (await gateway.client.management.create({ ...(cwd !== undefined ? { cwd } : {}) }, BACKGROUND_CONTEXT)).id;
 }

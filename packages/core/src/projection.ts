@@ -1,6 +1,7 @@
 import type { AssistantMessage, ModelThinkingLevel, Usage, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, LiveState, ToolSlot, UsageState } from "@earendil-works/pi-durable";
 import type { NekoModelRef } from "./runtime.ts";
+import { savedWorkspace } from "./workspace.ts";
 
 /**
  * ConversationView → 前端投影 ChatView（每次 commit 后重算，v1 全量快照）。
@@ -74,7 +75,7 @@ export type ChatItem =
 			/** 最终结果文本（pi.tool-result entry）。 */
 			result: string | null;
 			durationMs: number | null;
-			/** 补充说明（如"未运行：回答被中断。"）；无则为 null。 */
+			/** 补充说明（如"Not run: response interrupted."）；无则为 null。 */
 			note: string | null;
 	  }
 	| { type: "system"; key: string; id: number; text: string };
@@ -183,12 +184,13 @@ export function totalUsage(state: UsageState): Usage {
 
 /** pi.agent doc 在 ConversationView.docs 里的 JSON 形状（AgentState 的视图表示）。 */
 type AgentDocView = {
+	readonly cwd?: string;
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
 };
 
 /** ConversationView → 前端投影 ChatView（服务器每次 commit 后调用）。 */
-export function projectChatView(view: ConversationView, modelLabel: string, cwd: string): ChatView {
+export function projectChatView(view: ConversationView, modelLabel: string): ChatView {
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	const usage = totalUsage((view.docs["pi.usage"] ?? { models: {}, tools: {} }) as UsageState);
 	// pi.agent 随每次 configure 提交进视图：投影同步读出生效模型/thinkingLevel，无竞态。
@@ -248,7 +250,7 @@ export function projectChatView(view: ConversationView, modelLabel: string, cwd:
 						output: null,
 						result: null,
 						durationMs: null,
-						note: ran ? null : "未运行：回答被中断。",
+						note: ran ? null : "Not run: response interrupted.",
 					});
 				}
 			}
@@ -256,7 +258,7 @@ export function projectChatView(view: ConversationView, modelLabel: string, cwd:
 		}
 		if (entry.kind === "pi.tool-result") continue; // 已合入对应工具卡片
 		if (entry.kind === "pi.compaction") {
-			items.push({ type: "system", key: `e${entry.id}`, id: entry.id, text: "[context 已压缩]" });
+			items.push({ type: "system", key: `e${entry.id}`, id: entry.id, text: "[context compacted]" });
 		} else if (entry.kind === "pi.reset") {
 			items.push({ type: "system", key: `e${entry.id}`, id: entry.id, text: "[new context]" });
 		}
@@ -267,18 +269,18 @@ export function projectChatView(view: ConversationView, modelLabel: string, cwd:
 		live.run === undefined
 			? null
 			: live.generation?.retry !== undefined
-				? `重试中（第 ${live.generation.attempt + 1} 次）…`
+				? `Retrying (attempt ${live.generation.attempt + 1})...`
 				: runningTool !== undefined
-					? `运行 ${runningTool.name}…`
-					: "思考中…";
+					? `Running ${runningTool.name}...`
+					: "Thinking...";
 
 	return {
 		model: agentModel !== null ? `${agentModel.provider}/${agentModel.modelId}` : modelLabel,
 		agent: {
 			model: agentModel,
-			thinkingLevel: agent?.thinkingLevel ?? null,
+			thinkingLevel: agent?.thinkingLevel ?? "off",
 		},
-		cwd,
+		cwd: savedWorkspace(agent?.cwd),
 		busy: live.run !== undefined,
 		status,
 		usage: {
@@ -312,11 +314,11 @@ function assistantItem(message: AssistantMessage, id: number): Extract<ChatItem,
 	const hasToolCalls = message.content.some((block) => block.type === "toolCall");
 	const note =
 		message.stopReason === "length"
-			? "回答在完成前被截断。"
+			? "Response truncated before completion."
 			: !hasToolCalls && message.stopReason === "aborted"
-				? "已中止。"
+				? "Stopped."
 				: !hasToolCalls && message.stopReason === "error"
-					? `出错：${message.errorMessage ?? "未知错误"}`
+					? `Error: ${message.errorMessage ?? "Unknown error"}`
 					: null;
 	return {
 		type: "assistant",

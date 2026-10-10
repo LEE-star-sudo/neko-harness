@@ -110,7 +110,7 @@ describe("Bun gateway startup", () => {
 				configDir: dir,
 				spawnTimeoutMs: 3_000,
 			}),
-		).rejects.toThrow(/提前退出/);
+		).rejects.toThrow(/exited early/);
 		expect(existsSync(socketPath)).toBe(false);
 	});
 });

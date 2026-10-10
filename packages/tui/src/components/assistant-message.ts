@@ -1,7 +1,7 @@
 import { Container, Markdown, MouseRegion, Spacer, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, theme } from "../theme.ts";
 
-const THINKING_COLLAPSED_LABEL = "Thinking…（点击展开）";
+const THINKING_COLLAPSED_LABEL = "Thinking... (click to expand)";
 
 export type AssistantContent = {
 	readonly thinking: string;

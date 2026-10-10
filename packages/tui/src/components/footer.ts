@@ -1,41 +1,48 @@
-import { Container, TruncatedText } from "@earendil-works/pi-tui";
+import { basename } from "node:path";
+import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { formatTokens } from "../format.ts";
+import { labels } from "../labels.ts";
 import { theme } from "../theme.ts";
 
 export type FooterStats = {
 	readonly sessionId: string;
 	readonly model: string;
-	/** 生效的 thinking level；null/未设置不显示。 */
 	readonly thinkingLevel: string | null;
-	/** 忙碌描述；undefined 表示空闲。 */
 	readonly busy: string | undefined;
 	readonly usageText: string;
 	readonly cwd: string;
 };
 
-/** 底部状态栏：会话 · 模型 · 状态 · 用量 · 工作目录 + 按键提示。（TruncatedText 无 setText，更新即重建。） */
-export class StatusFooter extends Container {
+export class StatusFooter implements Component {
+	panelOpen = false;
+	#stats: FooterStats | undefined;
 	setStats(stats: FooterStats): void {
-		const busy = stats.busy === undefined ? theme.ok("就绪") : theme.accent(stats.busy);
-		const thinking = stats.thinkingLevel === null ? "" : theme.dim(` · think ${stats.thinkingLevel}`);
-		this.clear();
-		this.addChild(
-			new TruncatedText(
-				`${theme.dim(`会话 ${stats.sessionId}`)}  ·  ${theme.model(stats.model)}${thinking}  ·  ${busy}  ·  ${stats.usageText}  ·  ${theme.dim(stats.cwd)}`,
-				1,
-				0,
-			),
-		);
-		this.addChild(new TruncatedText(theme.dim(this.#hints(stats.busy !== undefined)), 1, 0));
+		this.#stats = stats;
 	}
-
-	#hints(busy: boolean): string {
-		return busy
-			? "Enter 插入（steer） · Alt+Enter 排队（follow-up） · Esc 中止 · Ctrl+S 会话 · /model 模型 · Ctrl+C 退出"
-			: "Enter 发送 · /model 模型 · /think <level> · Ctrl+S 会话 · /fork 分叉 · /archive 归档 · Ctrl+C 退出";
+	invalidate(): void {}
+	render(width: number): string[] {
+		const s = this.#stats;
+		if (!s) return [labels.connecting, ""].map((x) => truncateToWidth(x, width));
+		const space = Math.max(1, width - 2);
+		const status = truncateToWidth(s.busy ?? labels.ready, Math.min(28, Math.floor(space / 2)));
+		const workspace = truncateToWidth(basename(s.cwd) || s.cwd, Math.max(1, space - visibleWidth(status) - 3));
+		let first = `${workspace} | ${s.busy ? theme.accent(status) : theme.ok(status)}`;
+		for (const field of [s.model.split("/").at(-1) ?? s.model, s.thinkingLevel ? `Think: ${s.thinkingLevel}` : ""]) {
+			if (field && visibleWidth(first) + visibleWidth(field) + 3 <= space) first += ` | ${theme.model(field)}`;
+		}
+		const hints = this.panelOpen ? labels.close : s.busy ? labels.busyHints : labels.idleHints;
+		const compactHints = s.busy ? labels.busyCompact : labels.idleCompact;
+		const compactUsage = s.usageText.replace(/ Cache: \S+/, "");
+		const second = this.panelOpen
+			? hints
+			: visibleWidth(s.usageText) + hints.length + 3 <= space
+				? `${s.usageText} | ${hints}`
+				: visibleWidth(compactUsage) + compactHints.length + 3 <= space
+					? `${compactUsage} | ${compactHints}`
+					: compactHints;
+		return [` ${first}`, ` ${theme.dim(second)}`].map((line) => truncateToWidth(line, width));
 	}
 }
-
 export function usageText(input: number, output: number, cacheRead: number, costTotal: number): string {
-	return `↑${formatTokens(input)} ↓${formatTokens(output)} 缓存${formatTokens(cacheRead)} $${costTotal.toFixed(4)}`;
+	return `In: ${formatTokens(input)} Out: ${formatTokens(output)} Cache: ${formatTokens(cacheRead)} $${costTotal.toFixed(4)}`;
 }

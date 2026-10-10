@@ -39,3 +39,5 @@ export {
 	type NekoSession,
 	type NekoSubmitOptions,
 } from "./runtime.ts";
+
+export { normalizeWorkspace } from "./workspace.ts";

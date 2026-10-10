@@ -52,3 +52,9 @@ const config = mergeNekoConfig(mergeNekoConfig(DEFAULT_NEKO_CONFIG, file), cliOv
 bun --conditions=neko-source packages/core/examples/chat.ts
 bun --conditions=neko-source packages/core/examples/coding-tools.ts
 ```
+
+## 工作区语义
+
+`neko tui --cwd <directory>` 使用指定目录作为工作区；省略该参数时使用启动目录。路径会解析为实际目录的绝对路径，不会将子目录提升到 Git 根目录。会话持久化保存工作区，分叉会话继承该工作区；从其他目录重启网关不会改变已有会话的工作区。read、write、edit 和 bash 默认使用保存的工作区。工作区不是沙箱：在宿主权限允许的范围内，仍可通过显式路径访问其他目录。
+
+TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入的会话。共享网关和 Web 保留全局会话目录。工作区目录不存在时会明确报错，不会回退到网关目录。不支持未保存绝对工作区路径的旧会话存储，需要使用新的存储路径；应用不会自动删除或迁移旧数据。

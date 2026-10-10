@@ -99,7 +99,6 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			socketPath,
 			serverId,
 			model,
-			cwd: options.cwd,
 			onError: options.onError,
 		});
 	} catch (error) {
@@ -115,14 +114,12 @@ type BindOptions = {
 	readonly socketPath: string | null;
 	readonly serverId: string;
 	readonly model: NekoModelRef;
-	readonly cwd: string | undefined;
 	readonly onError: ((error: Error) => void) | undefined;
 };
 
 async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<NekoGateway> {
-	const { context, host, port, socketPath, serverId, model, cwd } = options;
+	const { context, host, port, socketPath, serverId, model } = options;
 	const modelLabel = `${model.provider}/${model.modelId}`;
-	const sessionCwd = cwd ?? process.cwd();
 
 	const serverServices = await createNekoServerServices({ runtime, context });
 	let wsListener: WsListener | undefined;
@@ -146,7 +143,7 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 			async openSession(metadata) {
 				const session = await runtime.getConversation(toConversationId(metadata.id));
 				if (session === undefined) throw new SessionNotFoundError(`Unknown session: ${metadata.id}`);
-				return openNekoSessionHandle({ runtime, session, modelLabel, cwd: sessionCwd, context });
+				return openNekoSessionHandle({ runtime, session, modelLabel, onActivity: serverServices.refresh, context });
 			},
 		},
 		{ listeners, serverId, onError: options.onError },

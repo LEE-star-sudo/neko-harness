@@ -1,0 +1,146 @@
+import { expect, it } from "bun:test";
+import { Container, ScrollView, stripTerminalSequences, Text, VStack, visibleWidth } from "@earendil-works/pi-tui";
+import { renderLayoutFrame } from "@earendil-works/pi-tui/dist/layout.js";
+import { StatusFooter } from "../src/components/footer.ts";
+import { PickerPanel } from "../src/components/picker.ts";
+import { createAppLayout } from "../src/layout.ts";
+
+const footer = () => {
+	const f = new StatusFooter();
+	f.setStats({
+		sessionId: "1",
+		cwd: "/projects/项目/neko-harness",
+		model: "deepseek/deepseek-flash",
+		thinkingLevel: "high",
+		busy: undefined,
+		usageText: "In: 12k Out: 2k $0.012",
+	});
+	return f;
+};
+it("reproduces legacy footer collapse when transcript grows", () => {
+	const f = footer();
+	const transcript = new ScrollView(new Text("history\n".repeat(1000), 0, 0), { primary: true });
+	const dock = new VStack([
+		{ component: new Text("input\ninput\ninput", 0, 0), shrink: 1, minSize: 3 },
+		{ component: f, shrink: 1, minSize: 0 },
+	]);
+	const root = new VStack([
+		{ component: transcript, grow: 1, shrink: 1, minSize: 1 },
+		{ component: dock, basis: "auto", grow: 0, shrink: 1, minSize: 1 },
+	]);
+	const frame = renderLayoutFrame(root, 80, 24, () => {});
+	const dockBox = frame.root.children[1]!;
+	expect(dockBox.rect.height).toBeLessThan(5);
+	expect(frame.lines.map(stripTerminalSequences).join("\n")).not.toContain("Ready");
+});
+it("keeps bottom rows, selection and help visible at supported sizes", async () => {
+	for (const [width, height] of [
+		[120, 40],
+		[80, 24],
+		[60, 16],
+		[40, 10],
+	] as const) {
+		const panel = new PickerPanel(
+			() => {},
+			() => {},
+		);
+		const editor = new Text("input\ninput\ninput", 0, 0);
+		const root = createAppLayout({
+			transcript: new ScrollView(new Text("中文输出\n".repeat(500), 0, 0), { primary: true }),
+			panel,
+			editor,
+			footer: footer(),
+			notices: new Container(),
+			panelOpen: () => panel.open,
+		});
+		let frame = renderLayoutFrame(root, width, height, () => {});
+		expect(frame.lines.map(stripTerminalSequences).join("\n")).toContain("Ready");
+		await panel.show(
+			"Models",
+			async () =>
+				Array.from({ length: 30 }, (_, i) => ({
+					value: String(i),
+					label: `Model ${i}`,
+					description: "/very/long/path/".repeat(10),
+				})),
+			async () => {},
+		);
+		for (let i = 0; i < 29; i++) panel.handleInput("\x1b[B");
+		frame = renderLayoutFrame(root, width, height, () => {});
+		const plain = frame.lines.map(stripTerminalSequences).join("\n");
+		expect(plain).toContain("> Model 29");
+		expect(plain).toContain("Esc Close");
+		expect(plain).toContain("Ready");
+		expect(frame.lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+	}
+});
+it("small window fallback preserves the editor draft", () => {
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	const editor = new Text("draft", 0, 0);
+	const root = createAppLayout({
+		transcript: new Text("history"),
+		panel,
+		editor,
+		footer: footer(),
+		notices: new Container(),
+		panelOpen: () => false,
+	});
+	expect(renderLayoutFrame(root, 30, 8, () => {}).lines.join("\n")).toContain("Terminal too small");
+	expect(renderLayoutFrame(root, 80, 24, () => {}).lines.join("\n")).toContain("draft");
+});
+
+it("bounds real multiline editing and slash completion without losing cursor or footer", async () => {
+	const { TuiAltScreen, CombinedAutocompleteProvider, CURSOR_MARKER } = await import("@earendil-works/pi-tui");
+	const { BoundedEditor } = await import("../src/components/editor.ts");
+	const { getEditorTheme } = await import("../src/theme.ts");
+	const terminal = { columns: 80, rows: 24 } as import("@earendil-works/pi-tui").Terminal;
+	const ui = new TuiAltScreen(terminal);
+	const editor = new BoundedEditor(ui, getEditorTheme(), { autocompleteMaxVisible: 2 });
+	editor.focused = true;
+	editor.setText(`${"中文 draft\n".repeat(30)}last line`);
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	const root = createAppLayout({
+		transcript: new ScrollView(new Text("history\n".repeat(500)), { primary: true }),
+		panel,
+		editor,
+		footer: footer(),
+		notices: new Container(),
+		panelOpen: () => panel.open,
+	});
+	let frame = renderLayoutFrame(root, 80, 24, () => {});
+	expect(frame.lines.join("\n")).toContain("last line");
+	expect(frame.lines.join("\n")).toContain(CURSOR_MARKER);
+	expect(frame.lines.join("\n")).toContain("Ready");
+	const draft = editor.getText(),
+		cursor = editor.getCursor();
+	await panel.show(
+		"Models",
+		async () => [{ value: "a", label: "A" }],
+		async () => {},
+	);
+	renderLayoutFrame(root, 40, 10, () => {});
+	panel.close();
+	expect(editor.getText()).toBe(draft);
+	expect(editor.getCursor()).toEqual(cursor);
+	editor.setText("");
+	editor.setAutocompleteProvider(
+		new CombinedAutocompleteProvider(
+			[
+				{ name: "model", description: "Choose a model" },
+				{ name: "sessions", description: "Switch sessions" },
+			],
+			process.cwd(),
+		),
+	);
+	editor.handleInput("/");
+	await new Promise((r) => setTimeout(r, 50));
+	frame = renderLayoutFrame(root, 80, 24, () => {});
+	expect(frame.lines.join("\n")).toContain("Ready");
+	expect(frame.lines.join("\n")).toContain("Choose a model");
+});

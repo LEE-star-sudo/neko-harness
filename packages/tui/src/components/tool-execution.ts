@@ -17,7 +17,7 @@ export type ToolCardState = {
 	/** 最终结果文本。 */
 	readonly result: string | null;
 	readonly durationMs: number | null;
-	/** 补充说明（如"未运行：回答被中断。"）。 */
+	/** 补充说明（如"Not run: response interrupted."）。 */
 	readonly note: string | null;
 };
 
@@ -62,9 +62,9 @@ export class ToolExecutionComponent extends Container {
 
 	#statusLine(phase: Phase): string {
 		if (phase === "pending") return theme.dim("…");
-		if (phase === "running") return theme.accent("运行中…");
+		if (phase === "running") return theme.accent("Running...");
 		return this.#state.isError
-			? theme.error("✗ 失败")
+			? theme.error("x Failed")
 			: theme.ok(`✓${this.#state.durationMs !== null ? ` ${(this.#state.durationMs / 1000).toFixed(1)}s` : ""}`);
 	}
 
@@ -75,15 +75,15 @@ export class ToolExecutionComponent extends Container {
 
 		if (this.#expanded && state.detail !== null) {
 			const detail = clipLines(state.detail, 20);
-			text += `\n${theme.dim("──── 参数 ────")}\n${detail.visible}`;
-			if (detail.rest > 0) text += `\n${theme.dim(`… 还有 ${detail.rest} 行`)}`;
+			text += `\n${theme.dim("---- Arguments ----")}\n${detail.visible}`;
+			if (detail.rest > 0) text += `\n${theme.dim(`... ${detail.rest} more lines`)}`;
 		}
 
 		const body = state.phase === "running" ? state.output : state.result;
 		if (body !== null && body !== "") {
 			const clipped = clipLines(body, this.#expanded ? Number.MAX_SAFE_INTEGER : PREVIEW_LINES);
 			text += `\n${clipped.visible}`;
-			if (clipped.rest > 0) text += `\n${theme.dim(`… 还有 ${clipped.rest} 行，点击展开`)}`;
+			if (clipped.rest > 0) text += `\n${theme.dim(`... ${clipped.rest} more lines (click to expand)`)}`;
 		}
 		if (state.note !== null) {
 			text += `\n${theme.error(state.note)}`;

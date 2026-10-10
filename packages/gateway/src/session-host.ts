@@ -20,14 +20,14 @@ export async function openNekoSessionHandle(options: {
 	readonly runtime: NekoRuntime;
 	readonly session: NekoSession;
 	readonly modelLabel: string;
-	readonly cwd: string;
+	readonly onActivity: () => Promise<void>;
 	readonly context: Context;
 }): Promise<RoutedSessionHandle> {
-	const { runtime, session, modelLabel, cwd, context } = options;
+	const { runtime, session, modelLabel, onActivity, context } = options;
 	const view = await session.viewState();
-	const chatState = replicatedState<ChatView>(projectChatView(view.value, modelLabel, cwd));
+	const chatState = replicatedState<ChatView>(projectChatView(view.value, modelLabel));
 	const unsubscribe = view.subscribe((value) => {
-		chatState.replace(context, projectChatView(value, modelLabel, cwd));
+		chatState.replace(context, projectChatView(value, modelLabel));
 	});
 
 	// 会话级 provider 由本句柄的所有 attachment 共享（等价 coding-agent worker 的 per-scope endpoint 模式）。
@@ -39,6 +39,7 @@ export async function openNekoSessionHandle(options: {
 				...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
 				...(input.whenBusy !== undefined ? { whenBusy: input.whenBusy } : {}),
 			});
+			await onActivity();
 		},
 		abort: () => session.abort(),
 		usage: async () => {
@@ -57,7 +58,7 @@ export async function openNekoSessionHandle(options: {
 				// 句柄仍在路由中但会话已被归档/删除（竞态窗口）：给前端一个可判读的远程错误。
 				throw new RemoteServiceError(
 					"service_invalid_value",
-					`会话 ${String(session.id)} 不存在或已归档，无法应用配置变更`,
+					`Session ${String(session.id)} is unavailable or archived`,
 				);
 			}
 		},

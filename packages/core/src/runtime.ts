@@ -10,8 +10,10 @@ import {
 	AssistantEntry,
 	type Conversation,
 	type ConversationId,
+	type ConversationRecord,
 	type ConversationView,
 	type ConversationWatch,
+	type Cursor,
 	createRegistry,
 	defineDoc,
 	type Extension,
@@ -25,6 +27,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { executionWorkspace, normalizeWorkspace, savedWorkspace } from "./workspace.ts";
 
 /** The built-in DeepSeek chat model used when the caller does not choose one. */
 export const DEFAULT_MODEL = { provider: "deepseek", modelId: "deepseek-flash" } as const;
@@ -94,6 +97,8 @@ export type NekoConversationInfo = {
 	readonly id: ConversationId;
 	/** Archived conversations are hidden from listings and lookups (soft delete). */
 	readonly archived: boolean;
+	readonly workspaceRoot: string;
+	readonly lastUsedAt: number;
 };
 
 /** A chat model offered by the runtime's Models registry, for frontend selectors. */
@@ -108,6 +113,7 @@ export type NekoModelInfo = {
 
 /** What one conversation currently runs with (resolved agent). */
 export type NekoAgentInfo = {
+	readonly cwd: string;
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel: ModelThinkingLevel;
 	/** Names of the selected extensions, in effect order. */
@@ -139,6 +145,15 @@ const ArchivedDoc = defineDoc<{ archived: boolean }>({
 	initial: () => ({ archived: false }),
 });
 
+const ActivityDoc = defineDoc<{ lastUsedAt: number }>({
+	kind: "app.neko.activity",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ lastUsedAt: 0 }),
+});
+
 /** A running neko-harness runtime: one open storage and its conversations, root plus created ones. */
 export type NekoRuntime = {
 	/** Chord context bound to every runtime call. */
@@ -167,6 +182,8 @@ export type NekoRuntime = {
 
 	/** Every conversation of this storage, root included, with its soft-delete state. */
 	listConversations(): Promise<NekoConversationInfo[]>;
+	touchConversation(id: ConversationId): Promise<void>;
+	forkConversation(id: ConversationId): Promise<NekoSession>;
 	/** Create a new ownerless conversation; starts as a copy of the runtime's model/thinking/cwd choices. */
 	createConversation(options?: NekoCreateConversationOptions): Promise<NekoSession>;
 	/** Acquire a session by id; `undefined` for unknown or archived conversations. */
@@ -195,6 +212,7 @@ export type NekoRuntime = {
  */
 export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promise<NekoRuntime> {
 	const context = options.context ?? BACKGROUND_CONTEXT;
+	const defaultCwd = normalizeWorkspace(options.cwd);
 	const model: NekoModelRef = options.model ?? DEFAULT_MODEL;
 	const providers = options.providers ?? [];
 
@@ -231,21 +249,54 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		{
 			models,
 			registry,
-			env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? process.cwd() }),
+			env: ({ cwd }) => new NodeExecutionEnv({ cwd: executionWorkspace(cwd) }),
 		},
 		context,
 	);
+	const scanConversations = () =>
+		harness.commit(async (tx) => {
+			const records: ConversationRecord[] = [];
+			let cursor: Cursor | undefined;
+			do {
+				const page = await tx.scanConversations({}, 1000, cursor);
+				records.push(...page.items);
+				cursor = page.next;
+			} while (cursor);
+			return records;
+		}, context);
+	const existing = await scanConversations();
+	try {
+		for (const record of existing) {
+			const target = await harness.conversation(record.id, context);
+			if (target) savedWorkspace((await target.agent(context)).cwd);
+		}
+	} catch (error) {
+		await harness.close(context);
+		throw error;
+	}
 	const conversation = await harness.root(context, {
 		agent: {
 			model,
 			...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
-			...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+			cwd: defaultCwd,
 		},
 	});
+	const touchConversation = async (id: ConversationId): Promise<void> => {
+		await harness.commit(async (tx) => {
+			const doc = await tx.doc(ActivityDoc, id);
+			doc.lastUsedAt = Math.max(Date.now(), doc.lastUsedAt + 1);
+		}, context);
+	};
+	if (existing.length === 0) await touchConversation(conversation.id);
 	harness.resume();
 
-	const submitTo = (target: Conversation, content: string, submitOptions?: NekoSubmitOptions): Promise<Submission> =>
-		target.submit(
+	const submitTo = async (
+		target: Conversation,
+		content: string,
+		submitOptions?: NekoSubmitOptions,
+	): Promise<Submission> => {
+		executionWorkspace((await target.agent(context)).cwd);
+		const result = await target.submit(
 			{
 				type: "input",
 				content,
@@ -254,6 +305,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			},
 			context,
 		);
+
+		await touchConversation(target.id);
+		return result;
+	};
 
 	const waitAnswerOf = async (target: Conversation, submission: Submission): Promise<NekoAnswer> => {
 		const settled = await submission.wait(context);
@@ -320,6 +375,29 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 
 	return {
 		context,
+		touchConversation,
+		async forkConversation(id) {
+			const source = await sessionFor(id);
+			const agent = await source.conversation.agent(context);
+			const newest = await source.conversation.entries({}, 1, undefined, context);
+			const at = newest.items[0]?.id;
+			const child =
+				at === undefined
+					? await harness.createConversation(
+							{
+								ownership: { kind: "ownerless" },
+								agent: { model: agent.model, thinkingLevel: agent.thinkingLevel, cwd: savedWorkspace(agent.cwd) },
+							},
+							context,
+						)
+					: await source.conversation.fork(at, { ownership: { kind: "ownerless" } }, context);
+			await child.configure(
+				{ model: agent.model, thinkingLevel: agent.thinkingLevel, cwd: savedWorkspace(agent.cwd) },
+				context,
+			);
+			await touchConversation(child.id);
+			return makeSession(child);
+		},
 		harness,
 		conversation,
 		root: rootSession,
@@ -342,11 +420,20 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		async listConversations() {
 			// The directory hides archived conversations (soft-deleted).
-			const page = await harness.commit((tx) => tx.scanConversations({}, 1000, undefined), context);
+			const records = await scanConversations();
 			const infos: NekoConversationInfo[] = [];
-			for (const record of page.items) {
+			for (const record of records) {
 				const archived = (await harness.snapshot(ArchivedDoc, record.id, context))?.archived ?? false;
-				if (!archived) infos.push({ id: record.id, archived: false });
+				if (!archived) {
+					const target = await harness.conversation(record.id, context);
+					if (!target) continue;
+					infos.push({
+						id: record.id,
+						archived: false,
+						workspaceRoot: savedWorkspace((await target.agent(context)).cwd),
+						lastUsedAt: (await harness.snapshot(ActivityDoc, record.id, context))?.lastUsedAt ?? 0,
+					});
+				}
 			}
 			return infos;
 		},
@@ -357,11 +444,12 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 					agent: {
 						model: createOptions?.model ?? model,
 						...(createOptions?.thinkingLevel !== undefined ? { thinkingLevel: createOptions.thinkingLevel } : {}),
-						...(createOptions?.cwd !== undefined ? { cwd: createOptions.cwd } : {}),
+						cwd: normalizeWorkspace(createOptions?.cwd ?? defaultCwd),
 					},
 				},
 				context,
 			);
+			await touchConversation(created.id);
 			return makeSession(created);
 		},
 		getConversation,
@@ -397,6 +485,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return {
 				...(agent.model !== undefined ? { model: agent.model } : {}),
 				thinkingLevel: agent.thinkingLevel,
+				cwd: savedWorkspace(agent.cwd),
 				extensions: agent.extensions.map((extension) => extension.name),
 			};
 		},

@@ -14,6 +14,8 @@ import type { ChatView, NekoConversationChange, NekoModelInfo, NekoModelRef, Usa
 
 /** 目录条目：非归档会话（含 root），id 为十进制字符串形式的 ConversationId。 */
 export type NekoSessionSummary = {
+	readonly workspaceRoot: string;
+	readonly lastUsedAt: number;
 	readonly id: string;
 };
 

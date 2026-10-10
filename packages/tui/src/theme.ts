@@ -17,6 +17,8 @@ export type ThemePreference = ThemeMode | "auto";
  * 浅色主题参照 Web UI 蓝粉白风格（樱花粉主色 / 天依蓝辅色），文本色均按白底对比度加深。
  */
 const SLOT_NAMES = [
+	"panel",
+	"selection",
 	"accent",
 	"model",
 	"dim",
@@ -78,6 +80,8 @@ function createTheme(palette: Record<ThemeSlotName, SlotStyle>): NekoTheme {
 
 /** 深色主题（默认终端假定，Tokyo Night 风）。 */
 export const darkTheme: NekoTheme = createTheme({
+	panel: { bg: "#1F2335" },
+	selection: { bg: "#33476B", fg: "#FFFFFF", bold: true },
 	accent: { fg: "#82AAFF" },
 	model: { fg: "#BB9AF7" },
 	dim: { fg: "#6C738A" },
@@ -100,6 +104,8 @@ export const darkTheme: NekoTheme = createTheme({
  * 工具标题琥珀加深 #B45309；工具卡片用浅 tinted 底，状态字色保持深色高对比。
  */
 export const lightTheme: NekoTheme = createTheme({
+	panel: { bg: "#F2F5FA" },
+	selection: { bg: "#D0E2F7", fg: "#16365B", bold: true },
 	accent: { fg: "#B0456B" },
 	model: { fg: "#1B7AB8" },
 	dim: { fg: "#6E7781" },
@@ -139,6 +145,8 @@ function delegate(name: ThemeSlotName): ThemeSlot {
 
 /** 组件使用的动态主题入口：槽位委托到当前激活主题，切换后自动生效。 */
 export const theme: NekoTheme = {
+	panel: delegate("panel"),
+	selection: delegate("selection"),
 	accent: delegate("accent"),
 	model: delegate("model"),
 	dim: delegate("dim"),

@@ -68,6 +68,7 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 }
 
 type SpawnPlan = {
+	readonly configDir?: string;
 	readonly storagePath: string;
 	readonly socketPath: string | undefined;
 	readonly nekoDir: string;
@@ -105,7 +106,7 @@ async function connectSpawned(
 	if (socketPath === undefined) {
 		const generated = await waitForValue(
 			() => readServerId(join(plan.nekoDir, SERVER_ID_FILENAME)),
-			"gateway 写出 serverId 文件",
+			"gateway serverId file",
 			plan.spawnTimeoutMs ?? 20_000,
 			child,
 			outputTail,
@@ -116,7 +117,7 @@ async function connectSpawned(
 
 	await waitForValue(
 		() => (existsSync(socketPath) ? true : undefined),
-		`gateway 就绪（socket: ${socketPath}）`,
+		`gateway ready (socket: ${socketPath})`,
 		plan.spawnTimeoutMs ?? 20_000,
 		child,
 		outputTail,
@@ -126,7 +127,7 @@ async function connectSpawned(
 	const serverId =
 		plan.fileServerId ?? serverIdFromSocketPath(socketPath) ?? readServerId(join(plan.nekoDir, SERVER_ID_FILENAME));
 	if (serverId === undefined) {
-		throw new Error(`无法确定 gateway 的 serverId（socket: ${socketPath}）`);
+		throw new Error(`Cannot determine gateway serverId (socket: ${socketPath})`);
 	}
 
 	let lastError: unknown;
@@ -150,7 +151,7 @@ async function connectSpawned(
 		}
 	}
 	throw new Error(
-		`gateway 已启动但连接失败：${lastError instanceof Error ? lastError.message : String(lastError)}\n${outputTail()}`,
+		`Gateway connection failed: ${lastError instanceof Error ? lastError.message : String(lastError)}\n${outputTail()}`,
 	);
 }
 
@@ -161,6 +162,7 @@ function gatewayArgs(plan: SpawnPlan): string[] {
 		"0", // TUI 不需要 WS；随机端口避免与已有实例的无谓冲突（socket 冲突由单实例语义处理）。
 		"--storage",
 		plan.storagePath,
+		...(plan.configDir ? ["--cwd", plan.configDir, "--config", plan.configDir] : []),
 		...(plan.socketPath !== undefined ? ["--socket-path", plan.socketPath] : []),
 		...(plan.model !== undefined ? ["--model", `${plan.model.provider}/${plan.model.modelId}`] : []),
 	];
@@ -209,22 +211,23 @@ async function waitForValue<T>(
 	const start = Date.now();
 	for (;;) {
 		const error = spawnError();
-		if (error !== undefined) throw new Error(`gateway 子进程启动失败：${error.message}${formatTail(outputTail())}`);
+		if (error !== undefined)
+			throw new Error(`Gateway process failed to start: ${error.message}${formatTail(outputTail())}`);
 		const value = poll();
 		if (value !== undefined) return value;
 		if (child.exitCode !== null) {
-			throw new Error(`gateway 子进程提前退出（exit ${child.exitCode}）${formatTail(outputTail())}`);
+			throw new Error(`Gateway process exited early (exit ${child.exitCode})${formatTail(outputTail())}`);
 		}
 		if (Date.now() - start > timeoutMs) {
 			child.kill("SIGTERM");
-			throw new Error(`等待${what}超时（${timeoutMs}ms）${formatTail(outputTail())}`);
+			throw new Error(`Timed out waiting for ${what} (${timeoutMs}ms)${formatTail(outputTail())}`);
 		}
 		await sleep(SOCKET_POLL_MS);
 	}
 }
 
 function formatTail(tail: string): string {
-	return tail === "" ? "" : `\n--- gateway 输出 ---\n${tail}`;
+	return tail === "" ? "" : `\n--- gateway output ---\n${tail}`;
 }
 
 function sleep(ms: number): Promise<void> {
