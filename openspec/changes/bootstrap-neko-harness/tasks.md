@@ -44,8 +44,8 @@
 ## 6. 集成验收
 
 - [x] 6.1 CLI 入口端到端可跑：`neko tui` / `neko web` / `neko serve`（均经真实 DeepSeek API 验证；`neko -p` print 模式未做，留待后续变更）
-- [ ] 6.2 全量 `vitest run` + `biome check` 通过（27/27 绿）；spec 走查遗留两个未覆盖场景：会话级切换模型（model-providers）、扩展热替换（agent-runtime）——留待后续变更补齐后勾选
+- [x] 6.2 全量 `vitest run` + `biome check` 通过（34/34 绿）；spec 走查完成：会话级切换模型（core test/model-switching + gateway test + TUI `/model` + Web 选择器，真实 API 验证隔离性）、扩展热替换（core test/reload：运行中调用走 v1、新调用走 v2）
 
 ## Workflow follow-up
 
-- 归档：`/skill:openspec-archive-change`（待 6.2 走查补齐后）
+- 归档：`/skill:openspec-archive-change`（全部任务已完成，可归档）

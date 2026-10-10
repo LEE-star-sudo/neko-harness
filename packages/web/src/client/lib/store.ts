@@ -1,4 +1,4 @@
-import type { ChatView } from "@neko-harness/core";
+import type { ChatView, NekoModelInfo } from "@neko-harness/core";
 import { useSyncExternalStore } from "react";
 import type { NekoSessionSummary } from "./gateway.ts";
 
@@ -11,6 +11,8 @@ export type NekoState = {
 	phase: ConnPhase;
 	/** 会话目录（neko.session-directory 订阅推送，实时）。 */
 	sessions: readonly NekoSessionSummary[];
+	/** 模型目录（neko.models.list 全局快照）；拉取失败为空数组。 */
+	models: readonly NekoModelInfo[];
 	currentSessionId: string | null;
 	/** 当前会话的 ChatView 快照（neko.chat.view 订阅）；切换/断线中可能为 null。 */
 	view: ChatView | null;
@@ -20,6 +22,7 @@ export type NekoState = {
 let state: NekoState = {
 	phase: "connecting",
 	sessions: [],
+	models: [],
 	currentSessionId: null,
 	view: null,
 	notice: null,
@@ -54,6 +57,9 @@ export const storeActions = {
 	},
 	setDirectory(sessions: readonly NekoSessionSummary[]): void {
 		emit({ ...state, sessions });
+	},
+	setModels(models: readonly NekoModelInfo[]): void {
+		emit({ ...state, models });
 	},
 	setSession(currentSessionId: string | null): void {
 		emit({ ...state, currentSessionId });

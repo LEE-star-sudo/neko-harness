@@ -1,3 +1,4 @@
+import type { NekoModelRef } from "@neko-harness/core";
 import { GatewayConnection } from "./gateway.ts";
 import { getState, storeActions } from "./store.ts";
 
@@ -41,6 +42,7 @@ export function startNekoApp(): void {
 				onPhase: storeActions.setPhase,
 				onError: (text) => storeActions.notice({ level: "error", text }),
 				onDirectory: (directory) => storeActions.setDirectory(directory.sessions),
+				onModels: storeActions.setModels,
 				onSessionChange: storeActions.setSession,
 				onView: storeActions.setView,
 			},
@@ -83,6 +85,16 @@ export const appActions = {
 			return;
 		}
 		connection.createSession().catch((error: unknown) => {
+			storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
+		});
+	},
+	/** 会话级切换模型；下一次请求生效，状态条随投影 agent.model 即时更新。 */
+	configureModel(model: NekoModelRef): void {
+		if (connection === undefined) {
+			notReady();
+			return;
+		}
+		connection.configure({ model }).catch((error: unknown) => {
 			storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
 		});
 	},

@@ -5,6 +5,8 @@ import { theme } from "../theme.ts";
 export type FooterStats = {
 	readonly sessionId: string;
 	readonly model: string;
+	/** 生效的 thinking level；null/未设置不显示。 */
+	readonly thinkingLevel: string | null;
 	/** 忙碌描述；undefined 表示空闲。 */
 	readonly busy: string | undefined;
 	readonly usageText: string;
@@ -15,10 +17,11 @@ export type FooterStats = {
 export class StatusFooter extends Container {
 	setStats(stats: FooterStats): void {
 		const busy = stats.busy === undefined ? theme.ok("就绪") : theme.accent(stats.busy);
+		const thinking = stats.thinkingLevel === null ? "" : theme.dim(` · think ${stats.thinkingLevel}`);
 		this.clear();
 		this.addChild(
 			new TruncatedText(
-				`${theme.dim(`会话 ${stats.sessionId}`)}  ·  ${theme.model(stats.model)}  ·  ${busy}  ·  ${stats.usageText}  ·  ${theme.dim(stats.cwd)}`,
+				`${theme.dim(`会话 ${stats.sessionId}`)}  ·  ${theme.model(stats.model)}${thinking}  ·  ${busy}  ·  ${stats.usageText}  ·  ${theme.dim(stats.cwd)}`,
 				1,
 				0,
 			),
@@ -28,8 +31,8 @@ export class StatusFooter extends Container {
 
 	#hints(busy: boolean): string {
 		return busy
-			? "Enter 插入（steer） · Alt+Enter 排队（follow-up） · Esc 中止 · Ctrl+S 会话 · Ctrl+C 退出"
-			: "Enter 发送 · Ctrl+S 会话列表 · /fork 分叉 · /archive 归档 · Ctrl+C 退出";
+			? "Enter 插入（steer） · Alt+Enter 排队（follow-up） · Esc 中止 · Ctrl+S 会话 · /model 模型 · Ctrl+C 退出"
+			: "Enter 发送 · /model 模型 · /think <level> · Ctrl+S 会话 · /fork 分叉 · /archive 归档 · Ctrl+C 退出";
 	}
 }
 

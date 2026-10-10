@@ -161,11 +161,7 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 								<span className="text-tianyi-600">.</span>
 								<span className="logo-gradient">harness</span>
 							</div>
-							<p className="max-w-sm text-sm text-ink-600">
-								和 DeepSeek 驱动的 agent 对话 ♡ 内置 read / write / edit / bash 工具
-								<br />
-								输入消息开始吧 ✦
-							</p>
+							<p className="max-w-sm text-sm text-ink-600">输入消息开始吧 ✦</p>
 						</div>
 					)}
 					{items.map((item) => {

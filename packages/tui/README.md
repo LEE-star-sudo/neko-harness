@@ -20,11 +20,16 @@ npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--sto
 - 工具卡片显示工具名 + 参数摘要 + 状态（运行中/✓/✗）；结果默认预览 8 行，点击展开完整输出
 - 状态栏：会话 id · 模型 · 运行状态 · 用量（↑input ↓output 缓存 $成本）· 工作目录
 
-## 会话管理
+## 会话与模型
 
 - `Ctrl+S` 或 `/sessions`：会话列表浮层（SelectList）——切换或新建
 - `/fork`：从当前会话分叉（继承历史，之后独立演进）
 - `/archive`：归档当前会话（软删除）并切换到下一个（没有则新建）
+- `/model`：模型选择浮层（`neko.models` 全量列表：name、provider/modelId、上下文长度、
+  thinking 支持；当前模型置顶标记）——`neko.chat.configure` 只改当前会话，下一次请求生效，
+  状态栏模型名随 ChatView.agent 投影即时更新
+- `/think <level>`：设置当前会话 thinking level（off/minimal/low/medium/high/xhigh/max）
+- 每个会话的模型/thinking 配置相互独立；新建会话回到 gateway 默认模型
 
 ## 主题
 

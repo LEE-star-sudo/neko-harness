@@ -102,14 +102,34 @@ export function SessionList(props: { open: boolean; onClose: () => void }) {
 										onClick={() => {
 											requestArchive(session.id);
 										}}
-										className={`focus-neko shrink-0 rounded-lg px-1.5 py-1 text-xs ${
+										className={`focus-neko shrink-0 rounded-md px-1.5 py-1 text-xs ${
 											confirming
-												? "bg-sakura-700 font-semibold text-white"
-												: "text-ink-400 opacity-0 group-hover:opacity-100 hover:bg-sakura-100 hover:text-sakura-800"
+												? "border border-sakura-200 bg-sakura-100 font-medium text-sakura-800"
+												: "text-ink-400 opacity-0 group-hover:opacity-100 hover:bg-sakura-100 hover:text-sakura-700"
 										}`}
 										title={confirming ? "再次点击确认归档" : "归档会话"}
 									>
-										{confirming ? "确认?" : "✕"}
+										{confirming ? (
+											"归档？"
+										) : (
+											<svg
+												width="13"
+												height="13"
+												viewBox="0 0 24 24"
+												fill="none"
+												stroke="currentColor"
+												strokeWidth="1.8"
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												aria-hidden="true"
+											>
+												<path d="M3 6h18" />
+												<path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+												<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+												<line x1="10" y1="11" x2="10" y2="17" />
+												<line x1="14" y1="11" x2="14" y2="17" />
+											</svg>
+										)}
 									</button>
 								</li>
 							);

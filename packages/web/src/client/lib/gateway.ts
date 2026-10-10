@@ -1,11 +1,13 @@
 import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
-import type { ChatView } from "@neko-harness/core";
+import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
 import {
 	NekoChat,
 	type NekoChat as NekoChatFacade,
 	type NekoDirectoryState,
+	NekoModels,
+	type NekoModels as NekoModelsFacade,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionManagement as NekoSessionManagementFacade,
@@ -33,6 +35,7 @@ export type GatewayEvents = {
 	/** 连接/服务级错误提示（已格式化）。 */
 	onError(text: string): void;
 	onDirectory(state: NekoDirectoryState): void;
+	onModels(models: readonly NekoModelInfo[]): void;
 	onSessionChange(sessionId: string | null): void;
 	onView(view: ChatView | null): void;
 };
@@ -57,6 +60,7 @@ export class GatewayConnection {
 	#serverBinding: RemoteServiceBinding | undefined;
 	#sessionBinding: RemoteServiceBinding | undefined;
 	#management: NekoSessionManagementFacade | undefined;
+	#models: NekoModelsFacade | undefined;
 	#chat: NekoChatFacade | undefined;
 	#currentSessionId: string | undefined;
 	#unsubDirectory: (() => void) | undefined;
@@ -112,6 +116,7 @@ export class GatewayConnection {
 			submit: (input, context) => facade.submit(input, context),
 			abort: (context) => facade.abort(context),
 			usage: (context) => facade.usage(context),
+			configure: (change, context) => facade.configure(change, context),
 		};
 		this.#currentSessionId = sessionId;
 		const initial = this.#chat.view.value;
@@ -141,6 +146,20 @@ export class GatewayConnection {
 		const management = this.#management;
 		if (management === undefined) throw new Error("网关连接未就绪");
 		await management.archive(sessionId, CONTEXT);
+	}
+
+	/** 模型目录（neko.models.list 全局快照）。 */
+	async listModels(): Promise<readonly NekoModelInfo[]> {
+		const models = this.#models;
+		if (models === undefined) throw new Error("网关连接未就绪");
+		return models.list(CONTEXT);
+	}
+
+	/** 会话级切换模型；从下一次请求起生效，投影 agent.model 随即更新。 */
+	async configure(change: NekoConversationChange): Promise<void> {
+		const chat = this.#chat;
+		if (chat === undefined) throw new Error("会话未就绪");
+		await chat.configure(change, CONTEXT);
 	}
 
 	submit(content: string): void {
@@ -181,13 +200,21 @@ export class GatewayConnection {
 		});
 		const serverTransport = createClientServiceTransport(client, () => ({ serverId: this.#serverId }));
 		this.#serverBinding = createRemoteServiceBinding({
-			services: [NekoSessionDirectory, NekoSessionManagement],
+			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels],
 			transport: serverTransport,
 		});
 		const directory = this.#serverBinding.use(NekoSessionDirectory);
 		const management = this.#serverBinding.use(NekoSessionManagement);
+		const models = this.#serverBinding.use(NekoModels);
 		await this.#serverBinding.ready(CONTEXT);
 		this.#management = management;
+		this.#models = models;
+		models
+			.list(CONTEXT)
+			.then((list) => this.#events.onModels(list))
+			.catch(() => {
+				// 模型目录拉取失败不阻塞连接；选择器退化为只读标签。
+			});
 		const initialDirectory = directory.state.value;
 		if (initialDirectory !== undefined) this.#events.onDirectory(initialDirectory);
 		this.#unsubDirectory = directory.state.subscribe((value) => {
@@ -238,6 +265,7 @@ export class GatewayConnection {
 		this.#unsubDirectory = undefined;
 		this.#teardownSession();
 		this.#management = undefined;
+		this.#models = undefined;
 		const binding = this.#serverBinding;
 		this.#serverBinding = undefined;
 		await binding?.dispose(CONTEXT).catch(() => {});

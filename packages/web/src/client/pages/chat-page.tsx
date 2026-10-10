@@ -30,7 +30,13 @@ export function ChatPage() {
 					</div>
 				)}
 				<MessageList view={view} busy={busy} />
-				<StatusBar model={view?.model ?? "…"} usage={view?.usage ?? null} busy={busy} status={status} />
+				<StatusBar
+					model={view?.model ?? "…"}
+					agentModel={view?.agent.model ?? null}
+					usage={view?.usage ?? null}
+					busy={busy}
+					status={status}
+				/>
 				<Composer busy={busy} status={status} />
 			</div>
 		</div>

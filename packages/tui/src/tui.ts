@@ -1,4 +1,5 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	Box,
 	CombinedAutocompleteProvider,
@@ -16,12 +17,20 @@ import {
 	TuiAltScreen,
 	VStack,
 } from "@earendil-works/pi-tui";
-import type { ChatItem, ChatView, NekoModelRef, StreamingToolCall, StreamingView } from "@neko-harness/core";
+import type {
+	ChatItem,
+	ChatView,
+	NekoModelInfo,
+	NekoModelRef,
+	StreamingToolCall,
+	StreamingView,
+} from "@neko-harness/core";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
 import { type ToolCardState, ToolExecutionComponent } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
+import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import {
 	getActiveThemeMode,
@@ -53,6 +62,8 @@ const EXIT_COMMANDS = new Set(["/exit", "/quit"]);
 const SESSIONS_COMMANDS = new Set(["/sessions", "/session"]);
 const MAX_NOTICES = 3;
 const NEW_SESSION_VALUE = "__new__";
+/** /think 接受的 thinking level（pi-ai ModelThinkingLevel）。 */
+const THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 type ItemEntry =
 	| { readonly kind: "user"; readonly component: UserMessageComponent }
@@ -113,6 +124,8 @@ class NekoTuiApp {
 				[
 					{ name: "exit", description: "退出 neko TUI" },
 					{ name: "sessions", description: "会话列表（切换/新建）" },
+					{ name: "model", description: "切换当前会话的模型" },
+					{ name: "think", description: "设置 thinking level（/think high）" },
 					{ name: "fork", description: "分叉当前会话" },
 					{ name: "archive", description: "归档当前会话" },
 				],
@@ -188,7 +201,7 @@ class NekoTuiApp {
 
 	/**
 	 * Enter 提交。空闲：正常提交；忙碌：steer（插入当前工具轮之后）。
-	 * 斜杠命令：/exit、/quit、/sessions、/fork、/archive。
+	 * 斜杠命令：/exit、/quit、/sessions、/model、/think <level>、/fork、/archive。
 	 */
 	submit(text: string): void {
 		const trimmed = text.trim();
@@ -199,6 +212,14 @@ class NekoTuiApp {
 		}
 		if (SESSIONS_COMMANDS.has(trimmed)) {
 			this.openSessionsOverlay();
+			return;
+		}
+		if (trimmed === "/model") {
+			void this.openModelOverlay();
+			return;
+		}
+		if (trimmed.startsWith("/think")) {
+			this.configureThinking(trimmed.slice("/think".length).trim());
 			return;
 		}
 		if (trimmed === "/fork") {
@@ -318,8 +339,71 @@ class NekoTuiApp {
 				void this.switchSession(value).catch((error: unknown) => this.addNotice(messageOf(error), true));
 			}
 		};
-		this.#overlayHandle = this.#ui.showOverlay(new SessionsOverlay(items, pick, () => this.#closeOverlay()), {
+		this.#overlayHandle = this.#ui.showOverlay(new PickerOverlay("会话", items, pick, () => this.#closeOverlay()), {
 			maxHeight: "60%",
+		});
+	}
+
+	/** /model：模型选择浮层（neko.models 列表 + neko.chat.configure，仅当前会话，下一次请求生效）。 */
+	async openModelOverlay(): Promise<void> {
+		if (this.#overlayHandle !== undefined || this.#exitStarted) return;
+		let models: readonly NekoModelInfo[];
+		try {
+			models = await this.#gateway.client.listModels();
+		} catch (error: unknown) {
+			this.addNotice(`读取模型列表失败：${messageOf(error)}`, true);
+			return;
+		}
+		if (models.length === 0) {
+			this.addNotice("模型目录为空", true);
+			return;
+		}
+		const current = this.#lastView?.agent.model;
+		const currentKey = current === null || current === undefined ? null : `${current.provider}/${current.modelId}`;
+		// 当前模型置顶（pi 惯例），其余保持注册表顺序。
+		const sorted = [...models].sort(
+			(left, right) => Number(keyOf(right) === currentKey) - Number(keyOf(left) === currentKey),
+		);
+		const items: SelectItem[] = sorted.map((model) => {
+			const key = keyOf(model);
+			const parts = [`${model.provider}/${model.modelId}`, `${formatContextWindow(model.contextWindow)} 上下文`];
+			if (model.reasoning) parts.push("支持 thinking");
+			return {
+				value: key,
+				label: `${model.name}${key === currentKey ? "（当前）" : ""}`,
+				description: parts.join(" · "),
+			};
+		});
+		const pick = (value: string): void => {
+			this.#closeOverlay();
+			const selected = models.find((model) => keyOf(model) === value);
+			if (selected === undefined || value === currentKey) return;
+			this.configureModel({ provider: selected.provider, modelId: selected.modelId });
+		};
+		this.#overlayHandle = this.#ui.showOverlay(new PickerOverlay("模型", items, pick, () => this.#closeOverlay()), {
+			maxHeight: "60%",
+		});
+		this.#ui.requestRender();
+	}
+
+	configureModel(model: NekoModelRef): void {
+		const chat = this.#chatFacade;
+		if (chat === undefined) return;
+		chat.configure({ model }, BACKGROUND_CONTEXT).catch((error: unknown) => {
+			this.addNotice(`切换模型失败：${messageOf(error)}`, true);
+		});
+	}
+
+	configureThinking(raw: string): void {
+		const level = THINKING_LEVELS.find((candidate) => candidate === raw);
+		if (level === undefined) {
+			this.addNotice(`/think 需要 level：${THINKING_LEVELS.join(" / ")}`, true);
+			return;
+		}
+		const chat = this.#chatFacade;
+		if (chat === undefined) return;
+		chat.configure({ thinkingLevel: level }, BACKGROUND_CONTEXT).catch((error: unknown) => {
+			this.addNotice(`设置 thinking level 失败：${messageOf(error)}`, true);
 		});
 	}
 
@@ -507,6 +591,7 @@ class NekoTuiApp {
 		this.#footer.setStats({
 			sessionId: this.#sessionId,
 			model: view.model,
+			thinkingLevel: view.agent.thinkingLevel,
 			busy: this.#busyText,
 			usageText: usageText(view.usage.input, view.usage.output, view.usage.cacheRead, view.usage.cost),
 			cwd: view.cwd,
@@ -598,29 +683,37 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * 会话选择浮层：标题 + SelectList + 提示。浮层获得焦点后输入路由到浮层组件本身，
+ * 选择浮层（会话/模型共用）：标题 + SelectList + 提示。浮层获得焦点后输入路由到浮层组件本身，
  * 必须由这里把按键转发给 SelectList（Container 默认不向子组件分发输入）。
  */
-class SessionsOverlay extends Container {
+class PickerOverlay extends Container {
 	readonly #list: SelectList;
 
-	constructor(items: readonly SelectItem[], onPick: (value: string) => void, onClose: () => void) {
+	constructor(title: string, items: readonly SelectItem[], onPick: (value: string) => void, onClose: () => void) {
 		super();
 		const box = new Box(2, 1);
-		box.addChild(new Text(style.bold("会话"), 0, 0));
+		box.addChild(new Text(style.bold(title), 0, 0));
 		box.addChild(new Spacer(1));
 		this.#list = new SelectList([...items], Math.min(items.length, 10), getSelectListTheme());
 		this.#list.onSelect = (item) => onPick(item.value);
 		this.#list.onCancel = onClose;
 		box.addChild(this.#list);
 		box.addChild(new Spacer(1));
-		box.addChild(new Text(theme.dim("↑↓ 选择 · Enter 切换 / 新建 · Esc 关闭"), 0, 0));
+		box.addChild(new Text(theme.dim("↑↓ 选择 · Enter 确认 · Esc 关闭"), 0, 0));
 		this.addChild(box);
 	}
 
 	handleInput(data: string): void {
 		this.#list.handleInput(data);
 	}
+}
+
+function keyOf(model: NekoModelInfo): string {
+	return `${model.provider}/${model.modelId}`;
+}
+
+function formatContextWindow(tokens: number): string {
+	return formatTokens(tokens);
 }
 
 /** 打开 neko 终端界面；用户退出（/exit 或 Ctrl+C）后 resolve。 */

@@ -1,7 +1,7 @@
 import type { Context, ReplicatedState } from "@earendil-works/chord";
 import { defineService } from "@earendil-works/chord";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ChatView, NekoModelRef, UsageTotals } from "@neko-harness/core";
+import type { ChatView, NekoConversationChange, NekoModelInfo, NekoModelRef, UsageTotals } from "@neko-harness/core";
 
 /**
  * neko 网关应用层服务契约的浏览器镜像（packages/gateway/src/contract.ts 的逐字拷贝，
@@ -35,13 +35,27 @@ export interface NekoSessionManagement {
 	archive(sessionId: string, context: Context): Promise<void>;
 	attach(sessionId: string, context: Context): Promise<void>;
 	detach(context: Context): Promise<void>;
+	/** 从会话当前状态分叉出新会话（pi-durable conversation.fork）；空会话退化为新建。 */
+	fork(sessionId: string, context: Context): Promise<NekoSessionSummary>;
 }
 
 export const NekoSessionManagement = defineService<NekoSessionManagement>("neko.session-management");
 
+/**
+ * 服务器级模型目录服务：Models registry 的全局快照（模型选择器数据源）。
+ * 模型列表是全局的，故放服务器级而非会话级。
+ */
+export interface NekoModels {
+	list(context: Context): Promise<readonly NekoModelInfo[]>;
+}
+
+export const NekoModels = defineService<NekoModels>("neko.models");
+
 export type NekoSubmitInput = {
 	readonly content: string;
 	readonly requestId?: string;
+	/** 忙碌时 admission 策略：steer 插入当前工具轮后；followUp 排队等当前 run 结束。缺省由 pi-durable 排队。 */
+	readonly whenBusy?: "steer" | "followUp";
 };
 
 export interface NekoChat {
@@ -49,6 +63,8 @@ export interface NekoChat {
 	submit(input: NekoSubmitInput, context: Context): Promise<void>;
 	abort(context: Context): Promise<void>;
 	usage(context: Context): Promise<UsageTotals>;
+	/** 会话级切换模型/thinkingLevel；从下一次请求起生效。会话未知或已归档时抛远程错误。 */
+	configure(change: NekoConversationChange, context: Context): Promise<void>;
 }
 
 export const NekoChat = defineService<NekoChat>("neko.chat");
