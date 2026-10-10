@@ -14,7 +14,7 @@ Options:
 
 Resumes the most recently used session in this workspace, or creates one.
 A gateway is started when needed and stopped when its owning TUI exits.
-The built-in provider requires DEEPSEEK_API_KEY.`;
+Configure DeepSeek with /login or DEEPSEEK_API_KEY.`;
 
 type CliOptions = {
 	cwd?: string;

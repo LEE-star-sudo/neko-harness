@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall, Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { MemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/runtime.ts";
 import { byMessage, byVisited, relativeTime } from "../src/session-display.ts";
 import { boundedText, cleanTitle, SessionMetadataDoc } from "../src/session-metadata.ts";
@@ -23,7 +24,7 @@ it("names the first answered question off-thread, persists usage and keeps indep
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
 	};
-	let runtime = await createNekoRuntime(opts);
+	let runtime = await createNekoRuntime({ ...opts, credentials: new MemoryCredentialStore() });
 	let captured = "";
 	faux.setResponses([
 		async () => {
@@ -54,7 +55,7 @@ it("names the first answered question off-thread, persists usage and keeps indep
 		const fork = await runtime.forkConversation(runtime.root.id);
 		expect((await runtime.listConversations()).find((s) => s.id === fork.id)?.title).toBe(before.title);
 		await runtime.close();
-		runtime = await createNekoRuntime(opts);
+		runtime = await createNekoRuntime({ ...opts, credentials: new MemoryCredentialStore() });
 		expect((await runtime.listConversations())[0]!.title).toBe(before.title);
 		expect(await runtime.namingUsage()).toEqual(naming);
 		expect(await runtime.usage()).toEqual(total);
@@ -74,6 +75,7 @@ it("falls back after two invalid title responses without polluting the transcrip
 		fauxAssistantMessage([fauxText("``")]),
 	]);
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
@@ -138,13 +140,13 @@ it("restores an interrupted naming attempt and ignores results after archive", a
 				release = r;
 			}),
 	]);
-	let runtime = await createNekoRuntime(opts);
+	let runtime = await createNekoRuntime({ ...opts, credentials: new MemoryCredentialStore() });
 	try {
 		await runtime.submit("recover this title");
 		await until(async () => faux.state.callCount === 2);
 		await runtime.close();
 		faux.appendResponses([fauxAssistantMessage([fauxText("Recovered title")])]);
-		runtime = await createNekoRuntime(opts);
+		runtime = await createNekoRuntime({ ...opts, credentials: new MemoryCredentialStore() });
 		await until(async () => (await runtime.listConversations())[0]?.title === "Recovered title");
 		release(fauxAssistantMessage([fauxText("obsolete result")]));
 		expect((await runtime.harness.snapshot(SessionMetadataDoc, runtime.root.id, runtime.context))?.attempts).toBe(2);
@@ -174,6 +176,7 @@ it("does not retry a failed first answer using a later question", async () => {
 	const faux = fauxProvider();
 	faux.setResponses([fauxAssistantMessage([]), fauxAssistantMessage([fauxText("later answer")])]);
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
@@ -210,6 +213,7 @@ it("names from the final tool answer while steer and follow-up keep their own ac
 		},
 	});
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
@@ -266,6 +270,7 @@ it("limits concurrent naming to two and never charges a request twice", async ()
 		}),
 	);
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [chat.provider],
 		model: { provider: "faux", modelId: "faux-1" },
@@ -318,7 +323,11 @@ it("sends DeepSeek titles with thinking disabled while preserving conversation t
 	) as typeof fetch;
 	let runtime: Awaited<ReturnType<typeof createNekoRuntime>> | undefined;
 	try {
-		runtime = await createNekoRuntime({ storage: "memory", thinkingLevel: "high" });
+		runtime = await createNekoRuntime({
+			credentials: new MemoryCredentialStore(),
+			storage: "memory",
+			thinkingLevel: "high",
+		});
 		await runtime.waitAnswer(await runtime.submit("Name this question"));
 		await until(async () => (await runtime!.listConversations())[0]?.title === "DeepSeek title");
 		expect(bodies).toHaveLength(2);
@@ -339,6 +348,7 @@ it("skips models that cannot disable thinking", async () => {
 	faux.models[0]!.thinkingLevelMap = { off: null };
 	faux.setResponses([fauxAssistantMessage([fauxText("answer")])]);
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
@@ -364,6 +374,7 @@ it("bounds hung title requests by timeout and the persisted retry budget", async
 		() => new Promise(() => {}),
 	]);
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
@@ -385,6 +396,7 @@ it("does not advance message time or name an aborted first answer", async () => 
 	const faux = fauxProvider({ tokensPerSecond: 100, tokenSize: { min: 1, max: 1 } });
 	faux.setResponses([fauxAssistantMessage([fauxText("partial answer ".repeat(100))])]);
 	const runtime = await createNekoRuntime({
+		credentials: new MemoryCredentialStore(),
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },

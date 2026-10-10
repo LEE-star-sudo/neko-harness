@@ -18,7 +18,7 @@ const USAGE = `用法: main.ts [选项]
   --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
   -h, --help           显示此帮助
 
-需要环境变量 DEEPSEEK_API_KEY（spawn 的 gateway 子进程继承本进程环境）。`;
+可在 Web 设置页配置 Key；gateway 子进程也会继承 DEEPSEEK_API_KEY。`;
 
 type CliOptions = {
 	port?: number;

@@ -1,4 +1,5 @@
 import { fauxProvider } from "../../../test/faux.ts";
+import { MemoryCredentialStore } from "../src/credentials.ts";
 // 2.5 用量统计：一轮带工具调用的对话后，usage 按 provider/modelId 与工具名分组，
 // 且带 usage 的失败工具结果也计入。
 
@@ -52,6 +53,7 @@ describe("usage accounting (2.5)", () => {
 			fauxAssistantMessage([fauxText("done")]),
 		]);
 		const runtime = await createNekoRuntime({
+			credentials: new MemoryCredentialStore(),
 			storage: "memory",
 			model: { provider: "faux", modelId: "faux-1" },
 			providers: [faux.provider],

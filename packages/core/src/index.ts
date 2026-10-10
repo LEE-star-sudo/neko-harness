@@ -10,6 +10,12 @@ export {
 	parseNekoConfig,
 } from "./config.ts";
 export {
+	type CredentialStatus,
+	DEFAULT_CREDENTIALS_PATH,
+	FileCredentialStore,
+	MemoryCredentialStore,
+} from "./credentials.ts";
+export {
 	type ChatItem,
 	type ChatView,
 	projectChatView,

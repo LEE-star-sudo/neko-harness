@@ -7,7 +7,7 @@ gateway 子进程（退出时关停由本进程拉起的实例）。
 ## 运行
 
 ```bash
-# 需要 DEEPSEEK_API_KEY
+# 可启动后通过 /login 配置 DeepSeek Key
 bun --conditions=neko-source packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <sqlite路径>] [--socket-path <path>] [--theme light|dark|auto]
 ```
 
@@ -28,7 +28,7 @@ bun --conditions=neko-source packages/tui/src/main.ts [--cwd <dir>] [--model pro
 - `/model`：模型选择浮层（`neko.models` 全量列表：name、provider/modelId、上下文长度、
   thinking 支持；当前模型置顶标记）——`neko.chat.configure` 只改当前会话，下一次请求生效，
   状态栏模型名随 ChatView.agent 投影即时更新
-- `/think <level>`：设置当前会话 thinking level（off/minimal/low/medium/high/xhigh/max）
+- `/think`：选择当前模型支持的思考强度；也支持 `/think <level>`。选项遵循 Pi，Flash 为 off/low/high/max，Pro 为 off/high/max
 - 每个会话的模型/thinking 配置相互独立；新建会话回到 gateway 默认模型
 
 ## 主题
@@ -79,3 +79,9 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 `/sessions`、`/session` 和 Ctrl+S 使用同一面板，仅展示当前工作区，并按最近消息倒序排列。每行显示自动标题（生成前为首问摘要）、相对时间及当前会话标记；选中详情展示模型、运行状态和完整时间。搜索匹配标题、首问摘要、ID，界面标签使用英语，标题保留对话语言。
 
 面板打开期间订阅目录更新，每分钟刷新时间；后台重排按 ID 保持选中项，选中项消失时回退到相邻项。关闭面板停止计时并恢复编辑器草稿和焦点。Kitty 按键释放事件不触发二次移动。120×40、80×24、60×16 窗口均保持底部状态栏，较小高度优先显示会话行和操作提示。
+
+## DeepSeek 凭据与思考配置
+
+未配置 Key 也可启动、浏览会话；发送前通过 TUI `/login` 或 Web 设置页配置。保存值位于宿主用户的 `~/.neko/credentials.json`（权限 `0600`），所有工作区共用，重启后保留；优先于网关进程的 `DEEPSEEK_API_KEY`，移除后回退环境变量。两端只显示配置状态和生效来源，不回显已有 Key；“已配置”不代表已通过远端认证。获取 Key：https://platform.deepseek.com/api_keys 。
+
+默认新会话使用 DeepSeek V4.1 Flash + high，显式配置和已有会话保留自身设置。TUI `/model`、`/think` 与 Web 聊天区模型面板共用 Pi 1.1.0 能力：Flash 为 off/low/high/max，Pro 为 off/high/max。Flash low 切换到 Pro 时遵循 Pi 调整为 high。变更仅作用于当前会话后续请求，标题总结仍使用非思考模式。

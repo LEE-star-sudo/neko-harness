@@ -21,6 +21,7 @@ export type GatewayEnsureOptions = {
 	readonly socketPath?: string;
 	/** SQLite 存储文件（决定数据目录与默认 socket 位置）。 */
 	readonly storagePath: string;
+	readonly credentialsPath?: string;
 	readonly cwd?: string;
 	readonly model?: NekoModelRef;
 	/** 逻辑服务器身份（默认读取/生成 <storageDir>/gateway-server-id）。 */
@@ -99,6 +100,7 @@ function spawnGatewayProcess(options: GatewayEnsureOptions, socketPath: string, 
 		serverId,
 		"--storage",
 		options.storagePath,
+		...(options.credentialsPath ? ["--credentials", options.credentialsPath] : []),
 		...(options.cwd !== undefined ? ["--cwd", options.cwd] : []),
 		...(options.model !== undefined ? ["--model", `${options.model.provider}/${options.model.modelId}`] : []),
 	];

@@ -26,7 +26,7 @@ bun run --cwd packages/web build   # tsc 服务端 → dist/ + vite 客户端 �
 bun --conditions=neko-source packages/web/src/main.ts              # 起静态服务（自动 spawn gateway）
 ```
 
-需要 `DEEPSEEK_API_KEY`。浏览器访问打印的地址（默认 http://127.0.0.1:8322）。
+可在设置页配置 DeepSeek Key，或使用 `DEEPSEEK_API_KEY`。浏览器访问打印的地址（默认 http://127.0.0.1:8322）。
 
 ## 工作区与会话导航
 
@@ -41,3 +41,9 @@ Web 默认进入自身启动目录（或 `--cwd`）对应的工作区，即使�
 侧栏每行显示会话标题和距最近消息的时间；后台命名完成前使用首问摘要，空会话显示“新会话”。搜索同时匹配标题、首问摘要和 ID。列表按最近消息倒序排列，查看旧会话或标题更新不改变顺序；启动恢复仍使用独立的最近访问记录。顶栏及归档确认使用相同名称，界面不展示内部会话 ID，可通过完整时间辅助辨认同名会话。
 
 相对时间每分钟及窗口重新聚焦时刷新。鼠标悬停或键盘聚焦会话行可查看完整标题和时间，辅助技术通过按钮名称读取同样信息；触屏用户可打开行操作菜单查看完整标题和时间。标题保留对话语言，导航继续使用中文。后台标题更新保留当前会话、输入草稿与工作区选择。
+
+## DeepSeek 凭据与思考配置
+
+未配置 Key 也可启动、浏览会话；发送前通过 TUI `/login` 或 Web 设置页配置。保存值位于宿主用户的 `~/.neko/credentials.json`（权限 `0600`），所有工作区共用，重启后保留；优先于网关进程的 `DEEPSEEK_API_KEY`，移除后回退环境变量。两端只显示配置状态和生效来源，不回显已有 Key；“已配置”不代表已通过远端认证。获取 Key：https://platform.deepseek.com/api_keys 。
+
+默认新会话使用 DeepSeek V4.1 Flash + high，显式配置和已有会话保留自身设置。TUI `/model`、`/think` 与 Web 聊天区模型面板共用 Pi 1.1.0 能力：Flash 为 off/low/high/max，Pro 为 off/high/max。Flash low 切换到 Pro 时遵循 Pi 调整为 high。变更仅作用于当前会话后续请求，标题总结仍使用非思考模式。

@@ -74,10 +74,19 @@ export async function openNekoSessionHandle(options: {
 	provider.provide(NekoChat, {
 		view: chatState,
 		submit: async (input) => {
-			await session.submit(input.content, {
-				...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
-				...(input.whenBusy !== undefined ? { whenBusy: input.whenBusy } : {}),
-			});
+			try {
+				await session.submit(input.content, {
+					...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+					...(input.whenBusy !== undefined ? { whenBusy: input.whenBusy } : {}),
+				});
+			} catch (error) {
+				if (error instanceof Error && error.message.startsWith("DEEPSEEK_KEY_REQUIRED:"))
+					throw new RemoteServiceError(
+						"service_invalid_value",
+						"DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.",
+					);
+				throw error;
+			}
 			await onActivity();
 		},
 		abort: () => session.abort(),

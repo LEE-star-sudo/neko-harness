@@ -6,6 +6,8 @@ import { byMessage, byVisited } from "@neko-harness/core/session-display";
 import {
 	type NekoBrowseOptions,
 	NekoChat,
+	type NekoCredentialState,
+	NekoCredentials,
 	type NekoDirectoryPage,
 	type NekoDirectoryState,
 	NekoModels,
@@ -21,6 +23,7 @@ const CONTEXT: Context = BACKGROUND_CONTEXT;
 export type ConnPhase = "connecting" | "ready" | "reconnecting";
 export type GatewayEvents = {
 	onPhase(phase: ConnPhase): void;
+	onCredentials?(state: NekoCredentialState | null): void;
 	onError(text: string): void;
 	onDirectory(state: NekoDirectoryState): void;
 	onWorkspaces(state: NekoWorkspaceState): void;
@@ -51,6 +54,7 @@ export class GatewayConnection {
 	#management: NekoSessionManagement | undefined;
 	#workspaces: NekoWorkspaces | undefined;
 	#models: NekoModels | undefined;
+	#credentials: NekoCredentials | undefined;
 	#chat: NekoChat | undefined;
 	#sessions: readonly NekoSessionSummary[] = [];
 	#workspace: string;
@@ -80,6 +84,14 @@ export class GatewayConnection {
 	}
 	get managementReady() {
 		return this.#connected && !this.#operating;
+	}
+	async saveCredential(key: string): Promise<void> {
+		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
+		await this.#credentials.save({ key }, CONTEXT);
+	}
+	async removeCredential(): Promise<void> {
+		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
+		await this.#credentials.remove(CONTEXT);
 	}
 	async start(): Promise<void> {
 		this.#options.events.onPhase("connecting");
@@ -248,7 +260,7 @@ export class GatewayConnection {
 			if (change.state === "disconnected" && client === this.#client) this.#scheduleReconnect();
 		});
 		const binding = createRemoteServiceBinding({
-			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces],
+			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces, NekoCredentials],
 			transport: createClientServiceTransport(client, () => ({ serverId: this.#options.serverId })),
 		});
 		this.#server = binding;
@@ -257,6 +269,13 @@ export class GatewayConnection {
 		this.#management = binding.use(NekoSessionManagement);
 		this.#workspaces = binding.use(NekoWorkspaces);
 		this.#models = binding.use(NekoModels);
+		this.#credentials = binding.use(NekoCredentials);
+		this.#unsub.push(
+			this.#credentials.state.subscribe((value) => {
+				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value);
+			}),
+		);
+		if (this.#credentials.state.value) this.#options.events.onCredentials?.(this.#credentials.state.value);
 		const directory = binding.use(NekoSessionDirectory);
 		const publish = (value: NekoDirectoryState) => {
 			if (epoch !== this.#epoch) return;
@@ -328,6 +347,8 @@ export class GatewayConnection {
 		this.#dropView();
 		this.#management = undefined;
 		this.#workspaces = undefined;
+		this.#credentials = undefined;
+		this.#options.events.onCredentials?.(null);
 		this.#models = undefined;
 		await this.#server?.dispose(CONTEXT).catch(() => {});
 		this.#server = undefined;

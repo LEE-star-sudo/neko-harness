@@ -29,6 +29,7 @@ export const NEKO_CONFIG_BASENAME = "neko.config.json";
 export const DEFAULT_NEKO_CONFIG: NekoConfig = {
 	defaultModel: { provider: "deepseek", modelId: "deepseek-flash" },
 	theme: "auto",
+	thinkingLevel: "high",
 };
 
 /**

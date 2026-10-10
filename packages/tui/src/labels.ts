@@ -2,6 +2,7 @@
 export const commands = [
 	{ name: "exit", description: "Exit neko TUI" },
 	{ name: "sessions", description: "Switch or create a session" },
+	{ name: "login", description: "Configure DeepSeek API key" },
 	{ name: "model", description: "Choose a model" },
 	{ name: "think", description: "Set thinking level (/think high)" },
 	{ name: "fork", description: "Fork this session" },

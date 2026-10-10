@@ -16,6 +16,7 @@ export type NekoTuiGatewayOptions = {
 	readonly socketPath?: string;
 	/** 存储文件路径：解析默认 socket 位置 + 透传给拉起的 gateway（--storage）。 */
 	readonly storagePath?: string;
+	readonly credentialsPath?: string;
 	/** 模型：透传给拉起的 gateway（--model）。 */
 	readonly model?: NekoModelRef;
 	/** neko.config.json 查找起始目录（默认 process.cwd()）。 */
@@ -70,6 +71,7 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 type SpawnPlan = {
 	readonly configDir?: string;
 	readonly storagePath: string;
+	readonly credentialsPath?: string;
 	readonly socketPath: string | undefined;
 	readonly nekoDir: string;
 	readonly fileServerId: string | undefined;
@@ -162,6 +164,7 @@ function gatewayArgs(plan: SpawnPlan): string[] {
 		"0", // TUI 不需要 WS；随机端口避免与已有实例的无谓冲突（socket 冲突由单实例语义处理）。
 		"--storage",
 		plan.storagePath,
+		...(plan.credentialsPath ? ["--credentials", plan.credentialsPath] : []),
 		...(plan.configDir ? ["--cwd", plan.configDir, "--config", plan.configDir] : []),
 		...(plan.socketPath !== undefined ? ["--socket-path", plan.socketPath] : []),
 		...(plan.model !== undefined ? ["--model", `${plan.model.provider}/${plan.model.modelId}`] : []),

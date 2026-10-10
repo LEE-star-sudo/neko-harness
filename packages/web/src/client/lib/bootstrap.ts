@@ -1,4 +1,4 @@
-import type { NekoModelRef } from "@neko-harness/core";
+import type { NekoConversationChange, NekoModelRef } from "@neko-harness/core";
 import type { NekoBrowseOptions } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
 import { storeActions } from "./store.ts";
@@ -43,6 +43,7 @@ export function startNekoApp(): void {
 			workspaceRoot: info.workspaceRoot,
 			events: {
 				onPhase: storeActions.setPhase,
+				onCredentials: storeActions.setCredentials,
 				onWorkspaces: (state) => storeActions.setWorkspaces(state.workspaces),
 				onWorkspace: storeActions.setWorkspace,
 				onOperation: storeActions.setOperation,
@@ -62,6 +63,18 @@ function notReady(): void {
 }
 
 export const appActions = {
+	saveCredential(key: string) {
+		return requireConnection().saveCredential(key);
+	},
+	removeCredential() {
+		return requireConnection().removeCredential();
+	},
+	configure(change: NekoConversationChange, sessionId: string) {
+		const current = requireConnection();
+		if (current.currentSessionId !== sessionId || !current.ready)
+			return Promise.reject(new Error("会话已变化，请重试"));
+		return current.configure(change);
+	},
 	submit(content: string): void {
 		if (connection?.ready !== true) {
 			notReady();

@@ -1,14 +1,17 @@
 import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { MemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/index.ts";
 
 describe("createNekoRuntime", () => {
-	it("throws a clear error when the DeepSeek API key is missing", async () => {
+	it("allows configuration when the DeepSeek API key is missing", async () => {
 		const original = process.env.DEEPSEEK_API_KEY;
 		delete process.env.DEEPSEEK_API_KEY;
 		try {
-			await expect(createNekoRuntime({ storage: "memory" })).rejects.toThrow(/DEEPSEEK_API_KEY/);
+			const runtime = await createNekoRuntime({ credentials: new MemoryCredentialStore(), storage: "memory" });
+			await expect(runtime.submit("hello")).rejects.toThrow(/DEEPSEEK_KEY_REQUIRED/);
+			await runtime.close();
 		} finally {
 			if (original !== undefined) process.env.DEEPSEEK_API_KEY = original;
 		}
@@ -18,6 +21,7 @@ describe("createNekoRuntime", () => {
 		const faux = fauxProvider();
 		faux.setResponses([fauxAssistantMessage([fauxText("2")])]);
 		const runtime = await createNekoRuntime({
+			credentials: new MemoryCredentialStore(),
 			storage: "memory",
 			model: { provider: "faux", modelId: "faux-1" },
 			providers: [faux.provider],

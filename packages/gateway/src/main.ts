@@ -15,10 +15,11 @@ const USAGE = `用法: main.ts [选项]
   --cwd <dir>          会话工具的工作目录（默认当前目录）
   --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
   --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
+  --credentials <path> 用户凭据文件（默认 ~/.neko/credentials.json）
   --config <dir>       neko.config.json 查找起始目录（默认当前目录）
   -h, --help           显示此帮助
 
-需要环境变量 DEEPSEEK_API_KEY（除非配置其他 provider）。`;
+可通过前端设置或 DEEPSEEK_API_KEY 配置凭据。`;
 
 type CliOptions = {
 	host?: string;
@@ -28,6 +29,7 @@ type CliOptions = {
 	cwd?: string;
 	model?: NekoModelRef;
 	storagePath?: string;
+	credentialsPath?: string;
 	configDir?: string;
 };
 
@@ -80,6 +82,11 @@ function parseArgs(argv: readonly string[]): CliOptions {
 				i++;
 				break;
 			}
+			case "--credentials":
+				if (next === undefined) throw new Error("--credentials 需要参数");
+				options.credentialsPath = next;
+				i++;
+				break;
 			case "--storage":
 				if (next === undefined) throw new Error("--storage 需要参数");
 				options.storagePath = next;

@@ -6,7 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
-import { createNekoRuntime, type NekoRuntimeOptions } from "../src/index.ts";
+import { createNekoRuntime, MemoryCredentialStore, type NekoRuntimeOptions } from "../src/index.ts";
 
 let directory = "";
 afterAll(async () => {
@@ -21,6 +21,7 @@ describe("requestId idempotency (2.3)", () => {
 			const faux = fauxProvider();
 			faux.setResponses([fauxAssistantMessage([fauxText("ok")])]);
 			return {
+				credentials: new MemoryCredentialStore(),
 				storagePath,
 				model: { provider: "faux", modelId: "faux-1" },
 				providers: [faux.provider],

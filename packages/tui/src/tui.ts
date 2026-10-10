@@ -23,6 +23,7 @@ import { normalizeWorkspace } from "@neko-harness/core";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
+import { LoginPanel } from "./components/login.ts";
 import { PickerPanel } from "./components/picker.ts";
 import { type ToolCardState, ToolExecutionComponent } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
@@ -60,7 +61,6 @@ const EXIT_COMMANDS = new Set(["/exit", "/quit"]);
 const SESSIONS_COMMANDS = new Set(["/sessions", "/session"]);
 const NEW_SESSION_VALUE = "__new__";
 /** /think 接受的 thinking level（pi-ai ModelThinkingLevel）。 */
-const THINKING_LEVELS: readonly ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 type ItemEntry =
 	| { readonly kind: "user"; readonly component: UserMessageComponent }
@@ -81,6 +81,8 @@ class NekoTuiApp {
 	readonly #notices = new Container();
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
+	readonly #login: LoginPanel;
+	#thinkingModel: string | undefined;
 	#sessionPanelTimer: ReturnType<typeof setInterval> | undefined;
 	#sessionOperation = false;
 	#noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -119,11 +121,18 @@ class NekoTuiApp {
 		this.#panel = new PickerPanel(
 			() => this.#ui.requestRender(),
 			() => {
+				this.#thinkingModel = undefined;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
 				this.#ui.setFocus(this.#editor);
 			},
 		);
+		this.#login = new LoginPanel({
+			changed: () => this.#ui.requestRender(),
+			closed: () => this.#ui.setFocus(this.#editor),
+			save: (key) => this.#gateway.client.credentials.save({ key }, BACKGROUND_CONTEXT),
+			remove: () => this.#gateway.client.credentials.remove(BACKGROUND_CONTEXT),
+		});
 		this.#editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd()));
 		this.#editor.onSubmit = (text) => {
 			this.submit(text);
@@ -136,7 +145,7 @@ class NekoTuiApp {
 				if (matchesKey(data, "ctrl+c")) this.exit();
 				return { consume: true };
 			}
-			if (this.#panel.open) {
+			if (this.#panel.open || this.#login.open) {
 				// Let focused-component dispatch filter key releases before handling panel input.
 				return undefined;
 			}
@@ -164,17 +173,32 @@ class NekoTuiApp {
 	}
 
 	async run(initialSessionId: string): Promise<void> {
+		const picker = this.#panel,
+			login = this.#login;
 		const content = new Container();
 		content.addChild(this.#chat);
 		this.#transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });
 		this.#ui.setLayoutRoot(
 			createAppLayout({
 				transcript: this.#transcript,
-				panel: this.#panel,
+				panel: {
+					get height() {
+						return picker.height;
+					},
+					set height(value: number) {
+						picker.height = value;
+						login.height = value;
+					},
+					render: (width: number) => {
+						const active = this.#login.open ? this.#login : this.#panel;
+						return active.render(width);
+					},
+					invalidate: () => {},
+				},
 				editor: this.#editor,
 				footer: this.#footer,
 				notices: this.#notices,
-				panelOpen: () => this.#panel.open,
+				panelOpen: () => this.#panel.open || this.#login.open,
 			}),
 		);
 		this.#ui.setFocus(this.#editor);
@@ -214,12 +238,24 @@ class NekoTuiApp {
 			this.openSessionsOverlay();
 			return;
 		}
+		if (trimmed === "/login") {
+			if (!this.#panel.open && !this.#login.open) {
+				const service = this.#gateway.client.credentials;
+				this.#login.show(service.state.value, (fn) => service.state.subscribe(fn));
+				this.#ui.setFocus(this.#login);
+			}
+			return;
+		}
+		if (trimmed.startsWith("/login ")) {
+			this.addNotice("Use /login, then paste your key in the protected field.", true);
+			return;
+		}
 		if (trimmed === "/model") {
 			void this.openModelOverlay();
 			return;
 		}
 		if (trimmed.startsWith("/think")) {
-			this.configureThinking(trimmed.slice("/think".length).trim());
+			void this.configureThinking(trimmed.slice("/think".length).trim());
 			return;
 		}
 		if (trimmed === "/fork") {
@@ -232,6 +268,14 @@ class NekoTuiApp {
 		}
 		const chat = this.#chatFacade;
 		if (chat === undefined) return;
+		if (
+			this.#lastView?.agent.model?.provider === "deepseek" &&
+			this.#gateway.client.credentials.state.value?.source === "none"
+		) {
+			this.#editor.setText(text);
+			this.addNotice("Configure DeepSeek with /login before sending.", true);
+			return;
+		}
 		chat
 			.submit({ content: trimmed, ...(this.#busyText !== undefined ? { whenBusy: "steer" } : {}) }, BACKGROUND_CONTEXT)
 			.catch((error: unknown) => this.addNotice(messageOf(error), true));
@@ -327,7 +371,7 @@ class NekoTuiApp {
 		];
 	}
 	openSessionsOverlay(): void {
-		if (this.#exitStarted || this.#panel.open) return;
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
 		void this.#panel.show(
 			`Sessions · ${this.#options.cwd}`,
 			async () => this.sessionItems(),
@@ -341,7 +385,7 @@ class NekoTuiApp {
 	}
 
 	async openModelOverlay(): Promise<void> {
-		if (this.#exitStarted || this.#panel.open) return;
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
 		const chat = this.#chatFacade;
 		const current = this.#lastView?.agent.model;
 		const currentKey = current ? `${current.provider}/${current.modelId}` : null;
@@ -371,21 +415,46 @@ class NekoTuiApp {
 		await ready;
 	}
 
-	configureThinking(raw: string): void {
-		const level = THINKING_LEVELS.find((candidate) => candidate === raw);
-		if (level === undefined) {
-			this.addNotice(`/think requires a level: ${THINKING_LEVELS.join(" / ")}`, true);
-			return;
-		}
+	async configureThinking(raw: string): Promise<void> {
+		if (this.#panel.open || this.#login.open) return;
 		const chat = this.#chatFacade;
-		if (chat === undefined) return;
-		chat.configure({ thinkingLevel: level }, BACKGROUND_CONTEXT).catch((error: unknown) => {
-			this.addNotice(`Failed to set thinking level: ${messageOf(error)}`, true);
-		});
+		const ref = this.#lastView?.agent.model;
+		if (!chat || !ref) return;
+		try {
+			const model = (await this.#gateway.client.listModels()).find(
+				(m) => m.provider === ref.provider && m.modelId === ref.modelId,
+			);
+			if (chat !== this.#chatFacade || this.#exitStarted || this.#panel.open || this.#login.open || !model) return;
+			if (raw) {
+				const level = model.supportedThinkingLevels.find((value) => value === raw);
+				if (!level) {
+					this.addNotice(`Available levels: ${model.supportedThinkingLevels.join(" / ")}`, true);
+					return;
+				}
+				await chat.configure({ thinkingLevel: level }, BACKGROUND_CONTEXT);
+			} else {
+				this.#thinkingModel = keyOf(model);
+				void this.#panel.show(
+					"Thinking level",
+					async () =>
+						model.supportedThinkingLevels.map((level) => ({
+							value: level,
+							label: `${level}${level === this.#lastView?.agent.thinkingLevel ? " (Current)" : ""}`,
+						})),
+					async (value) => {
+						await chat.configure({ thinkingLevel: value as ModelThinkingLevel }, BACKGROUND_CONTEXT);
+					},
+				);
+				this.#ui.setFocus(this.#panel);
+			}
+		} catch {
+			this.addNotice("Failed to configure thinking level. Try again.", true);
+		}
 	}
 
 	#closeOverlay(): void {
 		if (this.#panel.open) this.#panel.close();
+		if (this.#login.open) this.#login.close();
 		this.#ui.setFocus(this.#editor);
 	}
 
@@ -423,6 +492,10 @@ class NekoTuiApp {
 
 	applyView(view: ChatView): void {
 		this.#lastView = view;
+		if (this.#thinkingModel && this.#thinkingModel !== `${view.agent.model?.provider}/${view.agent.model?.modelId}`) {
+			this.#panel.close();
+			this.addNotice("Model changed. Open /think to choose its supported levels.");
+		}
 		this.#syncItems(view);
 		this.#syncStreaming(view.streaming);
 		this.#syncBusy(view);

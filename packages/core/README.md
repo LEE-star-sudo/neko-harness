@@ -7,7 +7,7 @@ pi-durable 的薄封装：打开 SQLite 存储、注册内置 DeepSeek provider�
 ```ts
 import { createNekoRuntime } from "@neko-harness/core";
 
-const runtime = await createNekoRuntime(); // 需要 DEEPSEEK_API_KEY
+const runtime = await createNekoRuntime(); // 对话前需配置 DeepSeek Key
 const submission = await runtime.submit("1+1等于几？");
 const answer = await runtime.waitAnswer(submission); // { status: "done", text }
 ```
@@ -16,7 +16,7 @@ const answer = await runtime.waitAnswer(submission); // { status: "done", text }
 
 - `storage`: `"sqlite" | "memory"`，默认 `"sqlite"`
 - `storagePath`: SQLite 文件路径，默认 `~/.neko/neko.sqlite`
-- `apiKey`: DeepSeek API key，默认读 `DEEPSEEK_API_KEY` 环境变量（缺失时抛出清晰错误）
+- `apiKey`: DeepSeek API key，仅当前运行时的显式覆盖，不写环境变量或凭据文件
 - `model`: 默认 `{ provider: "deepseek", modelId: "deepseek-flash" }`（目录内另有 `deepseek-v4-pro`）
 - `thinkingLevel`: pi-ai `ModelThinkingLevel`
 - `cwd`: 会话工作目录，默认 `process.cwd()`
@@ -70,3 +70,11 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 首问成功取得最终回答后，在后台使用回答所用模型独立生成标题，禁用思考且不提供工具，不修改会话配置或聊天记录。生成期间及失败时使用首问摘要；空会话显示默认名称。标题最多 60 个 Unicode 字符，只生成一次。每次请求最长 20 秒，同时最多两个命名请求；失败等待 2 秒后重试一次，尝试次数持久化，重开不会重置。模型不支持关闭思考、首轮失败或答案为空时直接保留摘要。归档与关闭会取消在途命名，忽略迟到结果。分叉继承现有名称，之后各自独立。
 
 命名会产生额外模型用量。`namingUsage(id?)` 可单独核对，`usage(id?)` 包含聊天与命名用量，`globalUsage()` 汇总全部会话自身用量，避免分叉继承造成重复计费。`onDirectoryChange(listener)` 通知元数据状态变化。新格式元数据随会话创建原子写入；没有该格式的旧存储明确拒绝打开，不自动迁移、回填或删除。
+
+## DeepSeek 凭据与思考配置
+
+未配置 Key 也可启动、浏览会话；发送前通过 TUI `/login` 或 Web 设置页配置。保存值位于宿主用户的 `~/.neko/credentials.json`（权限 `0600`），所有工作区共用，重启后保留；优先于网关进程的 `DEEPSEEK_API_KEY`，移除后回退环境变量。两端只显示配置状态和生效来源，不回显已有 Key；“已配置”不代表已通过远端认证。获取 Key：https://platform.deepseek.com/api_keys 。
+
+默认新会话使用 DeepSeek V4.1 Flash + high，显式配置和已有会话保留自身设置。TUI `/model`、`/think` 与 Web 聊天区模型面板共用 Pi 1.1.0 能力：Flash 为 off/low/high/max，Pro 为 off/high/max。Flash low 切换到 Pro 时遵循 Pi 调整为 high。变更仅作用于当前会话后续请求，标题总结仍使用非思考模式。
+
+编程入口可注入 `credentials: CredentialStore` 或 `credentialsPath`，测试应使用隔离存储。显式 `apiKey` 为最高优先级临时覆盖，状态显示 runtime；默认 memory runtime 使用内存凭据。

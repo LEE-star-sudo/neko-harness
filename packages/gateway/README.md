@@ -41,3 +41,13 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 `neko.session-directory` 每个会话包含 `title`、`firstPromptPreview`、`createdAt`、`lastMessageAt`（空会话为 null）、`model`、`status`（idle/running/error），保留 `workspaceRoot` 与用于恢复选择的 `lastUsedAt`。Unix socket 和 WebSocket 使用相同字段。输入受理、回答完成、模型及运行状态改变、后台命名完成都会串行刷新目录；即使没有客户端 attach 该会话也会广播，流式 token 不逐个刷新目录。重连获取完整最新快照。聊天用量投影同步包含独立命名费用。
 
 本次契约要求前后端共同升级，不提供旧客户端兼容或历史元数据回填。
+
+## DeepSeek 凭据与思考配置
+
+未配置 Key 也可启动、浏览会话；发送前通过 TUI `/login` 或 Web 设置页配置。保存值位于宿主用户的 `~/.neko/credentials.json`（权限 `0600`），所有工作区共用，重启后保留；优先于网关进程的 `DEEPSEEK_API_KEY`，移除后回退环境变量。两端只显示配置状态和生效来源，不回显已有 Key；“已配置”不代表已通过远端认证。获取 Key：https://platform.deepseek.com/api_keys 。
+
+默认新会话使用 DeepSeek V4.1 Flash + high，显式配置和已有会话保留自身设置。TUI `/model`、`/think` 与 Web 聊天区模型面板共用 Pi 1.1.0 能力：Flash 为 off/low/high/max，Pro 为 off/high/max。Flash low 切换到 Pro 时遵循 Pi 调整为 high。变更仅作用于当前会话后续请求，标题总结仍使用非思考模式。
+
+`neko.credentials` 是无需 attach 的服务器级服务，提供脱敏状态订阅和 save/remove；持久化成功后发布 revision。Unix 与 WebSocket 使用同一服务。
+
+宿主集成和隔离测试可通过 `credentialsPath` 或 `neko serve --credentials <path>` 指定凭据文件；默认仍为用户级共享路径。

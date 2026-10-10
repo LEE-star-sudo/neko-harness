@@ -29,6 +29,7 @@ export type NekoGatewayOptions = {
 	readonly storage?: "sqlite" | "memory";
 	readonly storagePath?: string;
 	readonly apiKey?: string;
+	readonly credentialsPath?: string;
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
 	readonly cwd?: string;
@@ -84,9 +85,10 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		context,
 		storage: options.storage ?? "sqlite",
 		...(options.storage !== "memory" ? { storagePath } : {}),
+		...(options.credentialsPath !== undefined ? { credentialsPath: options.credentialsPath } : {}),
 		...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 		model,
-		...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
+		thinkingLevel: options.thinkingLevel ?? fileConfig.thinkingLevel ?? "high",
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.providers !== undefined ? { providers: options.providers } : {}),
 		...(options.extensions !== undefined ? { extensions: options.extensions } : {}),

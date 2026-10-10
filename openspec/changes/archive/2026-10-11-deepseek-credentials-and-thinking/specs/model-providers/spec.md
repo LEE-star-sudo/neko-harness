@@ -1,0 +1,70 @@
+# Spec Delta
+
+## MODIFIED Requirements
+
+### Requirement: DeepSeek 接入
+
+系统 SHALL 内置 DeepSeek provider，使用 OpenAI Chat Completions 格式（api.deepseek.com），按 Pi 认证约定优先读取保存的凭据并回退 DEEPSEEK_API_KEY，支持 deepseek 系列模型的 thinking、tool use 与流式输出。缺少凭据 MUST NOT 阻止网关与前端启动。
+
+#### Scenario: 未配置密钥
+
+- **WHEN** 未保存密钥且 DEEPSEEK_API_KEY 未设置时启动
+- **THEN** 用户可浏览会话和配置密钥；提交 DeepSeek 输入前收到配置引导，不接受该输入为新消息、不更新时间且不发起模型请求
+
+#### Scenario: thinking 级别映射
+
+- **WHEN** 会话配置 thinking level 为 high
+- **THEN** 发往 DeepSeek 的请求携带该 provider 方言对应的 thinking 参数，且回答中的推理内容与正文分离呈现
+
+### Requirement: 模型目录与切换
+
+系统 SHALL 提供可用模型列表（含上下文窗口、价格、支持的能力及思考强度），并允许按会话切换模型与 thinking level。能力列表及不支持强度的调整 MUST 遵循已安装 Pi 的约定，TUI/Web MUST 使用同一能力数据，不能根据外部目录扩展选项或覆盖上游映射。
+
+#### Scenario: 会话级切换模型
+
+- **WHEN** 用户在某会话中切换模型
+- **THEN** 该会话的下一次请求使用新模型，其他会话不受影响
+
+#### Scenario: 已锁定 Pi 的能力
+
+- **WHEN** 使用 Pi 1.1.0 内置 DeepSeek 模型目录
+- **THEN** Flash 可选 off/low/high/max，Pro 可选 off/high/max；两端不提供 minimal/medium/xhigh
+
+#### Scenario: 切换到不支持当前强度的模型
+
+- **WHEN** Flash low 切换为 Pro
+- **THEN** 遵循 Pi 将强度调整为 high，两端显示相同实际生效值，不将 low 透传为 Pro 的有效选项
+
+## ADDED Requirements
+
+### Requirement: 用户级凭据管理
+
+系统 SHALL 将 UI 保存的 DeepSeek 凭据持久保存于宿主用户级独立存储，所有工作区共用，重启后保留。保存凭据 SHALL 优先于环境变量；移除后 SHALL 回退环境变量。保存和移除 MUST 不修改进程环境变量；后续模型请求使用最新凭据，已发出的请求不被强制中断。
+
+#### Scenario: 保存与回退
+
+- **WHEN** 环境变量已有 Key，用户保存另一个 Key 后重启，再移除保存值
+- **THEN** 重启后先使用保存值，移除后使用环境变量；环境变量配置状态始终为已配置
+
+#### Scenario: 空值与存储失败
+
+- **WHEN** 用户提交空白 Key，或凭据文件写入失败
+- **THEN** 拒绝操作并显示不含密钥的错误，保留原生效凭据；空值不视为删除
+
+### Requirement: 凭据保密与状态
+
+系统 MUST 仅向前端返回保存状态、环境变量是否配置及当前生效来源，不返回已有密钥。凭据文件 SHALL 仅宿主用户可读写；密钥 MUST NOT 写入会话、日志、项目配置或浏览器持久存储。“已配置” SHALL 仅表示存在凭据，不声称已通过远端认证。
+
+#### Scenario: 查看与编辑
+
+- **WHEN** 任一前端打开配置界面
+- **THEN** 只读取无敏感内容的状态，环境变量状态来自网关进程；输入框为空，可输入替换值，保存或取消后清除输入
+
+### Requirement: 默认模型与思考强度
+
+系统 SHALL 在没有显式覆盖时为新会话使用 DeepSeek V4.1 Flash（deepseek-flash）及 high 强度。已有会话和显式配置 MUST 保留自身设置；自动标题总结 MUST 继续使用独立非思考请求。
+
+#### Scenario: 默认与显式配置
+
+- **WHEN** 用户从任一前端新建无显式模型/强度覆盖的会话
+- **THEN** 默认值为 Flash high；恢复已有会话不重置其配置，显式指定 off 时保持 off

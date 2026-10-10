@@ -6,6 +6,7 @@ import type { NekoModelInfo } from "@neko-harness/core";
 import {
 	NekoChat,
 	type NekoChat as NekoChatFacade,
+	NekoCredentials,
 	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
@@ -26,6 +27,7 @@ export type NekoGatewayClient = {
 	readonly directory: NekoSessionDirectory;
 	readonly management: NekoSessionManagement;
 	readonly workspaces: NekoWorkspaces;
+	readonly credentials: NekoCredentials;
 	/** Models registry 的全局模型列表（模型选择器数据源）。 */
 	listModels(): Promise<readonly NekoModelInfo[]>;
 	/** attach（幂等）到会话，返回水合完成的 chat 门面（view 订阅可用）。 */
@@ -43,7 +45,7 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 	try {
 		const serverTransport = createClientServiceTransport(client, () => ({ serverId: address.serverId }));
 		const serverBinding = createRemoteServiceBinding({
-			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces],
+			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces, NekoCredentials],
 			transport: serverTransport,
 		});
 		const directory = serverBinding.use(NekoSessionDirectory);
@@ -57,6 +59,7 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 			directory,
 			management,
 			workspaces: serverBinding.use(NekoWorkspaces),
+			credentials: serverBinding.use(NekoCredentials),
 			listModels: () => models.list(BACKGROUND_CONTEXT),
 			async attach(sessionId) {
 				// 重复 attach 前先释放旧会话绑定（路由本身幂等，客户端只是重新水合订阅）。

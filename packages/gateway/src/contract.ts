@@ -111,3 +111,11 @@ export interface NekoWorkspaces {
 	browse(input: NekoBrowseOptions, context: Context): Promise<NekoDirectoryPage>;
 }
 export const NekoWorkspaces = defineService<NekoWorkspaces>("neko.workspaces");
+
+export type NekoCredentialState = import("@neko-harness/core").CredentialStatus & { revision: number };
+export interface NekoCredentials {
+	readonly state: ReplicatedState<NekoCredentialState>;
+	save(input: { key: string }, context: Context): Promise<void>;
+	remove(context: Context): Promise<void>;
+}
+export const NekoCredentials = defineService<NekoCredentials>("neko.credentials");

@@ -2,6 +2,8 @@ export { connectNekoGateway, type NekoGatewayAddress, type NekoGatewayClient } f
 export {
 	NekoChat,
 	type NekoCreateSessionOptions,
+	type NekoCredentialState,
+	NekoCredentials,
 	type NekoDirectoryState,
 	NekoModels,
 	NekoSessionDirectory,

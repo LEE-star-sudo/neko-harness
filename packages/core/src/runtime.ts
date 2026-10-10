@@ -2,8 +2,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AttachedReplicatedState, Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { ModelThinkingLevel, Provider } from "@earendil-works/pi-ai";
-import { createModels } from "@earendil-works/pi-ai/models";
+import type { CredentialStore, ModelThinkingLevel, Provider } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, createModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import {
 	type AgentEventStream,
@@ -27,6 +27,7 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { type CredentialStatus, FileCredentialStore, MemoryCredentialStore } from "./credentials.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import {
 	accessibleWorkspace,
@@ -54,8 +55,10 @@ export type NekoRuntimeOptions = {
 	readonly storage?: "sqlite" | "memory";
 	/** SQLite file path; default `~/.neko/neko.sqlite`. */
 	readonly storagePath?: string;
-	/** DeepSeek API key; default `process.env.DEEPSEEK_API_KEY`. Missing: a clear error is thrown. */
+	/** Explicit in-memory DeepSeek override; never persisted or written to process.env. */
 	readonly apiKey?: string;
+	readonly credentials?: CredentialStore;
+	readonly credentialsPath?: string;
 	/** Model the root conversation runs with; default the built-in DeepSeek chat model. */
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
@@ -122,6 +125,8 @@ export type NekoModelInfo = {
 	readonly contextWindow: number;
 	/** Whether the model supports thinking/reasoning levels. */
 	readonly reasoning: boolean;
+	readonly supportedThinkingLevels: readonly ModelThinkingLevel[];
+	readonly thinkingLevelAdjustments: Record<ModelThinkingLevel, ModelThinkingLevel>;
 };
 
 /** What one conversation currently runs with (resolved agent). */
@@ -221,6 +226,9 @@ export type NekoRuntime = {
 	configureConversation(id: ConversationId, change: NekoConversationChange): Promise<boolean>;
 	/** Every chat model in the Models registry, for frontend model selectors. */
 	listModels(): NekoModelInfo[];
+	credentialStatus(): Promise<CredentialStatus>;
+	saveCredential(key: string): Promise<void>;
+	removeCredential(): Promise<void>;
 	/** The conversation's resolved agent: effective model, thinking level, selected extension names. */
 	getAgent(id?: ConversationId): Promise<NekoAgentInfo>;
 	/**
@@ -243,24 +251,28 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const model: NekoModelRef = options.model ?? DEFAULT_MODEL;
 	const providers = options.providers ?? [];
 
-	const deepseekReplaced = providers.some((provider) => provider.id === "deepseek");
-	if (model.provider === "deepseek" && !deepseekReplaced) {
-		const key = options.apiKey ?? process.env.DEEPSEEK_API_KEY;
-		if (key === undefined || key === "") {
-			throw new Error(
-				"DEEPSEEK_API_KEY is not set: neko-harness needs a DeepSeek API key for the built-in " +
-					'"deepseek" provider. Set the environment variable or pass createNekoRuntime({ apiKey }).',
-			);
-		}
-		// deepseekProvider() reads the key from the environment at request time.
-		if (options.apiKey !== undefined && process.env.DEEPSEEK_API_KEY === undefined) {
-			process.env.DEEPSEEK_API_KEY = options.apiKey;
-		}
-	}
-
-	const models = createModels();
+	const credentials =
+		options.credentials ??
+		(options.storage === "memory" && !options.credentialsPath
+			? new MemoryCredentialStore()
+			: new FileCredentialStore(options.credentialsPath));
+	const runtimeKey = options.apiKey?.trim();
+	const effectiveCredentials: CredentialStore = runtimeKey
+		? {
+				read: async (id) => (id === "deepseek" ? { type: "api_key", key: runtimeKey } : credentials.read(id)),
+				list: () => credentials.list(),
+				modify: (id, fn) => credentials.modify(id, fn),
+				delete: (id) => credentials.delete(id),
+			}
+		: credentials;
+	const models = createModels({ credentials: effectiveCredentials });
 	models.setProvider(deepseekProvider());
 	for (const provider of providers) models.setProvider(provider);
+	const resolveLevel = (ref: NekoModelRef, level: ModelThinkingLevel) => {
+		const info = models.getModel(ref.provider, ref.modelId);
+		if (!info) throw new Error("Unknown model");
+		return clampThinkingLevel(info, level);
+	};
 
 	const registry = createRegistry();
 	registry.install(CodingTools);
@@ -313,7 +325,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const conversation = await harness.root(context, {
 		agent: {
 			model,
-			...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
+			thinkingLevel: resolveLevel(model, options.thinkingLevel ?? "high"),
 			cwd: defaultCwd,
 		},
 	});
@@ -352,7 +364,14 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		content: string,
 		submitOptions?: NekoSubmitOptions,
 	): Promise<Submission> => {
-		executionWorkspace((await target.agent(context)).cwd);
+		const agent = await target.agent(context);
+		executionWorkspace(agent.cwd);
+		const duplicate =
+			submitOptions?.requestId !== undefined &&
+			(await storage.submissionByRequest(target.id, submitOptions.requestId, context));
+		if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
+			throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
+		}
 		const requestId = submitOptions?.requestId ?? crypto.randomUUID();
 		await metadata.prepare(target.id, requestId, content);
 		let result: Submission;
@@ -555,7 +574,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 					ownership: { kind: "ownerless" },
 					agent: {
 						model: createOptions?.model ?? model,
-						...(createOptions?.thinkingLevel !== undefined ? { thinkingLevel: createOptions.thinkingLevel } : {}),
+						thinkingLevel: resolveLevel(
+							createOptions?.model ?? model,
+							createOptions?.thinkingLevel ?? options.thinkingLevel ?? "high",
+						),
 						cwd: workspace.path,
 					},
 				},
@@ -575,14 +597,46 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		async configureConversation(id, change) {
 			const session = await getConversation(id);
 			if (session === undefined) return false;
+			const current = await session.conversation.agent(context);
+			const ref = change.model ?? current.model;
+			const targetModel = ref && models.getModel(ref.provider, ref.modelId);
+			if (!targetModel) throw new Error("Unknown model");
 			await session.conversation.configure(
-				{
-					...(change.model !== undefined ? { model: change.model } : {}),
-					...(change.thinkingLevel !== undefined ? { thinkingLevel: change.thinkingLevel } : {}),
-				},
+				{ model: ref, thinkingLevel: clampThinkingLevel(targetModel, change.thinkingLevel ?? current.thinkingLevel) },
 				context,
 			);
 			return true;
+		},
+		async credentialStatus() {
+			const saved = await credentials.read("deepseek");
+			const savedConfigured = saved?.type === "api_key" && Boolean(saved.key);
+			const environmentConfigured = Boolean(process.env.DEEPSEEK_API_KEY);
+			return {
+				savedConfigured,
+				environmentConfigured,
+				source: runtimeKey ? "runtime" : savedConfigured ? "saved" : environmentConfigured ? "environment" : "none",
+			};
+		},
+		async saveCredential(key) {
+			if (
+				typeof key !== "string" ||
+				!key.trim() ||
+				key.length > 4096 ||
+				Array.from(key).some((char) => char.charCodeAt(0) < 32)
+			)
+				throw new Error("Enter a valid API key.");
+			try {
+				await credentials.modify("deepseek", async () => ({ type: "api_key", key: key.trim() }));
+			} catch {
+				throw new Error("Cannot save API key.");
+			}
+		},
+		async removeCredential() {
+			try {
+				await credentials.delete("deepseek");
+			} catch {
+				throw new Error("Cannot remove API key.");
+			}
 		},
 		listModels() {
 			return models.getModels().map((model) => ({
@@ -591,6 +645,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				name: model.name,
 				contextWindow: model.contextWindow,
 				reasoning: model.reasoning,
+				supportedThinkingLevels: getSupportedThinkingLevels(model),
+				thinkingLevelAdjustments: Object.fromEntries(
+					(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const).map((level) => [
+						level,
+						clampThinkingLevel(model, level),
+					]),
+				) as Record<ModelThinkingLevel, ModelThinkingLevel>,
 			}));
 		},
 		async getAgent(id?: ConversationId) {

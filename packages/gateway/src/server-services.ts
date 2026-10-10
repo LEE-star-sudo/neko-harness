@@ -9,6 +9,8 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { RoutedServerServiceAttachment, RoutedServerServiceHost } from "@earendil-works/pi-server";
 import type { NekoRuntime } from "@neko-harness/core";
 import {
+	type NekoCredentialState,
+	NekoCredentials,
 	type NekoDirectoryState,
 	NekoModels,
 	NekoSessionDirectory,
@@ -49,6 +51,7 @@ export async function createNekoServerServices(options: {
 		}));
 
 	let revision = 1;
+	const credentials = replicatedState<NekoCredentialState>({ revision: 1, ...(await runtime.credentialStatus()) });
 	const workspaces = replicatedState<NekoWorkspaceState>({ revision, workspaces: await runtime.listWorkspaces() });
 	const directory = replicatedState<NekoDirectoryState>({ revision, sessions: await list() });
 	const attachments = new Set<RoutedServerServiceAttachment>();
@@ -88,9 +91,24 @@ export async function createNekoServerServices(options: {
 					{ service: NekoSessionDirectory, mode: "singleton" },
 					{ service: NekoSessionManagement, mode: "singleton" },
 					{ service: NekoModels, mode: "singleton" },
+					{ service: NekoCredentials, mode: "singleton" },
 					{ service: NekoWorkspaces, mode: "singleton" },
 				]);
 				provider.provide(NekoSessionDirectory, { state: directory });
+				const updateCredentials = (operation: () => Promise<void>) =>
+					serialize(async () => {
+						await operation();
+						const status = await runtime.credentialStatus();
+						credentials.change(context, (draft) => {
+							Object.assign(draft, status);
+							draft.revision++;
+						});
+					});
+				provider.provide(NekoCredentials, {
+					state: credentials,
+					save: (input) => updateCredentials(() => runtime.saveCredential(input.key)),
+					remove: () => updateCredentials(() => runtime.removeCredential()),
+				});
 				provider.provide(NekoWorkspaces, {
 					state: workspaces,
 					browse: (input) => browseWorkspaces(input),

@@ -1,6 +1,6 @@
 import type { ChatView, NekoModelInfo } from "@neko-harness/core";
 import { useSyncExternalStore } from "react";
-import type { NekoWorkspaceSummary } from "./contract.ts";
+import type { NekoCredentialState, NekoWorkspaceSummary } from "./contract.ts";
 import type { NekoSessionSummary } from "./gateway.ts";
 
 export type ConnPhase = "connecting" | "ready" | "reconnecting" | "error";
@@ -10,6 +10,7 @@ export type NekoNotice = { level: "info" | "error"; text: string };
 export type NekoState = {
 	/** 网关连接阶段；error = /api/info 获取失败（不会自动恢复，需刷新页面）。 */
 	phase: ConnPhase;
+	credentials: NekoCredentialState | null;
 	workspaceRoot: string;
 	workspaces: readonly NekoWorkspaceSummary[];
 	operating: boolean;
@@ -25,6 +26,7 @@ export type NekoState = {
 
 let state: NekoState = {
 	phase: "connecting",
+	credentials: null,
 	workspaceRoot: "",
 	workspaces: [],
 	operating: false,
@@ -59,6 +61,10 @@ export function getState(): NekoState {
 }
 
 export const storeActions = {
+	setCredentials(credentials: NekoCredentialState | null): void {
+		if (credentials && state.credentials && credentials.revision < state.credentials.revision) return;
+		emit({ ...state, credentials });
+	},
 	setWorkspace(workspaceRoot: string): void {
 		emit({ ...state, workspaceRoot });
 	},

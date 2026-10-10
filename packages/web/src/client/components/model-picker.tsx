@@ -1,125 +1,127 @@
-import type { NekoModelInfo, NekoModelRef } from "@neko-harness/core";
-import { useEffect, useState } from "react";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { NekoModelRef } from "@neko-harness/core";
+import { useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
+import { Modal } from "./nav-primitives";
 
-function formatContext(tokens: number): string {
-	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M`;
-	if (tokens >= 1_000) return `${Math.round(tokens / 1024)}k`;
-	return String(tokens);
-}
-
-/**
- * 模型选择器（状态条左侧）：点击弹出模型目录面板（neko.models.list），
- * 当前模型高亮，点击切换（neko.chat.configure，下一次请求生效）。
- */
 export function ModelPicker(props: { current: NekoModelRef | null; fallbackLabel: string }) {
-	const { models } = useNekoState();
-	const [open, setOpen] = useState(false);
-
-	useEffect(() => {
-		if (!open) return;
-		const onKeyDown = (event: KeyboardEvent): void => {
-			if (event.key === "Escape") setOpen(false);
-		};
-		window.addEventListener("keydown", onKeyDown);
-		return () => {
-			window.removeEventListener("keydown", onKeyDown);
-		};
-	}, [open]);
-
-	const currentInfo =
-		props.current !== null
-			? models.find((m) => m.provider === props.current?.provider && m.modelId === props.current?.modelId)
-			: undefined;
-	const label =
-		currentInfo?.name ??
-		(props.current !== null ? `${props.current.provider}/${props.current.modelId}` : props.fallbackLabel);
-
-	const select = (model: NekoModelInfo): void => {
-		setOpen(false);
-		appActions.configureModel({ provider: model.provider, modelId: model.modelId });
-	};
-
+	const { models, currentSessionId, view, phase, operating } = useNekoState();
+	const [session, setSession] = useState<{ id: string } | null>(null);
+	const current = models.find((m) => m.provider === props.current?.provider && m.modelId === props.current?.modelId);
+	if (session && session.id !== currentSessionId) setSession(null);
+	const label = current?.name ?? props.fallbackLabel;
 	return (
-		<span className="relative min-w-0">
+		<>
 			<button
 				type="button"
-				onClick={() => {
-					setOpen(!open);
-				}}
-				disabled={models.length === 0}
-				className="focus-neko inline-flex min-w-0 max-w-56 items-center gap-1 rounded-full border border-transparent px-2 py-0.5 text-xs text-ink-500 hover:border-sakura-200 hover:bg-sakura-50 hover:text-sakura-800 disabled:cursor-default disabled:hover:border-transparent disabled:hover:bg-transparent"
-				aria-label={`选择模型（当前：${label}）`}
-				title={models.length === 0 ? label : "切换模型"}
+				disabled={!current || phase !== "ready" || operating}
+				onClick={() => currentSessionId && setSession({ id: currentSessionId })}
+				className="focus-neko min-w-0 truncate rounded-full px-2 py-1 text-left text-xs text-ink-500 hover:bg-sakura-50"
+				aria-label={`模型与思考强度：${label} ${view?.agent.thinkingLevel ?? ""}`}
 			>
-				<span className="min-w-0 truncate font-mono">{label}</span>
-				{models.length > 0 && (
-					<span aria-hidden className="shrink-0 text-[10px]">
-						▾
-					</span>
-				)}
+				{label} · {view?.agent.thinkingLevel ?? "off"} ▾
 			</button>
-			{open && (
-				<>
+			{session && session.id === currentSessionId && current && (
+				<ModelForm
+					key={session.id}
+					session={session.id}
+					current={current}
+					level={view?.agent.thinkingLevel ?? "off"}
+					onClose={() => setSession((active) => (active === session ? null : active))}
+				/>
+			)}
+		</>
+	);
+}
+function ModelForm(props: {
+	session: string;
+	current: ReturnType<typeof useNekoState>["models"][number];
+	level: string;
+	onClose: () => void;
+}) {
+	const { models } = useNekoState();
+	const [selected, setSelected] = useState(props.current);
+	const [level, setLevel] = useState<ModelThinkingLevel>(props.level as ModelThinkingLevel);
+	const [busy, setBusy] = useState(false);
+	const pending = useRef(false);
+	const [error, setError] = useState("");
+	async function apply() {
+		if (pending.current) return;
+		pending.current = true;
+		setBusy(true);
+		setError("");
+		try {
+			await appActions.configure(
+				{ model: { provider: selected.provider, modelId: selected.modelId }, thinkingLevel: level },
+				props.session,
+			);
+			props.onClose();
+		} catch {
+			setError("配置失败，请重试。");
+		} finally {
+			pending.current = false;
+			setBusy(false);
+		}
+	}
+	return (
+		<Modal title="模型与思考强度" onClose={props.onClose}>
+			<div className="model-settings space-y-5 p-5">
+				<fieldset className="space-y-2" aria-label="模型">
+					{models.map((model) => (
+						<button
+							type="button"
+							key={`${model.provider}/${model.modelId}`}
+							disabled={busy}
+							aria-pressed={model === selected}
+							onClick={() => {
+								setSelected(model);
+								setLevel(model.thinkingLevelAdjustments[level]);
+							}}
+							className={`focus-neko block w-full rounded-xl border px-4 py-3 text-left text-sm ${model === selected ? "border-sakura-300 bg-sakura-50 text-sakura-800" : "border-sakura-200 bg-surface text-ink-700"}`}
+						>
+							{model.name}
+							{model === selected ? " ✓" : ""}
+						</button>
+					))}
+				</fieldset>
+				<div>
+					<p className="mb-2 text-sm text-ink-600">思考强度</p>
+					<fieldset className="flex flex-wrap gap-2" aria-label="思考强度">
+						{selected.supportedThinkingLevels.map((item) => (
+							<button
+								type="button"
+								key={item}
+								disabled={busy}
+								aria-pressed={level === item}
+								onClick={() => setLevel(item)}
+								className={`focus-neko rounded-full border px-4 py-2 text-sm ${item === level ? "border-tianyi-300 bg-tianyi-50 text-tianyi-800" : "border-sakura-200"}`}
+							>
+								{item}
+							</button>
+						))}
+					</fieldset>
+				</div>
+				<p className="text-xs text-ink-500">仅当前会话，从下一次请求生效。</p>
+				{error && (
+					<p role="alert" className="text-sm text-sakura-800">
+						{error}
+					</p>
+				)}
+				<div className="flex justify-end gap-2">
+					<button type="button" onClick={props.onClose} className="focus-neko rounded-full px-4 py-2 text-sm">
+						取消
+					</button>
 					<button
 						type="button"
-						aria-label="关闭模型选择"
-						className="focus-neko fixed inset-0 z-30 cursor-default"
-						onClick={() => {
-							setOpen(false);
-						}}
-					/>
-					<div
-						role="listbox"
-						aria-label="模型列表"
-						className="discrete-in absolute bottom-full left-0 z-40 mb-2 max-h-80 w-80 overflow-y-auto rounded-2xl border border-sakura-200 bg-surface p-2 shadow-lift"
+						disabled={busy}
+						onClick={() => void apply()}
+						className="focus-neko rounded-full bg-sakura-100 px-5 py-2 text-sm text-sakura-800"
 					>
-						<ul className="flex flex-col gap-1">
-							{models.map((model) => {
-								const active =
-									props.current !== null &&
-									model.provider === props.current.provider &&
-									model.modelId === props.current.modelId;
-								return (
-									<li key={`${model.provider}/${model.modelId}`}>
-										<button
-											type="button"
-											role="option"
-											aria-selected={active}
-											onClick={() => {
-												select(model);
-											}}
-											className={`focus-neko w-full rounded-xl border px-3 py-2 text-left ${
-												active
-													? "border-sakura-300 bg-sakura-100"
-													: "border-transparent hover:border-sakura-200 hover:bg-sakura-50"
-											}`}
-										>
-											<span className="flex items-center gap-1.5">
-												<span className="truncate text-[13px] font-medium text-ink-900">{model.name}</span>
-												{model.reasoning && (
-													<span className="shrink-0 rounded-full border border-tianyi-200 bg-tianyi-50 px-1.5 text-[10px] text-tianyi-800">
-														思考 ✦
-													</span>
-												)}
-												{active && (
-													<span aria-hidden className="ml-auto shrink-0 text-sakura-500">
-														◈
-													</span>
-												)}
-											</span>
-											<span className="mt-0.5 block truncate font-mono text-[11px] text-ink-500">
-												{model.provider}/{model.modelId} · {formatContext(model.contextWindow)} ctx
-											</span>
-										</button>
-									</li>
-								);
-							})}
-						</ul>
-					</div>
-				</>
-			)}
-		</span>
+						{busy ? "应用中…" : "应用"}
+					</button>
+				</div>
+			</div>
+		</Modal>
 	);
 }

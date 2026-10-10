@@ -1,10 +1,14 @@
+import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
+import { useNekoState } from "../lib/store";
 
 const MAX_HEIGHT = 160;
 
 /** 输入区：textarea + 发送；Enter 发送 / Shift+Enter 换行（兼容输入法组合中状态）；忙碌时可中止。 */
 export function Composer(props: { busy: boolean; status: string | null; disabled?: boolean }) {
+	const { credentials, view } = useNekoState();
+	const missingKey = view?.agent.model?.provider === "deepseek" && credentials?.source === "none";
 	const [value, setValue] = useState("");
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -17,7 +21,7 @@ export function Composer(props: { busy: boolean; status: string | null; disabled
 
 	const submit = (): void => {
 		const content = value.trim();
-		if (content === "" || props.busy || props.disabled) return;
+		if (content === "" || props.busy || props.disabled || missingKey) return;
 		appActions.submit(content);
 		setValue("");
 		requestAnimationFrame(resize);
@@ -29,6 +33,14 @@ export function Composer(props: { busy: boolean; status: string | null; disabled
 
 	return (
 		<div className="border-t border-sakura-200/70 bg-surface/80 px-4 py-3 backdrop-blur">
+			{missingKey && (
+				<p className="mx-auto mb-2 max-w-3xl text-sm text-sakura-700">
+					尚未配置 DeepSeek Key。
+					<Link to="/settings" className="focus-neko underline">
+						前往设置
+					</Link>
+				</p>
+			)}
 			<div className="mx-auto flex max-w-3xl items-end gap-2">
 				<textarea
 					ref={textareaRef}

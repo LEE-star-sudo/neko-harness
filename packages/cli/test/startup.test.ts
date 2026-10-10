@@ -33,7 +33,12 @@ async function freePort(): Promise<number> {
 
 describe("Bun gateway startup", () => {
 	it("TUI starts, reuses and closes only its own gateway", async () => {
-		const options = { storagePath: join(dir, "session.sqlite"), configDir: dir, spawnTimeoutMs: 5_000 };
+		const options = {
+			credentialsPath: join(dir, "credentials.json"),
+			storagePath: join(dir, "session.sqlite"),
+			configDir: dir,
+			spawnTimeoutMs: 5_000,
+		};
 		const owner = await connectToGateway(options);
 		try {
 			expect(owner.spawned).toBe(true);
@@ -49,6 +54,7 @@ describe("Bun gateway startup", () => {
 
 	it("Web uses Bun, forwards options, supports WS reconnect and releases its child", async () => {
 		const options = {
+			credentialsPath: join(dir, "credentials.json"),
 			storagePath: join(dir, "session.sqlite"),
 			port: await freePort(),
 			cwd: dir,
@@ -91,6 +97,7 @@ describe("Bun gateway startup", () => {
 		const socketPath = join(dir, "timeout.sock");
 		await expect(
 			ensureNekoGateway({
+				credentialsPath: join(dir, "credentials.json"),
 				storagePath: join(dir, "session.sqlite"),
 				socketPath,
 				port: await freePort(),
@@ -100,17 +107,17 @@ describe("Bun gateway startup", () => {
 		expect(existsSync(socketPath)).toBe(false);
 	});
 
-	it("reports missing credentials without leaving a socket", async () => {
+	it("starts a gateway without credentials for frontend configuration", async () => {
 		delete process.env.DEEPSEEK_API_KEY;
-		const socketPath = join(dir, "failed.sock");
-		await expect(
-			connectToGateway({
-				storagePath: join(dir, "session.sqlite"),
-				socketPath,
-				configDir: dir,
-				spawnTimeoutMs: 3_000,
-			}),
-		).rejects.toThrow(/exited early/);
-		expect(existsSync(socketPath)).toBe(false);
+		const socketPath = join(dir, "unconfigured.sock");
+		const connected = await connectToGateway({
+			credentialsPath: join(dir, "credentials.json"),
+			storagePath: join(dir, "session.sqlite"),
+			socketPath,
+			configDir: dir,
+			spawnTimeoutMs: 3_000,
+		});
+		expect(existsSync(socketPath)).toBe(true);
+		await connected.close();
 	});
 });
