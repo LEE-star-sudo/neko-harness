@@ -20,8 +20,16 @@ import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
 import { ToolExecutionComponent } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
+import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
 import { totalUsage, userText } from "./format.ts";
-import { getEditorTheme, theme } from "./theme.ts";
+import {
+	getActiveThemeMode,
+	getEditorTheme,
+	setActiveTheme,
+	type ThemeMode,
+	type ThemePreference,
+	theme,
+} from "./theme.ts";
 
 export type NekoTuiOptions = {
 	/** 会话工具的工作目录；默认 process.cwd()。 */
@@ -30,6 +38,8 @@ export type NekoTuiOptions = {
 	readonly storagePath?: string;
 	/** 运行模型；默认内置 DeepSeek 模型。 */
 	readonly model?: NekoModelRef;
+	/** 主题：light / dark / auto（默认 auto，按终端背景自动选择）。 */
+	readonly theme?: ThemePreference;
 };
 
 const EXIT_COMMANDS = new Set(["/exit", "/quit"]);
@@ -49,6 +59,11 @@ class NekoTuiApp {
 	readonly #footer = new StatusFooter();
 	readonly #modelLabel: string;
 	readonly #cwd: string;
+	readonly #themePreference: ThemePreference;
+	/** 最近一次 applyView 的 live/view，主题切换后用于重刷状态栏与 Loader 配色。 */
+	#lastLive: LiveState | undefined;
+	#lastView: ConversationView | undefined;
+	#terminalSchemeUnsubscribe: (() => void) | undefined;
 
 	/** 已渲染的 entry id 序列，用于增量同步与重建判断。 */
 	#renderedEntryIds: number[] = [];
@@ -68,10 +83,13 @@ class NekoTuiApp {
 	#resolveExit: () => void = () => {};
 	#exitStarted = false;
 
-	constructor(runtime: NekoRuntime, modelLabel: string, cwd: string) {
+	constructor(runtime: NekoRuntime, modelLabel: string, cwd: string, themePreference: ThemePreference) {
 		this.#runtime = runtime;
 		this.#modelLabel = modelLabel;
 		this.#cwd = cwd;
+		this.#themePreference = themePreference;
+		// 首帧前的临时主题：auto 先用 COLORFGBG（无则浅色），OSC 11 应答后再修正。
+		setActiveTheme(themePreference === "auto" ? (detectColorFgBgMode() ?? "light") : themePreference);
 		this.#ui = new TuiAltScreen(new ProcessTerminal());
 		this.#editor = new Editor(this.#ui, getEditorTheme(), { paddingX: 1 });
 		this.#editor.setAutocompleteProvider(
@@ -122,10 +140,37 @@ class NekoTuiApp {
 		const unsubscribe = view.subscribe(() => this.scheduleApply());
 		this.#ui.start();
 		this.#ui.requestRender(true);
+		this.#startThemeDetection();
 		await this.#exited;
 		unsubscribe();
+		this.#terminalSchemeUnsubscribe?.();
 		this.#loader?.stop();
 		this.#ui.stop();
+	}
+
+	/** auto：首帧后异步查询终端背景（不阻塞启动），并跟随终端后续的主题变化通知。 */
+	#startThemeDetection(): void {
+		if (this.#themePreference !== "auto") return;
+		this.#ui.setTerminalColorSchemeNotifications(true);
+		this.#terminalSchemeUnsubscribe = this.#ui.onTerminalColorSchemeChange((scheme) => {
+			this.#applyThemeMode(scheme);
+		});
+		void queryTerminalMode(this.#ui, (late) => {
+			this.#applyThemeMode(late);
+		}).then(
+			(mode) => this.#applyThemeMode(mode),
+			() => {},
+		);
+	}
+
+	#applyThemeMode(mode: ThemeMode): void {
+		if (this.#exitStarted || mode === getActiveThemeMode()) return;
+		setActiveTheme(mode);
+		this.#ui.invalidate();
+		// Loader / footer 在创建时烘焙了颜色，按最近状态重建。
+		if (this.#lastLive !== undefined) this.#syncBusy(this.#lastLive, true);
+		if (this.#lastView !== undefined) this.#syncFooter(this.#lastView);
+		this.#ui.requestRender(true);
 	}
 
 	/** 提交输入；空串忽略，/exit、/quit 退出。忙碌时按 pi-durable 默认行为排队为 follow-up。 */
@@ -200,6 +245,8 @@ class NekoTuiApp {
 
 	applyView(view: ConversationView): void {
 		const live = (view.docs["pi.live"] ?? {}) as LiveState;
+		this.#lastLive = live;
+		this.#lastView = view;
 		this.#syncTranscript(view.entries);
 		const message = live.generation?.message as AssistantMessage | undefined;
 		// 部分流式内容被丢弃（如重试）时，重建转录以移除孤立的流式组件。
@@ -313,7 +360,7 @@ class NekoTuiApp {
 		return card;
 	}
 
-	#syncBusy(live: LiveState): void {
+	#syncBusy(live: LiveState, force = false): void {
 		const runningTool = live.tools?.find((slot) => slot.status === "running");
 		const busy =
 			live.run === undefined
@@ -323,7 +370,7 @@ class NekoTuiApp {
 					: runningTool !== undefined
 						? `运行 ${runningTool.name}…`
 						: "思考中…";
-		if (busy === this.#busy) {
+		if (!force && busy === this.#busy) {
 			if (this.#loader !== undefined && busy !== undefined) this.#loader.setMessage(busy);
 			return;
 		}
@@ -359,7 +406,12 @@ export async function runTui(options: NekoTuiOptions = {}): Promise<void> {
 	});
 	try {
 		const view = await runtime.viewState();
-		const app = new NekoTuiApp(runtime, `${model.provider}/${model.modelId}`, options.cwd ?? process.cwd());
+		const app = new NekoTuiApp(
+			runtime,
+			`${model.provider}/${model.modelId}`,
+			options.cwd ?? process.cwd(),
+			options.theme ?? "auto",
+		);
 		await app.run(view);
 		view.dispose();
 	} finally {

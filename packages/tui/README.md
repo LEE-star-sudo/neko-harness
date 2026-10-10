@@ -6,7 +6,7 @@
 
 ```bash
 # 需要 DEEPSEEK_API_KEY
-npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <sqlite路径>]
+npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--storage <sqlite路径>] [--theme light|dark|auto]
 ```
 
 ## 用法
@@ -17,12 +17,30 @@ npx tsx packages/tui/src/main.ts [--cwd <dir>] [--model provider/modelId] [--sto
 - 工具卡片显示工具名 + 参数摘要 + 状态；结果默认预览 8 行，点击展开完整输出
 - 状态栏：模型 · 运行状态 · 用量（↑input ↓output 缓存 $成本）· 工作目录
 
-## API
+## 主题
+
+明暗两套主题共享同一组语义槽位（用户气泡、助手强调、工具卡片、thinking 弱化、状态栏等）：
+
+- **dark**：深色终端（Tokyo Night 风）
+- **light**：浅色蓝粉白（樱花粉主色 / 天依蓝辅色；文本色按浅底对比度加深）
+
+选择方式（优先级从高到低）：
+
+1. `--theme light|dark|auto`
+2. 环境变量 `NEKO_THEME=light|dark|auto`
+3. 默认 `auto`
+
+`auto` 的回退链：OSC 11 终端背景查询（pi-tui `queryTerminalColors`，超时 100ms，不阻塞启动；超时后迟到的应答仍会修正）→ `COLORFGBG` 环境变量（按 Vim 的索引分类）→ 默认浅色。首帧先用 `COLORFGBG`（无则浅色）渲染，检测完成后如不同则整体重绘；运行期间还会跟随终端的主题变化通知。
 
 ```ts
 import { runTui } from "@neko-harness/tui";
 
-await runTui({ cwd: process.cwd(), storagePath: "~/.neko/neko.sqlite", model: { provider: "deepseek", modelId: "deepseek-flash" } });
+await runTui({
+  cwd: process.cwd(),
+  storagePath: "~/.neko/neko.sqlite",
+  model: { provider: "deepseek", modelId: "deepseek-flash" },
+  theme: "auto", // "light" | "dark" | "auto"
+});
 ```
 
 ## 后续（v1 未做）
