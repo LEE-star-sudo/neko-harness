@@ -80,6 +80,12 @@ export const appActions = {
 	submit(content: string, files: ImageFile[] = [], requestId?: string, sessionId?: string): Promise<void> {
 		return requireConnection().submit(content, files, requestId, sessionId);
 	},
+	searchFiles(query: string, workspaceRoot: string, signal: AbortSignal) {
+		return requireConnection().searchFiles(query, workspaceRoot, signal);
+	},
+	workspaceImage(path: string, sessionId: string, signal: AbortSignal) {
+		return requireConnection().workspaceImage(path, sessionId, signal);
+	},
 	compact(instructions: string, sessionId?: string): Promise<void> {
 		return requireConnection().compact(instructions, sessionId);
 	},

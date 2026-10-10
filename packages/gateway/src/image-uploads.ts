@@ -12,11 +12,13 @@ type Upload = {
 /** Attachment-local ownership; disconnect disposes only this client's staging data. */
 export class ImageUploads {
 	#uploads = new Map<string, Upload>();
+	#closed = false;
 	#timer = setInterval(() => this.expire(), 60_000).unref();
 	private expire() {
 		for (const [id, u] of this.#uploads) if (u.expires < Date.now()) this.#uploads.delete(id);
 	}
 	begin(input: { name: string; mimeType: string; size: number }): string {
+		if (this.#closed) throw new Error("Image attachment is closed");
 		this.expire();
 		if (!Number.isSafeInteger(input.size) || input.size < 1 || input.size > IMAGE_LIMITS.maxBytes)
 			throw new Error("Image exceeds 20 MiB");
@@ -85,10 +87,23 @@ export class ImageUploads {
 			content: { type: "image" as const, mimeType: u.mimeType, data: Buffer.concat(u.chunks).toString("base64") },
 		}));
 	}
+	read(id: string, offset: number) {
+		const u = this.get(id);
+		if (!u.ready || !Number.isSafeInteger(offset) || offset < 0 || offset > u.size)
+			throw new Error("Invalid image range");
+		return {
+			data: Buffer.concat(u.chunks)
+				.subarray(offset, offset + IMAGE_CHUNK_BYTES)
+				.toString("base64"),
+			total: u.size,
+			mimeType: u.mimeType,
+		};
+	}
 	release(id: string) {
 		this.#uploads.delete(id);
 	}
 	close() {
+		this.#closed = true;
 		clearInterval(this.#timer);
 		this.#uploads.clear();
 	}

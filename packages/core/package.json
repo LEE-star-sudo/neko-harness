@@ -23,6 +23,16 @@
 			"neko-source": "./src/credential-providers.ts",
 			"types": "./dist/credential-providers.d.ts",
 			"import": "./dist/credential-providers.js"
+		},
+		"./file-mentions": {
+			"neko-source": "./src/file-mentions.ts",
+			"types": "./dist/file-mentions.d.ts",
+			"import": "./dist/file-mentions.js"
+		},
+		"./workspace-files": {
+			"neko-source": "./src/workspace-files.ts",
+			"types": "./dist/workspace-files.d.ts",
+			"import": "./dist/workspace-files.js"
 		}
 	},
 	"scripts": {

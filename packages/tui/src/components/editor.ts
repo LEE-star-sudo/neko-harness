@@ -25,6 +25,11 @@ export class BoundedEditor extends Editor {
 
 	override handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
+		if (matchesKey(data, "escape") && this.isShowingAutocomplete()) {
+			this.resetEscapeSequence();
+			super.handleInput(data);
+			return;
+		}
 		if (matchesKey(data, "escape")) {
 			if (isKeyRepeat(data)) return;
 			const now = Date.now();

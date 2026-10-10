@@ -29,7 +29,7 @@ export async function prepareImage(
 	bytes: Uint8Array,
 	mimeType: string,
 	name: string,
-	model: Model<Api>,
+	model: { readonly input: readonly string[]; readonly inputLimits?: Model<Api>["inputLimits"] },
 ): Promise<PreparedImage> {
 	if (!model.input.includes("image"))
 		throw new Error("This model does not support images. Switch model or remove the images.");

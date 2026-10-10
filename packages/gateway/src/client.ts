@@ -10,6 +10,7 @@ import {
 	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
+	NekoWorkspaceFiles,
 	NekoWorkspaces,
 } from "./contract.ts";
 import { createWsByteTransportFactory } from "./ws-listener.ts";
@@ -27,6 +28,7 @@ export type NekoGatewayClient = {
 	readonly directory: NekoSessionDirectory;
 	readonly management: NekoSessionManagement;
 	readonly workspaces: NekoWorkspaces;
+	readonly workspaceFiles: NekoWorkspaceFiles;
 	readonly credentials: NekoCredentials;
 	/** Models registry 的全局模型列表（模型选择器数据源）。 */
 	listModels(): Promise<readonly NekoModelInfo[]>;
@@ -45,7 +47,14 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 	try {
 		const serverTransport = createClientServiceTransport(client, () => ({ serverId: address.serverId }));
 		const serverBinding = createRemoteServiceBinding({
-			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces, NekoCredentials],
+			services: [
+				NekoSessionDirectory,
+				NekoSessionManagement,
+				NekoModels,
+				NekoWorkspaces,
+				NekoWorkspaceFiles,
+				NekoCredentials,
+			],
 			transport: serverTransport,
 		});
 		const directory = serverBinding.use(NekoSessionDirectory);
@@ -59,6 +68,7 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 			directory,
 			management,
 			workspaces: serverBinding.use(NekoWorkspaces),
+			workspaceFiles: serverBinding.use(NekoWorkspaceFiles),
 			credentials: serverBinding.use(NekoCredentials),
 			listModels: () => models.list(BACKGROUND_CONTEXT),
 			async attach(sessionId) {
@@ -78,6 +88,8 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 				// async 返回值的 thenable 判定；包一层普通对象再交给调用方。
 				const chat: NekoChatFacade = {
 					view: facade.view,
+					importImage: async (input, context) => facade.importImage(input, context),
+					draftImage: async (input, context) => facade.draftImage(input, context),
 					compact: async (input, context) => facade.compact(input, context),
 					beginImage: async (input, context) => facade.beginImage(input, context),
 					appendImage: async (input, context) => facade.appendImage(input, context),

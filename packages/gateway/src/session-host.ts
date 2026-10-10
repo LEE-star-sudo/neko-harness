@@ -1,3 +1,5 @@
+import { open } from "node:fs/promises";
+import { basename, extname } from "node:path";
 import {
 	type Context,
 	createRemoteServiceEndpoint,
@@ -13,9 +15,11 @@ import {
 	mergeUsage,
 	type NekoRuntime,
 	type NekoSession,
+	prepareImage,
 	projectChatView,
 	totalUsage,
 } from "@neko-harness/core";
+import { workspaceTarget } from "@neko-harness/core/workspace-files";
 import { NekoChat } from "./contract.ts";
 import { IMAGE_CHUNK_BYTES, ImageUploads } from "./image-uploads.ts";
 
@@ -128,6 +132,53 @@ export async function openNekoSessionHandle(options: {
 		const provider = new RemoteServiceProvider([{ service: NekoChat, mode: "singleton" }]);
 		provider.provide(NekoChat, {
 			view: chatState,
+			draftImage: async ({ id, offset }) => safeUpload(() => uploads.read(id, offset)),
+			importImage: async (path, ctx) => {
+				const target = await workspaceTarget(chatState.value!.cwd, path);
+				const mimeType = (
+					{ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" } as Record<
+						string,
+						string
+					>
+				)[extname(target).toLowerCase()];
+				if (!mimeType) throw new Error("Only PNG, JPEG and WebP images are supported");
+				const agent = await runtime.getAgent(session.id);
+				const model = runtime
+					.listModels()
+					.find((m) => m.provider === agent.model?.provider && m.modelId === agent.model?.modelId);
+				if (!model?.input.includes("image")) throw new Error("Current model does not support images");
+				const handle = await open(target, "r");
+				let id: string | undefined;
+				try {
+					const info = await handle.stat();
+					if (!info.isFile()) throw new Error("Image must be a file");
+					ctx.abortSignal?.throwIfAborted();
+					id = uploads.begin({ name: basename(target), mimeType, size: info.size });
+					let offset = 0;
+					while (offset < info.size) {
+						ctx.abortSignal?.throwIfAborted();
+						const buffer = Buffer.alloc(Math.min(IMAGE_CHUNK_BYTES, info.size - offset));
+						const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+						if (!bytesRead) throw new Error("Image changed while reading");
+						uploads.append({ id, offset, data: buffer.subarray(0, bytesRead).toString("base64") });
+						offset += bytesRead;
+					}
+					const after = await handle.stat();
+					if (after.size !== info.size || after.mtimeMs !== info.mtimeMs)
+						throw new Error("Image changed while reading");
+					ctx.abortSignal?.throwIfAborted();
+					uploads.finish(id);
+					const raw = uploads.resolve([id])[0]!;
+					await prepareImage(Buffer.from(raw.content.data, "base64"), mimeType, basename(target), model);
+					ctx.abortSignal?.throwIfAborted();
+					return { id, name: basename(target) };
+				} catch (error) {
+					if (id) uploads.release(id);
+					throw error;
+				} finally {
+					await handle.close();
+				}
+			},
 			compact: async ({ instructions }) => {
 				try {
 					await session.compact(instructions);

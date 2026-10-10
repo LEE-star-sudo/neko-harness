@@ -90,6 +90,11 @@ export type NekoSubmitInput = {
  * 此后每次 commit 推送更新；不做历史重放，重连 = 重新 attach + 取最新快照。
  */
 export interface NekoChat {
+	importImage(path: string, context: Context): Promise<{ id: string; name: string }>;
+	draftImage(
+		input: { id: string; offset: number },
+		context: Context,
+	): Promise<{ data: string; total: number; mimeType: string }>;
 	readonly view: ReplicatedState<ChatView>;
 	compact(input: { instructions?: string }, context: Context): Promise<void>;
 	beginImage(input: { name: string; mimeType: string; size: number }, context: Context): Promise<string>;
@@ -140,3 +145,11 @@ export interface NekoCredentials {
 	remove(input: { provider: CredentialProviderId }, context: Context): Promise<void>;
 }
 export const NekoCredentials = defineService<NekoCredentials>("neko.credentials");
+
+export interface NekoWorkspaceFiles {
+	search(
+		input: { workspaceRoot: string; query: string },
+		context: Context,
+	): Promise<import("@neko-harness/core/file-mentions").FileCandidates>;
+}
+export const NekoWorkspaceFiles = defineService<NekoWorkspaceFiles>("neko.workspace-files");

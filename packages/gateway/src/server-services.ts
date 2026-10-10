@@ -9,6 +9,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { RoutedServerServiceAttachment, RoutedServerServiceHost } from "@earendil-works/pi-server";
 import type { NekoRuntime } from "@neko-harness/core";
 import { CREDENTIAL_PROVIDERS } from "@neko-harness/core";
+import { searchWorkspaceFiles } from "@neko-harness/core/workspace-files";
 import {
 	type NekoCredentialState,
 	NekoCredentials,
@@ -17,6 +18,7 @@ import {
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
+	NekoWorkspaceFiles,
 	type NekoWorkspaceState,
 	NekoWorkspaces,
 } from "./contract.ts";
@@ -52,6 +54,7 @@ export async function createNekoServerServices(options: {
 		}));
 
 	let revision = 1;
+	let fileQueries = 0;
 	const readStatuses = async (): Promise<NekoCredentialState["statuses"]> =>
 		Object.fromEntries(
 			await Promise.all(CREDENTIAL_PROVIDERS.map(async (spec) => [spec.id, await runtime.credentialStatus(spec.id)])),
@@ -92,12 +95,14 @@ export async function createNekoServerServices(options: {
 		host: {
 			attachClient(presentation) {
 				let activeSessionId: string | undefined;
+				let fileQuery: AbortController | undefined;
 				const provider = new RemoteServiceProvider([
 					{ service: NekoSessionDirectory, mode: "singleton" },
 					{ service: NekoSessionManagement, mode: "singleton" },
 					{ service: NekoModels, mode: "singleton" },
 					{ service: NekoCredentials, mode: "singleton" },
 					{ service: NekoWorkspaces, mode: "singleton" },
+					{ service: NekoWorkspaceFiles, mode: "singleton" },
 				]);
 				provider.provide(NekoSessionDirectory, { state: directory });
 				const updateCredentials = (operation: () => Promise<void>) =>
@@ -125,6 +130,27 @@ export async function createNekoServerServices(options: {
 						}),
 				});
 				// 模型目录是全局快照（Models registry），列表查询无需序列化。
+				provider.provide(NekoWorkspaceFiles, {
+					search: async (input, ctx) => {
+						fileQuery?.abort();
+						if (fileQueries >= 4) throw new Error("File search busy. Please retry.");
+						const controller = new AbortController();
+						fileQuery = controller;
+						fileQueries++;
+						try {
+							const roots = await runtime.listWorkspaces();
+							if (!roots.some((w) => w.path === input.workspaceRoot)) throw new Error("Unknown workspace.");
+							return await searchWorkspaceFiles(
+								input.workspaceRoot,
+								input.query,
+								AbortSignal.any([controller.signal, ...(ctx.abortSignal ? [ctx.abortSignal] : [])]),
+							);
+						} finally {
+							fileQueries--;
+							if (fileQuery === controller) fileQuery = undefined;
+						}
+					},
+				});
 				provider.provide(NekoModels, { list: async () => runtime.listModels() });
 				provider.provide(NekoSessionManagement, {
 					create: (createOptions) =>
@@ -182,6 +208,7 @@ export async function createNekoServerServices(options: {
 					release() {
 						if (released) return;
 						released = true;
+						fileQuery?.abort();
 						endpoint.dispose();
 						provider.dispose();
 						attachments.delete(attachment);

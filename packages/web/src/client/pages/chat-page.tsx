@@ -59,7 +59,7 @@ export function ChatPage() {
 					busy={busy}
 					status={status}
 				/>
-				<Composer disabled={phase !== "ready" || operating || !currentSessionId || !view} busy={busy} status={status} />
+				<Composer disabled={phase !== "ready" || operating} busy={busy} status={status} />
 			</div>
 		</div>
 	);

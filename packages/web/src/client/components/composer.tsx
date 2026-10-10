@@ -1,8 +1,11 @@
+import { replaceMention } from "@neko-harness/core/file-mentions";
 import { compactInstructions, type ImageFile } from "@neko-harness/core/image-transfer";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { appActions } from "../lib/bootstrap";
-import { useNekoState } from "../lib/store";
+import { getState, storeActions, useNekoState } from "../lib/store";
+import { ComposerSuggestions } from "./composer-suggestions";
+import { useFileMentions } from "./file-mentions";
 
 type Attachment = { id: string; file: File; error?: string; processing?: boolean };
 type Draft = { text: string; files: Attachment[]; requestId: string };
@@ -16,8 +19,14 @@ const subscribeDrafts = (listener: () => void) => {
 };
 type Props = { busy: boolean; status: string | null; disabled?: boolean };
 export function Composer(props: Props) {
-	const { currentSessionId } = useNekoState();
-	return <SessionComposer key={currentSessionId ?? "none"} sessionId={currentSessionId ?? "none"} {...props} />;
+	const { currentSessionId, workspaceRoot } = useNekoState();
+	return (
+		<SessionComposer
+			key={currentSessionId ?? `none:${workspaceRoot}`}
+			sessionId={currentSessionId ?? `none:${workspaceRoot}`}
+			{...props}
+		/>
+	);
 }
 function Thumbnail({ file }: { file: File }) {
 	const [url, setUrl] = useState("");
@@ -29,7 +38,7 @@ function Thumbnail({ file }: { file: File }) {
 	return <img src={url || undefined} alt={file.name} className="h-16 w-20 rounded-lg object-cover" />;
 }
 function SessionComposer(props: Props & { sessionId: string }) {
-	const { credentials, view, models } = useNekoState();
+	const { credentials, view, models, workspaceRoot, phase, operating } = useNekoState();
 	const active = view?.compaction?.active ?? [];
 	if (!drafts.has(props.sessionId))
 		drafts.set(props.sessionId, { text: "", files: [], requestId: crypto.randomUUID() });
@@ -38,6 +47,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState("");
 	const [menu, setMenu] = useState(false);
+	const commandId = useId();
 	const [drag, setDrag] = useState(false);
 	const textarea = useRef<HTMLTextAreaElement>(null);
 	const picker = useRef<HTMLInputElement>(null);
@@ -54,7 +64,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 	const model = models.find(
 		(m) => m.provider === view?.agent.model?.provider && m.modelId === view?.agent.model?.modelId,
 	);
-	const noVision = draft.files.length > 0 && !model?.input.includes("image");
+	const noVision = draft.files.length > 0 && model !== undefined && !model.input.includes("image");
 	const add = (files: File[]) => {
 		const next: Attachment[] = files.map((file) => ({
 			id: crypto.randomUUID(),
@@ -87,6 +97,77 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		};
 		update(next);
 	};
+	const imageRequest = useRef<AbortController | null>(null);
+	const creating = useRef(false);
+	useEffect(
+		() => () => {
+			if (!creating.current) imageRequest.current?.abort();
+		},
+		[],
+	);
+	const mentions = useFileMentions(textarea, workspaceRoot, phase === "ready" && !operating, (item, token) => {
+		const before = current.current;
+		if (item.kind === "file" && /\.(png|jpe?g|webp)$/i.test(item.path)) {
+			if (imageRequest.current) return;
+			const controller = new AbortController();
+			imageRequest.current = controller;
+			setError("正在读取图片…");
+			void (async () => {
+				let sessionId = props.sessionId;
+				if (sessionId.startsWith("none:")) {
+					creating.current = true;
+					await appActions.createSession();
+					const state = getState();
+					if (state.workspaceRoot !== workspaceRoot || !state.currentSessionId) throw new Error("工作区已切换");
+					sessionId = state.currentSessionId;
+					drafts.set(sessionId, before);
+					for (const listener of draftListeners) listener();
+				}
+				const file = await appActions.workspaceImage(item.path, sessionId, controller.signal);
+				if (
+					controller.signal.aborted ||
+					getState().currentSessionId !== sessionId ||
+					getState().workspaceRoot !== workspaceRoot
+				)
+					return;
+				const saved = drafts.get(sessionId) ?? before;
+				const attachment = {
+					id: crypto.randomUUID(),
+					file: new File([new Uint8Array(file.bytes)], file.name, { type: file.mimeType }),
+				};
+				const text =
+					saved.text === before.text ? before.text.slice(0, token.start) + before.text.slice(token.end) : saved.text;
+				drafts.set(sessionId, { ...saved, text, files: [...saved.files, attachment], requestId: crypto.randomUUID() });
+				for (const listener of draftListeners) listener();
+				setError("");
+			})()
+				.catch((error) => {
+					if (!controller.signal.aborted) {
+						const text = error instanceof Error ? error.message : "图片读取失败，请重试";
+						setError(text);
+						if (creating.current) storeActions.notice({ level: "error", text });
+					}
+				})
+				.finally(() => {
+					if (imageRequest.current === controller) imageRequest.current = null;
+				});
+			return;
+		}
+		const replacement = replaceMention(before.text, token, item.path, item.kind === "directory");
+		const el = textarea.current;
+		if (el) {
+			el.focus();
+			el.setSelectionRange(token.start, token.end);
+			// Native insertion preserves the browser undo stack where supported.
+			const inserted = replacement.text.slice(token.start, replacement.text.length - (before.text.length - token.end));
+			if (!document.execCommand("insertText", false, inserted)) edit({ text: replacement.text });
+			else edit({ text: el.value });
+			requestAnimationFrame(() => {
+				el.setSelectionRange(replacement.cursor, replacement.cursor);
+				if (item.kind === "directory") mentions.refresh();
+			});
+		}
+	});
 	const compact = async (instructions: string) => {
 		if (locked.current || props.disabled) return;
 		locked.current = true;
@@ -143,7 +224,21 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			const files: ImageFile[] = [];
 			for (const a of before.files)
 				files.push({ name: a.file.name, mimeType: a.file.type, bytes: new Uint8Array(await a.file.arrayBuffer()) });
-			await appActions.submit(before.text.trim(), files, before.requestId, props.sessionId);
+			let target = props.sessionId;
+			if (target.startsWith("none:")) {
+				await appActions.createSession();
+				const state = getState();
+				if (state.workspaceRoot !== workspaceRoot || !state.currentSessionId)
+					throw new Error("工作区已切换，草稿已保留");
+				target = state.currentSessionId;
+				drafts.set(target, before);
+				for (const listener of draftListeners) listener();
+			}
+			await appActions.submit(before.text.trim(), files, before.requestId, target);
+			if (target !== props.sessionId) {
+				drafts.set(target, { text: "", files: [], requestId: crypto.randomUUID() });
+				for (const listener of draftListeners) listener();
+			}
 			const saved = drafts.get(props.sessionId);
 			if (saved)
 				update({
@@ -152,11 +247,18 @@ function SessionComposer(props: Props & { sessionId: string }) {
 					requestId: crypto.randomUUID(),
 				});
 		} catch (e) {
-			setError(e instanceof Error ? e.message : "发送失败，请重试");
+			const message = e instanceof Error ? e.message : "发送失败，请重试";
+			setError(message);
+			if (getState().currentSessionId !== props.sessionId) storeActions.notice({ level: "error", text: message });
 		} finally {
 			locked.current = false;
 			setPending(false);
 		}
+	};
+	const acceptCommand = () => {
+		edit({ text: "/compact " });
+		setMenu(false);
+		textarea.current?.focus();
 	};
 	return (
 		<section
@@ -218,31 +320,17 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						))}
 					</ul>
 				)}
-				{menu && (
-					<div
-						role="menu"
-						aria-label="输入命令"
-						className="mb-2 max-h-40 overflow-auto rounded-xl border border-sakura-200 bg-base p-2 shadow-soft"
-					>
-						<button
-							onKeyDown={(e) => {
-								if (e.key === "Escape") {
-									setMenu(false);
-									textarea.current?.focus();
-								}
-							}}
-							role="menuitem"
-							type="button"
-							className="focus-neko w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-sakura-50"
-							onClick={() => {
-								edit({ text: "/compact " });
-								setMenu(false);
-								textarea.current?.focus();
-							}}
-						>
-							/compact · 压缩上下文（可附加要求）
-						</button>
-					</div>
+				{mentions.panel}
+				{menu && !mentions.open && (
+					<ComposerSuggestions
+						anchor={textarea}
+						id={commandId}
+						title="输入命令"
+						items={[{ key: "compact", label: "/compact", description: "压缩上下文（可附加要求）" }]}
+						selected={0}
+						onSelect={() => {}}
+						onAccept={acceptCommand}
+					/>
 				)}
 				<div className="flex items-end gap-2">
 					<input
@@ -271,11 +359,22 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						disabled={props.disabled}
 						value={draft.text}
 						rows={1}
-						placeholder="输入消息或 / 命令，支持粘贴图片"
+						placeholder="输入消息，@ 引用文件，/ 命令"
+						aria-autocomplete="list"
+						aria-controls={mentions.controls ?? (menu ? commandId : undefined)}
+						aria-activedescendant={mentions.active ?? (menu ? `${commandId}-0` : undefined)}
+						onClick={() => mentions.refresh()}
+						onBlur={() => {
+							mentions.close();
+							setMenu(false);
+						}}
+						onCompositionStart={() => mentions.close()}
+						onCompositionEnd={() => mentions.refresh()}
 						className="focus-neko max-h-40 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-[15px] text-ink-900"
 						onChange={(e) => {
 							edit({ text: e.target.value });
 							setMenu(/^\/[a-z]*$/.test(e.target.value));
+							if (!(e.nativeEvent as InputEvent).isComposing) mentions.refresh();
 							e.target.style.height = "auto";
 							e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
 						}}
@@ -288,20 +387,21 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						}}
 						onKeyDown={(e) => {
 							if (e.nativeEvent.isComposing) return;
+							if (mentions.keyDown(e)) return;
 							if (e.key === "Escape" && menu) {
 								e.preventDefault();
 								setMenu(false);
 							} else if (menu && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
 								e.preventDefault();
-								e.currentTarget.parentElement?.previousElementSibling
-									?.querySelector<HTMLButtonElement>("button")
-									?.focus();
+							} else if (menu && e.key === "Tab") {
+								if (!e.shiftKey) {
+									e.preventDefault();
+									acceptCommand();
+								} else setMenu(false);
 							} else if (e.key === "Enter" && !e.shiftKey) {
 								e.preventDefault();
-								if (menu && draft.text !== "/compact") {
-									edit({ text: "/compact " });
-									setMenu(false);
-								} else void submit();
+								if (menu) acceptCommand();
+								else void submit();
 							}
 						}}
 					/>
@@ -310,7 +410,11 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						aria-label="输入操作菜单"
 						aria-expanded={menu}
 						className="focus-neko h-10 px-2"
-						onClick={() => setMenu(!menu)}
+						onClick={() => {
+							mentions.close();
+							setMenu(!menu);
+							textarea.current?.focus();
+						}}
 					>
 						⋯
 					</button>

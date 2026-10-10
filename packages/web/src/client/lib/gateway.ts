@@ -1,5 +1,5 @@
 import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
 import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
@@ -16,6 +16,7 @@ import {
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
+	NekoWorkspaceFiles,
 	type NekoWorkspaceState,
 	NekoWorkspaces,
 } from "./contract.ts";
@@ -55,6 +56,7 @@ export class GatewayConnection {
 	#session: RemoteServiceBinding | undefined;
 	#management: NekoSessionManagement | undefined;
 	#workspaces: NekoWorkspaces | undefined;
+	#workspaceFiles: NekoWorkspaceFiles | undefined;
 	#models: NekoModels | undefined;
 	#credentials: NekoCredentials | undefined;
 	#chat: NekoChat | undefined;
@@ -267,6 +269,23 @@ export class GatewayConnection {
 			for (const id of ids) await chat.releaseImage(id, CONTEXT).catch(() => {});
 		}
 	}
+	async searchFiles(query: string, workspaceRoot: string, signal: AbortSignal) {
+		if (!this.managementReady || !this.#workspaceFiles || workspaceRoot !== this.#workspace)
+			throw new Error("工作区未就绪");
+		return this.#workspaceFiles.search({ workspaceRoot, query }, withAbortSignal(signal, CONTEXT));
+	}
+	async workspaceImage(path: string, sessionId: string, signal: AbortSignal): Promise<ImageFile> {
+		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
+		const chat = this.#chat!;
+		const ctx = withAbortSignal(signal, CONTEXT);
+		const image = await chat.importImage(path, ctx);
+		try {
+			const file = await downloadImage((offset) => chat.draftImage({ id: image.id, offset }, ctx));
+			return { ...file, name: image.name };
+		} finally {
+			await chat.releaseImage(image.id, CONTEXT).catch(() => {});
+		}
+	}
 	async compact(instructions: string, sessionId?: string): Promise<void> {
 		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
 		if (!this.ready) throw new Error("会话未就绪");
@@ -300,7 +319,14 @@ export class GatewayConnection {
 			if (change.state === "disconnected" && client === this.#client) this.#scheduleReconnect();
 		});
 		const binding = createRemoteServiceBinding({
-			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces, NekoCredentials],
+			services: [
+				NekoSessionDirectory,
+				NekoSessionManagement,
+				NekoModels,
+				NekoWorkspaces,
+				NekoCredentials,
+				NekoWorkspaceFiles,
+			],
 			transport: createClientServiceTransport(client, () => ({ serverId: this.#options.serverId })),
 		});
 		this.#server = binding;
@@ -308,6 +334,7 @@ export class GatewayConnection {
 		this.#assert(epoch);
 		this.#management = binding.use(NekoSessionManagement);
 		this.#workspaces = binding.use(NekoWorkspaces);
+		this.#workspaceFiles = binding.use(NekoWorkspaceFiles);
 		this.#models = binding.use(NekoModels);
 		this.#credentials = binding.use(NekoCredentials);
 		this.#unsub.push(
@@ -387,6 +414,7 @@ export class GatewayConnection {
 		this.#dropView();
 		this.#management = undefined;
 		this.#workspaces = undefined;
+		this.#workspaceFiles = undefined;
 		this.#credentials = undefined;
 		this.#options.events.onCredentials?.(null);
 		this.#models = undefined;

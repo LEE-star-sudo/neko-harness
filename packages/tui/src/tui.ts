@@ -1,7 +1,6 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
-	CombinedAutocompleteProvider,
 	Container,
 	isKeyRelease,
 	matchesKey,
@@ -31,6 +30,7 @@ import { PickerPanel } from "./components/picker.ts";
 import { type ToolCardState, ToolExecutionComponent } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
+import { fileCompletion } from "./file-completion.ts";
 import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
@@ -149,7 +149,7 @@ class NekoTuiApp {
 			save: (provider, key) => this.#gateway.client.credentials.save({ provider, key }, BACKGROUND_CONTEXT),
 			remove: (provider) => this.#gateway.client.credentials.remove({ provider }, BACKGROUND_CONTEXT),
 		});
-		const complete = new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd());
+		const complete = fileCompletion(commands, options.cwd ?? process.cwd(), (text) => this.addNotice(text));
 		const original = complete.applyCompletion.bind(complete);
 		complete.applyCompletion = (lines, line, col, item, prefix) => {
 			const result = original(lines, line, col, item, prefix);
@@ -221,6 +221,10 @@ class NekoTuiApp {
 						.catch((e) => this.addNotice(messageOf(e), true));
 					return { consume: true };
 				}
+			}
+			if (matchesKey(data, "escape") && this.#editor.isShowingAutocomplete()) {
+				this.#editor.resetEscapeSequence();
+				return undefined;
 			}
 			if (matchesKey(data, "ctrl+c")) {
 				if (this.#busyText !== undefined) this.abort();

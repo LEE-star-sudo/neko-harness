@@ -59,3 +59,9 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 图片通过 `beginImage` / `appendImage` / `finishImage` 准备，再由 `submit.images` 与文字一次提交。每块最多 256 KiB，同一 attachment 最多两个进行中上传、八个暂存附件，15 分钟过期；断连释放该 attachment 的暂存数据。相同 requestId 的重试先查已受理结果，不要求旧上传仍存在。临时数据仅在内存中，不建立永久附件文件库。
 
 `getImage` 按会话历史条目及内容位置分块读取，包含合法 fork 历史，不接受宿主路径。实时投影只包含图片描述，不随回答片段广播 base64；压缩后的历史仍可查看。
+
+## 工作区文件候选与图片导入
+
+`neko.workspace-files.search({ workspaceRoot, query }, context)` 只查询已登记工作区，返回文件/目录相对路径和 `limited` 标志，不返回正文。空工作区也可查询；每连接一个活跃查询，全局最多四个，替换查询、取消和断连会释放扫描进程。缺少 fd、超时、未知工作区与无匹配是不同结果。
+
+会话的 `importImage(path)` 重新验证工作区范围、文件大小、真实格式和模型图片能力，将图片放入 attachment 独立的暂存池；`draftImage` 按最多 256 KiB 分块读取预览，`releaseImage` 释放。其他 attachment 不可读取该暂存 ID；提交和断连沿用已有附件清理机制。

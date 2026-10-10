@@ -1,0 +1,75 @@
+import { expect, it } from "bun:test";
+import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BACKGROUND_CONTEXT as context, withAbortSignal } from "@earendil-works/chord/context";
+import { downloadImage } from "@neko-harness/core/image-transfer";
+import sharp from "sharp";
+import { fauxProvider } from "../../../test/faux.ts";
+import { connectNekoGateway, startGateway } from "../src/index.ts";
+
+it("queries a registered workspace and imports images with attachment ownership", async () => {
+	const temp = await mkdtemp(join(tmpdir(), "neko-file-gateway-"));
+	const root = await realpath(temp);
+	const faux = fauxProvider({ models: [{ id: "vision", input: ["text", "image"] }] });
+	const gateway = await startGateway({
+		storage: "memory",
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "vision" },
+		socketPath: join(root, "gateway.sock"),
+		port: 0,
+	});
+	const a = await connectNekoGateway({
+		transport: "unix",
+		socketPath: gateway.socketPath!,
+		serverId: gateway.serverId,
+	});
+	const b = await connectNekoGateway({ transport: "ws", url: gateway.wsUrl!, serverId: gateway.serverId });
+	try {
+		await writeFile(join(root, "my file.ts"), "body not in candidates");
+		await a.workspaces.add({ path: root }, context);
+		for (const client of [a, b]) {
+			const result = await client.workspaceFiles.search({ workspaceRoot: root, query: "file" }, context);
+			expect(result.entries.some((e) => e.path === "my file.ts")).toBe(true);
+			expect(JSON.stringify(result)).not.toContain("body not");
+			await expect(
+				client.workspaceFiles.search({ workspaceRoot: "/unregistered", query: "" }, context),
+			).rejects.toThrow();
+		}
+		const abort = new AbortController();
+		abort.abort();
+		await expect(
+			a.workspaceFiles.search({ workspaceRoot: root, query: "" }, withAbortSignal(abort.signal, context)),
+		).rejects.toThrow();
+		const session = await a.management.create({ cwd: root }, context);
+		const chat = await a.attach(session.id);
+		const other = await b.attach(session.id);
+		const bytes = await sharp({ create: { width: 3, height: 3, channels: 3, background: "blue" } })
+			.png()
+			.toBuffer();
+		await writeFile(join(root, "my image.png"), bytes);
+		await writeFile(join(root, "invalid.png"), "not an image");
+		await expect(chat.importImage("invalid.png", context)).rejects.toThrow();
+		const { open } = await import("node:fs/promises");
+		const huge = await open(join(root, "huge.png"), "w");
+		await huge.truncate(21 * 1024 * 1024);
+		await huge.close();
+		await expect(chat.importImage("huge.png", context)).rejects.toThrow();
+		await expect(chat.importImage("missing.png", context)).rejects.toThrow();
+		const image = await chat.importImage("my image.png", context);
+		expect(image.name).toBe("my image.png");
+		const read = await downloadImage((offset) => chat.draftImage({ id: image.id, offset }, context));
+		expect(read.bytes).toEqual(new Uint8Array(bytes));
+		await expect(other.draftImage({ id: image.id, offset: 0 }, context)).rejects.toThrow();
+		await chat.releaseImage(image.id, context);
+		await expect(chat.draftImage({ id: image.id, offset: 0 }, context)).rejects.toThrow();
+		await symlink("/tmp", join(root, "outside"));
+		await expect(chat.importImage("outside/no.png", context)).rejects.toThrow();
+		await expect(chat.importImage("../no.png", context)).rejects.toThrow();
+	} finally {
+		await a.close();
+		await b.close();
+		await gateway.close();
+		await rm(root, { recursive: true, force: true });
+	}
+});
