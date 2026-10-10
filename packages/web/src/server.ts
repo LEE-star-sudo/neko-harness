@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_STORAGE_PATH } from "@neko-harness/core";
+import { DEFAULT_STORAGE_PATH, normalizeWorkspace } from "@neko-harness/core";
 import { ensureNekoGateway, type GatewayEnsureOptions, type GatewayHandle } from "./gateway-spawn.ts";
 
 /**
@@ -48,13 +48,14 @@ const MIME: Readonly<Record<string, string>> = {
 
 export async function startWebServer(options: NekoWebOptions = {}): Promise<NekoWebServer> {
 	const staticDir = resolve(options.staticDir ?? DEFAULT_STATIC_DIR);
+	const workspaceRoot = normalizeWorkspace(options.gateway?.cwd ?? process.cwd());
 	const gateway = await ensureNekoGateway({
 		...(options.gateway ?? {}),
 		storagePath: options.gateway?.storagePath ?? DEFAULT_STORAGE_PATH,
 	});
 
 	const server: Server = createServer((request, response) => {
-		void handleHttp(request, response, { staticDir, gateway }).catch((error: unknown) => {
+		void handleHttp(request, response, { staticDir, gateway, workspaceRoot }).catch((error: unknown) => {
 			if (!response.headersSent) response.writeHead(500);
 			response.end(error instanceof Error ? error.message : String(error));
 		});
@@ -84,7 +85,7 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 async function handleHttp(
 	request: IncomingMessage,
 	response: ServerResponse,
-	info: { staticDir: string; gateway: GatewayHandle },
+	info: { staticDir: string; gateway: GatewayHandle; workspaceRoot: string },
 ): Promise<void> {
 	const url = new URL(request.url ?? "/", "http://localhost");
 	if (url.pathname === "/api/info") {
@@ -92,6 +93,7 @@ async function handleHttp(
 		response.end(
 			JSON.stringify({
 				gatewayWs: info.gateway.wsUrl,
+				workspaceRoot: info.workspaceRoot,
 				serverId: info.gateway.serverId,
 				socketPath: info.gateway.socketPath,
 			}),

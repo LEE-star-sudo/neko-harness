@@ -3,288 +3,356 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
 import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
 import {
+	type NekoBrowseOptions,
 	NekoChat,
-	type NekoChat as NekoChatFacade,
+	type NekoDirectoryPage,
 	type NekoDirectoryState,
 	NekoModels,
-	type NekoModels as NekoModelsFacade,
 	NekoSessionDirectory,
 	NekoSessionManagement,
-	type NekoSessionManagement as NekoSessionManagementFacade,
 	type NekoSessionSummary,
+	type NekoWorkspaceState,
+	NekoWorkspaces,
 } from "./contract.ts";
 import { createBrowserWsTransportFactory } from "./transport.ts";
 
-/**
- * 浏览器侧 neko 网关连接：pi-client 直连 gateway WebSocket（pi 协议帧，design D3）。
- *
- * 生命周期：start() → Client.connect（serverId 握手校验）→ 服务器级服务绑定
- * （session-directory 订阅 + session-management）→ attach 会话（默认目录第一个）
- * → 会话级 NekoChat.view 订阅（快照即最新投影，不重放历史，D4）。
- *
- * 断线：连接状态变 disconnected 即指数退避重连（800ms→8s），重建 Client、
- * 重新订阅目录、重新 attach 当前会话取最新快照。
- */
-
 const CONTEXT: Context = BACKGROUND_CONTEXT;
-
 export type ConnPhase = "connecting" | "ready" | "reconnecting";
-
 export type GatewayEvents = {
 	onPhase(phase: ConnPhase): void;
-	/** 连接/服务级错误提示（已格式化）。 */
 	onError(text: string): void;
 	onDirectory(state: NekoDirectoryState): void;
+	onWorkspaces(state: NekoWorkspaceState): void;
+	onWorkspace(path: string): void;
+	onOperation(busy: boolean): void;
 	onModels(models: readonly NekoModelInfo[]): void;
 	onSessionChange(sessionId: string | null): void;
 	onView(view: ChatView | null): void;
 };
-
 export type GatewayConnectionOptions = {
 	readonly url: string;
 	readonly serverId: string;
+	readonly workspaceRoot: string;
 	readonly events: GatewayEvents;
-	/** 重连退避基数毫秒；默认 800。 */
 	readonly retryBaseMs?: number;
 	readonly retryMaxMs?: number;
 };
+export function workspaceSessions(sessions: readonly NekoSessionSummary[], path: string): NekoSessionSummary[] {
+	return sessions
+		.filter((s) => s.workspaceRoot === path)
+		.sort((a, b) => b.lastUsedAt - a.lastUsedAt || Number(b.id) - Number(a.id));
+}
 
+/** Single attachment, serialized navigation, and generation-guarded snapshots. */
 export class GatewayConnection {
-	readonly #url: string;
-	readonly #serverId: string;
-	readonly #events: GatewayEvents;
-	readonly #retryBaseMs: number;
-	readonly #retryMaxMs: number;
-
+	readonly #options: GatewayConnectionOptions;
 	#client: Client | undefined;
-	#serverBinding: RemoteServiceBinding | undefined;
-	#sessionBinding: RemoteServiceBinding | undefined;
-	#management: NekoSessionManagementFacade | undefined;
-	#models: NekoModelsFacade | undefined;
-	#chat: NekoChatFacade | undefined;
+	#server: RemoteServiceBinding | undefined;
+	#session: RemoteServiceBinding | undefined;
+	#management: NekoSessionManagement | undefined;
+	#workspaces: NekoWorkspaces | undefined;
+	#models: NekoModels | undefined;
+	#chat: NekoChat | undefined;
+	#sessions: readonly NekoSessionSummary[] = [];
+	#workspace: string;
 	#currentSessionId: string | undefined;
-	#unsubDirectory: (() => void) | undefined;
+	#unsub: (() => void)[] = [];
 	#unsubView: (() => void) | undefined;
-	#reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	#timer: ReturnType<typeof setTimeout> | undefined;
 	#attempt = 0;
+	#epoch = 0;
+	#viewEpoch = 0;
 	#disposed = false;
-
+	#connected = false;
+	#operating = false;
+	#initialized = false;
 	constructor(options: GatewayConnectionOptions) {
-		this.#url = options.url;
-		this.#serverId = options.serverId;
-		this.#events = options.events;
-		this.#retryBaseMs = options.retryBaseMs ?? 800;
-		this.#retryMaxMs = options.retryMaxMs ?? 8000;
+		this.#options = options;
+		this.#workspace = options.workspaceRoot;
 	}
-
-	/** 开始连接；失败按退避自动重试。返回首个就绪的 promise（可忽略）。 */
+	get currentSessionId() {
+		return this.#currentSessionId;
+	}
+	get workspaceRoot() {
+		return this.#workspace;
+	}
+	get ready() {
+		return this.#connected && !this.#operating && this.#chat !== undefined;
+	}
+	get managementReady() {
+		return this.#connected && !this.#operating;
+	}
 	async start(): Promise<void> {
-		this.#events.onPhase("connecting");
+		this.#options.events.onPhase("connecting");
+		this.#options.events.onWorkspace(this.#workspace);
 		try {
 			await this.#connect();
-		} catch {
+		} catch (error) {
+			this.#error(error);
 			this.#scheduleReconnect();
 		}
 	}
-
-	get currentSessionId(): string | undefined {
-		return this.#currentSessionId;
+	#error(error: unknown) {
+		this.#options.events.onError(error instanceof Error ? error.message : String(error));
 	}
-
-	get ready(): boolean {
-		return this.#chat !== undefined;
+	#assert(epoch: number) {
+		if (this.#disposed || epoch !== this.#epoch) throw new Error("连接已变化，请重试");
 	}
-
-	/** attach（幂等）到会话；切换时旧订阅先释放。 */
-	async attachTo(sessionId: string): Promise<void> {
-		if (this.#currentSessionId === sessionId && this.#chat !== undefined && this.#unsubView !== undefined) return;
-		const management = this.#management;
-		const client = this.#client;
-		if (management === undefined || client === undefined) throw new Error("网关连接未就绪");
-		this.#events.onSessionChange(sessionId);
-		this.#events.onView(null);
-		this.#teardownSession();
-		await management.attach(sessionId, CONTEXT);
-		await waitForAttachment(client, sessionId);
-		const sessionTransport = createClientServiceTransport(client, () => client.attachment);
-		this.#sessionBinding = createRemoteServiceBinding({ services: [NekoChat], transport: sessionTransport });
-		const facade = this.#sessionBinding.use(NekoChat);
-		await this.#sessionBinding.ready(CONTEXT);
-		// Chord 服务门面是拦截任意属性的 Proxy（thenable 陷阱），包一层普通对象再持有。
-		this.#chat = {
-			view: facade.view,
-			submit: (input, context) => facade.submit(input, context),
-			abort: (context) => facade.abort(context),
-			usage: (context) => facade.usage(context),
-			configure: (change, context) => facade.configure(change, context),
-		};
-		this.#currentSessionId = sessionId;
-		const initial = this.#chat.view.value;
-		if (initial !== undefined) this.#events.onView(initial);
-		this.#unsubView = this.#chat.view.subscribe((value) => {
-			this.#events.onView(value);
+	async #operate(operation: (epoch: number) => Promise<void>): Promise<void> {
+		if (!this.managementReady) throw new Error("操作进行中或网关未连接，请稍后重试");
+		this.#operating = true;
+		this.#options.events.onOperation(true);
+		const epoch = this.#epoch;
+		try {
+			await operation(epoch);
+		} finally {
+			this.#operating = false;
+			this.#options.events.onOperation(false);
+			if (epoch === this.#epoch) this.#reconcile();
+		}
+	}
+	async selectWorkspace(path: string): Promise<void> {
+		await this.#operate(async (epoch) => {
+			if (!this.#workspaces?.state.value?.workspaces.some((w) => w.path === path)) throw new Error("工作区不存在");
+			await this.#select(path, undefined, epoch);
 		});
 	}
-
-	/** 脱离当前会话（归档最后一个会话后调用）。 */
-	async clearSession(): Promise<void> {
-		this.#teardownSession();
-		this.#currentSessionId = undefined;
-		this.#events.onSessionChange(null);
-		this.#events.onView(null);
-		await this.#management?.detach(CONTEXT).catch(() => {});
+	async addWorkspace(path: string): Promise<void> {
+		await this.#operate(async (epoch) => {
+			const item = await this.#workspaces!.add({ path }, CONTEXT);
+			this.#assert(epoch);
+			await this.#select(item.path, undefined, epoch);
+		});
 	}
-
+	async browse(options: NekoBrowseOptions): Promise<NekoDirectoryPage> {
+		if (!this.#connected || !this.#workspaces) throw new Error("网关未连接");
+		return this.#workspaces.browse(options, CONTEXT);
+	}
+	async attachTo(id: string): Promise<void> {
+		await this.#operate(async (epoch) => {
+			const entry = this.#sessions.find((s) => s.id === id && s.workspaceRoot === this.#workspace);
+			if (!entry) throw new Error("会话不属于当前工作区或已归档");
+			await this.#attach(id, epoch);
+		});
+	}
 	async createSession(): Promise<void> {
-		const management = this.#management;
-		if (management === undefined) throw new Error("网关连接未就绪");
-		const created = await management.create({}, CONTEXT);
-		await this.attachTo(created.id);
+		await this.#operate(async (epoch) => {
+			const created = await this.#management!.create({ cwd: this.#workspace }, CONTEXT);
+			this.#assert(epoch);
+			await this.#attach(created.id, epoch);
+		});
 	}
-
-	async archiveSession(sessionId: string): Promise<void> {
-		const management = this.#management;
-		if (management === undefined) throw new Error("网关连接未就绪");
-		await management.archive(sessionId, CONTEXT);
+	async archiveSession(id: string): Promise<void> {
+		await this.#operate(async (epoch) => {
+			await this.#management!.archive(id, CONTEXT);
+			this.#assert(epoch);
+			this.#sessions = this.#sessions.filter((s) => s.id !== id);
+			if (this.#currentSessionId === id) await this.#select(this.#workspace, undefined, epoch);
+		});
 	}
-
-	/** 模型目录（neko.models.list 全局快照）。 */
-	async listModels(): Promise<readonly NekoModelInfo[]> {
-		const models = this.#models;
-		if (models === undefined) throw new Error("网关连接未就绪");
-		return models.list(CONTEXT);
+	async #select(path: string, preferred: string | undefined, epoch: number): Promise<void> {
+		const sessions = workspaceSessions(this.#sessions, path);
+		const target = sessions.find((s) => s.id === preferred) ?? sessions[0];
+		try {
+			if (target) await this.#attach(target.id, epoch);
+			else await this.#clear(epoch);
+			this.#assert(epoch);
+			this.#workspace = path;
+			this.#options.events.onWorkspace(path);
+		} catch (error) {
+			// A failed attach cannot leave an old chat eligible for submissions.
+			if (epoch === this.#epoch) {
+				this.#dropView();
+				this.#currentSessionId = undefined;
+				this.#options.events.onSessionChange(null);
+			}
+			throw error;
+		}
 	}
-
-	/** 会话级切换模型；从下一次请求起生效，投影 agent.model 随即更新。 */
+	async #attach(id: string, epoch: number): Promise<void> {
+		if (this.#currentSessionId === id && this.#chat) return;
+		const client = this.#client!;
+		this.#dropView();
+		const generation = this.#viewEpoch;
+		this.#currentSessionId = undefined;
+		this.#options.events.onSessionChange(null);
+		const previousActivity = this.#sessions.find((s) => s.id === id)?.lastUsedAt ?? -1;
+		const changesAttachment = client.attachment?.sessionId !== id;
+		await this.#management!.attach(id, CONTEXT);
+		this.#assert(epoch);
+		await waitForAttachment(client, id);
+		if (changesAttachment) {
+			const started = Date.now();
+			while ((this.#sessions.find((s) => s.id === id)?.lastUsedAt ?? -1) <= previousActivity) {
+				if (Date.now() - started > 5000) throw new Error("等待会话目录更新超时");
+				await new Promise((r) => setTimeout(r, 5));
+				this.#assert(epoch);
+			}
+		}
+		this.#assert(epoch);
+		const binding = createRemoteServiceBinding({
+			services: [NekoChat],
+			transport: createClientServiceTransport(client, () => client.attachment),
+		});
+		this.#session = binding;
+		await binding.ready(CONTEXT);
+		this.#assert(epoch);
+		const chat = binding.use(NekoChat);
+		this.#chat = chat;
+		this.#currentSessionId = id;
+		this.#options.events.onSessionChange(id);
+		const publish = (view: ChatView) => {
+			if (epoch === this.#epoch && generation === this.#viewEpoch) this.#options.events.onView(view);
+		};
+		if (chat.view.value) publish(chat.view.value);
+		this.#unsubView = chat.view.subscribe(publish);
+	}
+	async #clear(epoch: number): Promise<void> {
+		this.#dropView();
+		this.#currentSessionId = undefined;
+		this.#options.events.onSessionChange(null);
+		await this.#management!.detach(CONTEXT);
+		this.#assert(epoch);
+	}
+	#reconcile(): void {
+		if (!this.managementReady || !this.#currentSessionId || this.#sessions.some((s) => s.id === this.#currentSessionId))
+			return;
+		void this.#operate((epoch) => this.#select(this.#workspace, undefined, epoch)).catch((e) => this.#error(e));
+	}
 	async configure(change: NekoConversationChange): Promise<void> {
-		const chat = this.#chat;
-		if (chat === undefined) throw new Error("会话未就绪");
-		await chat.configure(change, CONTEXT);
+		if (!this.ready) throw new Error("会话未就绪");
+		await this.#chat!.configure(change, CONTEXT);
 	}
-
 	submit(content: string): void {
-		this.#chat?.submit({ content }, CONTEXT).catch((error: unknown) => {
-			this.#events.onError(error instanceof Error ? error.message : String(error));
-		});
+		if (!this.ready) return;
+		void this.#chat!.submit({ content }, CONTEXT).catch((e: unknown) => this.#error(e));
 	}
-
 	abort(): void {
-		this.#chat?.abort(CONTEXT).catch((error: unknown) => {
-			this.#events.onError(error instanceof Error ? error.message : String(error));
-		});
+		if (this.ready) void this.#chat!.abort(CONTEXT).catch((e: unknown) => this.#error(e));
 	}
-
-	dispose(): void {
-		this.#disposed = true;
-		if (this.#reconnectTimer !== undefined) clearTimeout(this.#reconnectTimer);
-		this.#reconnectTimer = undefined;
-		void this.#teardown();
+	async listModels(): Promise<readonly NekoModelInfo[]> {
+		return this.#models?.list(CONTEXT) ?? [];
 	}
-
 	async #connect(): Promise<void> {
+		const epoch = ++this.#epoch;
 		const client = await Client.connect({
-			serverId: this.#serverId,
-			transportFactory: createBrowserWsTransportFactory(this.#url),
-			onListenerError: (error) => this.#events.onError(error.message),
+			serverId: this.#options.serverId,
+			transportFactory: createBrowserWsTransportFactory(this.#options.url),
+			onListenerError: (e) => this.#error(e),
 		});
-		if (this.#disposed) {
-			await client.dispose().catch(() => {});
+		if (this.#disposed || epoch !== this.#epoch) {
+			await client.dispose();
 			return;
 		}
 		this.#client = client;
 		client.onConnectionStateChange((change) => {
-			if (change.state !== "disconnected") return;
-			if (this.#client !== client || this.#disposed) return;
-			this.#events.onError(change.error?.message ?? "网关连接已断开");
-			this.#scheduleReconnect();
+			if (change.state === "disconnected" && client === this.#client) this.#scheduleReconnect();
 		});
-		const serverTransport = createClientServiceTransport(client, () => ({ serverId: this.#serverId }));
-		this.#serverBinding = createRemoteServiceBinding({
-			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels],
-			transport: serverTransport,
+		const binding = createRemoteServiceBinding({
+			services: [NekoSessionDirectory, NekoSessionManagement, NekoModels, NekoWorkspaces],
+			transport: createClientServiceTransport(client, () => ({ serverId: this.#options.serverId })),
 		});
-		const directory = this.#serverBinding.use(NekoSessionDirectory);
-		const management = this.#serverBinding.use(NekoSessionManagement);
-		const models = this.#serverBinding.use(NekoModels);
-		await this.#serverBinding.ready(CONTEXT);
-		this.#management = management;
-		this.#models = models;
-		models
-			.list(CONTEXT)
-			.then((list) => this.#events.onModels(list))
-			.catch(() => {
-				// 模型目录拉取失败不阻塞连接；选择器退化为只读标签。
-			});
-		const initialDirectory = directory.state.value;
-		if (initialDirectory !== undefined) this.#events.onDirectory(initialDirectory);
-		this.#unsubDirectory = directory.state.subscribe((value) => {
-			this.#events.onDirectory(value);
-		});
-		// attach 当前会话（重连）或目录第一个会话（首连）；会话可能刚被其他前端归档，失败则回退目录首项。
-		const target = this.#currentSessionId ?? initialDirectory?.sessions[0]?.id;
-		if (target !== undefined) {
-			try {
-				await this.attachTo(target);
-			} catch (error) {
-				const fallback = initialDirectory?.sessions[0]?.id;
-				if (fallback === undefined || fallback === target) throw error;
-				this.#events.onError(error instanceof Error ? error.message : String(error));
-				await this.attachTo(fallback);
-			}
+		this.#server = binding;
+		await binding.ready(CONTEXT);
+		this.#assert(epoch);
+		this.#management = binding.use(NekoSessionManagement);
+		this.#workspaces = binding.use(NekoWorkspaces);
+		this.#models = binding.use(NekoModels);
+		const directory = binding.use(NekoSessionDirectory);
+		const publish = (value: NekoDirectoryState) => {
+			if (epoch !== this.#epoch) return;
+			this.#sessions = value.sessions;
+			this.#options.events.onDirectory(value);
+			this.#reconcile();
+		};
+		this.#unsub.push(directory.state.subscribe(publish));
+		this.#unsub.push(
+			this.#workspaces.state.subscribe((value) => {
+				if (epoch === this.#epoch) this.#options.events.onWorkspaces(value);
+			}),
+		);
+		if (!this.#initialized) {
+			await this.#workspaces.add({ path: this.#workspace }, CONTEXT);
+			this.#assert(epoch);
+			this.#initialized = true;
 		}
+		const started = Date.now();
+		while (!directory.state.value || !this.#workspaces.state.value) {
+			if (Date.now() - started > 5000) throw new Error("等待工作区目录超时");
+			await new Promise((r) => setTimeout(r, 10));
+			this.#assert(epoch);
+		}
+		publish(directory.state.value);
+		this.#options.events.onWorkspaces(this.#workspaces.state.value);
+		await this.#select(this.#workspace, this.#currentSessionId, epoch);
+		this.#assert(epoch);
+		this.#connected = true;
 		this.#attempt = 0;
-		this.#events.onPhase("ready");
+		this.#options.events.onPhase("ready");
+		void this.#models
+			.list(CONTEXT)
+			.then((models) => {
+				if (epoch === this.#epoch) this.#options.events.onModels(models);
+			})
+			.catch(() => {});
 	}
-
 	#scheduleReconnect(): void {
-		if (this.#disposed || this.#reconnectTimer !== undefined) return;
-		this.#attempt += 1;
-		const delay = Math.min(this.#retryBaseMs * this.#attempt, this.#retryMaxMs);
-		this.#events.onPhase("reconnecting");
-		this.#reconnectTimer = setTimeout(() => {
-			this.#reconnectTimer = undefined;
-			void this.#teardown().then(() => {
-				if (this.#disposed) return;
-				this.#connect().catch(() => {
+		if (this.#disposed || this.#timer) return;
+		++this.#epoch;
+		this.#connected = false;
+		this.#dropView();
+		this.#options.events.onPhase("reconnecting");
+		const delay = Math.min((this.#options.retryBaseMs ?? 800) * ++this.#attempt, this.#options.retryMaxMs ?? 8000);
+		this.#timer = setTimeout(() => {
+			this.#timer = undefined;
+			void this.#teardown()
+				.then(() => {
+					if (!this.#disposed) return this.#connect();
+				})
+				.catch((e) => {
+					this.#error(e);
 					this.#scheduleReconnect();
 				});
-			});
 		}, delay);
 	}
-
-	#teardownSession(): void {
+	#dropView(): void {
+		++this.#viewEpoch;
 		this.#unsubView?.();
 		this.#unsubView = undefined;
 		this.#chat = undefined;
-		void this.#sessionBinding?.dispose(CONTEXT).catch(() => {});
-		this.#sessionBinding = undefined;
+		void this.#session?.dispose(CONTEXT).catch(() => {});
+		this.#session = undefined;
+		this.#options.events.onView(null);
 	}
-
 	async #teardown(): Promise<void> {
-		this.#unsubDirectory?.();
-		this.#unsubDirectory = undefined;
-		this.#teardownSession();
+		for (const unsubscribe of this.#unsub.splice(0)) unsubscribe();
+		this.#dropView();
 		this.#management = undefined;
+		this.#workspaces = undefined;
 		this.#models = undefined;
-		const binding = this.#serverBinding;
-		this.#serverBinding = undefined;
-		await binding?.dispose(CONTEXT).catch(() => {});
+		await this.#server?.dispose(CONTEXT).catch(() => {});
+		this.#server = undefined;
 		const client = this.#client;
 		this.#client = undefined;
 		await client?.dispose().catch(() => {});
 	}
+	dispose(): void {
+		this.#disposed = true;
+		++this.#epoch;
+		this.#connected = false;
+		clearTimeout(this.#timer);
+		void this.#teardown();
+	}
 }
-
-/** attach 响应与 out-of-band attachment 路由的到达顺序不保证，等路由发布到目标会话。 */
-function waitForAttachment(client: Client, sessionId: string): Promise<void> {
-	if (client.attachment?.sessionId === sessionId) return Promise.resolve();
-	return new Promise<void>((resolve, reject) => {
+function waitForAttachment(client: Client, id: string): Promise<void> {
+	if (client.attachment?.sessionId === id) return Promise.resolve();
+	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => {
 			unsubscribe();
-			reject(new Error(`等待会话 ${sessionId} 的 attachment 路由超时`));
-		}, 5_000);
-		const unsubscribe = client.onAttachmentChange((attachment) => {
-			if (attachment?.sessionId === sessionId) {
+			reject(new Error("等待会话连接超时"));
+		}, 5000);
+		const unsubscribe = client.onAttachmentChange((a) => {
+			if (a?.sessionId === id) {
 				clearTimeout(timer);
 				unsubscribe();
 				resolve();
@@ -292,5 +360,4 @@ function waitForAttachment(client: Client, sessionId: string): Promise<void> {
 		});
 	});
 }
-
 export type { NekoDirectoryState, NekoSessionSummary };

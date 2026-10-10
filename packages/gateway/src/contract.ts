@@ -84,3 +84,24 @@ export interface NekoChat {
 }
 
 export const NekoChat = defineService<NekoChat>("neko.chat");
+
+export type NekoWorkspaceSummary = { readonly path: string; readonly createdAt: number };
+export type NekoWorkspaceState = { readonly revision: number; readonly workspaces: readonly NekoWorkspaceSummary[] };
+export type NekoBrowseOptions = {
+	readonly path: string;
+	readonly query?: string;
+	readonly showHidden?: boolean;
+	readonly cursor?: string;
+};
+export type NekoDirectoryPage = {
+	readonly path: string;
+	readonly parent: string | null;
+	readonly entries: readonly { readonly name: string; readonly path: string; readonly error?: string }[];
+	readonly next: string | null;
+};
+export interface NekoWorkspaces {
+	readonly state: ReplicatedState<NekoWorkspaceState>;
+	add(input: { path: string }, context: Context): Promise<NekoWorkspaceSummary>;
+	browse(input: NekoBrowseOptions, context: Context): Promise<NekoDirectoryPage>;
+}
+export const NekoWorkspaces = defineService<NekoWorkspaces>("neko.workspaces");

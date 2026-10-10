@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
 /** Workspace identity is the physical directory, not the enclosing repository. */
@@ -27,6 +27,19 @@ export function executionWorkspace(directory: string | undefined): string {
 		if (!statSync(path).isDirectory()) throw new Error("Not a directory");
 	} catch (cause) {
 		throw new Error(`Workspace is not available: ${path}`, { cause });
+	}
+	return path;
+}
+
+export type NekoWorkspace = { readonly path: string; readonly createdAt: number };
+
+/** Explicit registration requires a readable, traversable directory. */
+export function accessibleWorkspace(directory: string): string {
+	const path = normalizeWorkspace(directory);
+	try {
+		accessSync(path, constants.R_OK | constants.X_OK);
+	} catch (cause) {
+		throw new Error(`Workspace is not accessible: ${directory}`, { cause });
 	}
 	return path;
 }

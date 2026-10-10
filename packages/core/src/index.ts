@@ -40,4 +40,4 @@ export {
 	type NekoSubmitOptions,
 } from "./runtime.ts";
 
-export { normalizeWorkspace } from "./workspace.ts";
+export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

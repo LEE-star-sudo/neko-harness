@@ -1,5 +1,6 @@
 import type { ChatView, NekoModelInfo } from "@neko-harness/core";
 import { useSyncExternalStore } from "react";
+import type { NekoWorkspaceSummary } from "./contract.ts";
 import type { NekoSessionSummary } from "./gateway.ts";
 
 export type ConnPhase = "connecting" | "ready" | "reconnecting" | "error";
@@ -9,6 +10,9 @@ export type NekoNotice = { level: "info" | "error"; text: string };
 export type NekoState = {
 	/** 网关连接阶段；error = /api/info 获取失败（不会自动恢复，需刷新页面）。 */
 	phase: ConnPhase;
+	workspaceRoot: string;
+	workspaces: readonly NekoWorkspaceSummary[];
+	operating: boolean;
 	/** 会话目录（neko.session-directory 订阅推送，实时）。 */
 	sessions: readonly NekoSessionSummary[];
 	/** 模型目录（neko.models.list 全局快照）；拉取失败为空数组。 */
@@ -21,6 +25,9 @@ export type NekoState = {
 
 let state: NekoState = {
 	phase: "connecting",
+	workspaceRoot: "",
+	workspaces: [],
+	operating: false,
 	sessions: [],
 	models: [],
 	currentSessionId: null,
@@ -52,6 +59,15 @@ export function getState(): NekoState {
 }
 
 export const storeActions = {
+	setWorkspace(workspaceRoot: string): void {
+		emit({ ...state, workspaceRoot });
+	},
+	setWorkspaces(workspaces: readonly NekoWorkspaceSummary[]): void {
+		emit({ ...state, workspaces });
+	},
+	setOperation(operating: boolean): void {
+		emit({ ...state, operating });
+	},
 	setPhase(phase: ConnPhase): void {
 		emit({ ...state, phase });
 	},

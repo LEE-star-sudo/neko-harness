@@ -14,7 +14,10 @@ import {
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
+	type NekoWorkspaceState,
+	NekoWorkspaces,
 } from "./contract.ts";
+import { browseWorkspaces } from "./workspaces.ts";
 
 /**
  * 服务器级服务（目录订阅 + 会话管理 + 模型目录），模式对照 coding-agent experimental services/server.ts：
@@ -40,6 +43,7 @@ export async function createNekoServerServices(options: {
 		}));
 
 	let revision = 1;
+	const workspaces = replicatedState<NekoWorkspaceState>({ revision, workspaces: await runtime.listWorkspaces() });
 	const directory = replicatedState<NekoDirectoryState>({ revision, sessions: await list() });
 	const attachments = new Set<RoutedServerServiceAttachment>();
 	let mutationTail = Promise.resolve();
@@ -55,6 +59,11 @@ export async function createNekoServerServices(options: {
 
 	const refreshNow = async (): Promise<void> => {
 		const sessions = await list();
+		const items = await runtime.listWorkspaces();
+		workspaces.change(context, (draft) => {
+			draft.revision++;
+			draft.workspaces = items;
+		});
 		revision += 1;
 		directory.change(context, (draft) => {
 			draft.revision = revision;
@@ -70,8 +79,19 @@ export async function createNekoServerServices(options: {
 					{ service: NekoSessionDirectory, mode: "singleton" },
 					{ service: NekoSessionManagement, mode: "singleton" },
 					{ service: NekoModels, mode: "singleton" },
+					{ service: NekoWorkspaces, mode: "singleton" },
 				]);
 				provider.provide(NekoSessionDirectory, { state: directory });
+				provider.provide(NekoWorkspaces, {
+					state: workspaces,
+					browse: (input) => browseWorkspaces(input),
+					add: (input) =>
+						serialize(async () => {
+							const item = await runtime.addWorkspace(input.path);
+							await refreshNow();
+							return item;
+						}),
+				});
 				// 模型目录是全局快照（Models registry），列表查询无需序列化。
 				provider.provide(NekoModels, { list: async () => runtime.listModels() });
 				provider.provide(NekoSessionManagement, {

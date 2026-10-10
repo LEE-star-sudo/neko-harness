@@ -4,7 +4,7 @@ import { appActions } from "../lib/bootstrap";
 const MAX_HEIGHT = 160;
 
 /** 输入区：textarea + 发送；Enter 发送 / Shift+Enter 换行（兼容输入法组合中状态）；忙碌时可中止。 */
-export function Composer(props: { busy: boolean; status: string | null }) {
+export function Composer(props: { busy: boolean; status: string | null; disabled?: boolean }) {
 	const [value, setValue] = useState("");
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -17,7 +17,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 
 	const submit = (): void => {
 		const content = value.trim();
-		if (content === "" || props.busy) return;
+		if (content === "" || props.busy || props.disabled) return;
 		appActions.submit(content);
 		setValue("");
 		requestAnimationFrame(resize);
@@ -32,6 +32,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 			<div className="mx-auto flex max-w-3xl items-end gap-2">
 				<textarea
 					ref={textareaRef}
+					disabled={props.disabled}
 					value={value}
 					rows={1}
 					placeholder={
@@ -63,7 +64,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 					<button
 						type="button"
 						onClick={submit}
-						disabled={value.trim() === ""}
+						disabled={props.disabled || value.trim() === ""}
 						className="btn-primary btn-lift focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-4 text-sm font-semibold disabled:cursor-not-allowed"
 					>
 						<span aria-hidden>➤</span>

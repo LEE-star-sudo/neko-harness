@@ -27,7 +27,13 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { executionWorkspace, normalizeWorkspace, savedWorkspace } from "./workspace.ts";
+import {
+	accessibleWorkspace,
+	executionWorkspace,
+	type NekoWorkspace,
+	normalizeWorkspace,
+	savedWorkspace,
+} from "./workspace.ts";
 
 /** The built-in DeepSeek chat model used when the caller does not choose one. */
 export const DEFAULT_MODEL = { provider: "deepseek", modelId: "deepseek-flash" } as const;
@@ -145,6 +151,15 @@ const ArchivedDoc = defineDoc<{ archived: boolean }>({
 	initial: () => ({ archived: false }),
 });
 
+const WorkspacesDoc = defineDoc<{ items: NekoWorkspace[] }>({
+	kind: "app.neko.workspaces",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ items: [] }),
+});
+
 const ActivityDoc = defineDoc<{ lastUsedAt: number }>({
 	kind: "app.neko.activity",
 	version: 1,
@@ -182,6 +197,8 @@ export type NekoRuntime = {
 
 	/** Every conversation of this storage, root included, with its soft-delete state. */
 	listConversations(): Promise<NekoConversationInfo[]>;
+	listWorkspaces(): Promise<NekoWorkspace[]>;
+	addWorkspace(path: string): Promise<NekoWorkspace>;
 	touchConversation(id: ConversationId): Promise<void>;
 	forkConversation(id: ConversationId): Promise<NekoSession>;
 	/** Create a new ownerless conversation; starts as a copy of the runtime's model/thinking/cwd choices. */
@@ -281,10 +298,27 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			cwd: defaultCwd,
 		},
 	});
+	const registerWorkspace = async (path: string): Promise<NekoWorkspace> => {
+		await harness.commit(async (tx) => {
+			const doc = await tx.doc(WorkspacesDoc, conversation.id);
+			if (!doc.items.some((item) => item.path === path)) doc.items.push({ path, createdAt: Date.now() });
+		}, context);
+		return (await harness.snapshot(WorkspacesDoc, conversation.id, context))!.items.find((item) => item.path === path)!;
+	};
+	const addWorkspace = async (path: string) => registerWorkspace(accessibleWorkspace(path));
+	for (const record of [...existing, { id: conversation.id }]) {
+		const target = await harness.conversation(record.id, context);
+		if (target) await registerWorkspace(savedWorkspace((await target.agent(context)).cwd));
+	}
+
+	let lastActivity = 0;
+	for (const record of existing)
+		lastActivity = Math.max(lastActivity, (await harness.snapshot(ActivityDoc, record.id, context))?.lastUsedAt ?? 0);
 	const touchConversation = async (id: ConversationId): Promise<void> => {
 		await harness.commit(async (tx) => {
 			const doc = await tx.doc(ActivityDoc, id);
-			doc.lastUsedAt = Math.max(Date.now(), doc.lastUsedAt + 1);
+			lastActivity = Math.max(Date.now(), lastActivity + 1, doc.lastUsedAt + 1);
+			doc.lastUsedAt = lastActivity;
 		}, context);
 	};
 	if (existing.length === 0) await touchConversation(conversation.id);
@@ -376,9 +410,14 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	return {
 		context,
 		touchConversation,
+		addWorkspace,
+		async listWorkspaces() {
+			return [...((await harness.snapshot(WorkspacesDoc, conversation.id, context))?.items ?? [])];
+		},
 		async forkConversation(id) {
 			const source = await sessionFor(id);
 			const agent = await source.conversation.agent(context);
+			await registerWorkspace(savedWorkspace(agent.cwd));
 			const newest = await source.conversation.entries({}, 1, undefined, context);
 			const at = newest.items[0]?.id;
 			const child =
@@ -438,13 +477,14 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return infos;
 		},
 		async createConversation(createOptions) {
+			const workspace = await addWorkspace(createOptions?.cwd ?? defaultCwd);
 			const created = await harness.createConversation(
 				{
 					ownership: { kind: "ownerless" },
 					agent: {
 						model: createOptions?.model ?? model,
 						...(createOptions?.thinkingLevel !== undefined ? { thinkingLevel: createOptions.thinkingLevel } : {}),
-						cwd: normalizeWorkspace(createOptions?.cwd ?? defaultCwd),
+						cwd: workspace.path,
 					},
 				},
 				context,

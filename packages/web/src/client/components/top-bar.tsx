@@ -1,41 +1,36 @@
-import { Link } from "@tanstack/react-router";
 import type { ConnPhase } from "../lib/store";
+import { useNekoState } from "../lib/store";
+import { folderName, Icon } from "./nav-primitives";
 
-const CONN_BADGE: Record<ConnPhase, { label: string; className: string }> = {
-	ready: { label: "已连接", className: "bg-tianyi-100 text-tianyi-900 border-tianyi-300" },
-	connecting: { label: "连接中…", className: "bg-ink-100 text-ink-600 border-ink-200" },
-	reconnecting: { label: "重连中…", className: "bg-sakura-100 text-sakura-900 border-sakura-300" },
-	error: { label: "连接失败", className: "bg-sakura-100 text-sakura-900 border-sakura-400" },
+const phases: Record<ConnPhase, string> = {
+	ready: "已连接",
+	connecting: "连接中…",
+	reconnecting: "重连中…",
+	error: "连接失败",
 };
-
-/** 顶栏：会话开关 + logo + 连接状态 + 设置入口。模型/用量/忙碌在输入区上方状态条。 */
-export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void }) {
-	const conn = CONN_BADGE[props.conn];
+export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void; sidebarOpen?: boolean }) {
+	const { workspaceRoot, currentSessionId, operating } = useNekoState();
 	return (
-		<header className="flex items-center gap-2 border-b border-sakura-200/70 bg-surface/80 px-3 py-2.5 backdrop-blur">
+		<header className="nav-theme nav-topbar">
 			<button
 				type="button"
+				className="nav-icon"
+				aria-label="切换侧栏"
+				title="切换侧栏"
+				aria-expanded={props.sidebarOpen}
 				onClick={props.onToggleSessions}
-				className="focus-neko rounded-lg px-2 py-1 text-ink-500 hover:bg-sakura-100 hover:text-sakura-800"
-				aria-label="切换会话列表"
-				title="会话列表"
 			>
-				<span aria-hidden>☰</span>
+				<Icon name="panel" />
 			</button>
-			<Link to="/" className="focus-neko flex items-baseline gap-1.5 rounded-lg no-underline">
-				<span className="logo-gradient text-xl font-extrabold tracking-tight">neko</span>
-				<span className="text-xs font-medium text-tianyi-600">web</span>
-			</Link>
-			<div className="min-w-0 flex-1" />
-			<span className={`rounded-full border px-2.5 py-0.5 text-xs ${conn.className}`}>{conn.label}</span>
-			<Link
-				to="/settings"
-				className="focus-neko rounded-full px-2 py-0.5 text-ink-500 no-underline hover:bg-sakura-100 hover:text-sakura-800"
-				aria-label="设置"
-				title="设置"
-			>
-				<span aria-hidden>⚙</span>
-			</Link>
+			<span className="nav-top-path" title={workspaceRoot}>
+				<Icon name="folder" />
+				<span className="nav-truncate">{folderName(workspaceRoot) || "工作区"}</span>
+			</span>
+			<span className="nav-muted">/</span>
+			<span className="nav-truncate">{currentSessionId ? `会话 ${currentSessionId}` : "新会话"}</span>
+			<output className={`nav-connection ${props.conn === "ready" ? "is-connected" : ""}`}>
+				{operating ? "切换中…" : phases[props.conn]}
+			</output>
 		</header>
 	);
 }

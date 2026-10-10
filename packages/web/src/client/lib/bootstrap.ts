@@ -1,6 +1,7 @@
 import type { NekoModelRef } from "@neko-harness/core";
+import type { NekoBrowseOptions } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
-import { getState, storeActions } from "./store.ts";
+import { storeActions } from "./store.ts";
 
 /**
  * 应用启动接线：从 /api/info 拿 gateway WebSocket 地址 + serverId，
@@ -9,6 +10,7 @@ import { getState, storeActions } from "./store.ts";
 
 export type GatewayInfo = {
 	gatewayWs: string;
+	workspaceRoot: string;
 	serverId: string;
 	socketPath: string;
 };
@@ -38,8 +40,12 @@ export function startNekoApp(): void {
 		connection = new GatewayConnection({
 			url: info.gatewayWs,
 			serverId: info.serverId,
+			workspaceRoot: info.workspaceRoot,
 			events: {
 				onPhase: storeActions.setPhase,
+				onWorkspaces: (state) => storeActions.setWorkspaces(state.workspaces),
+				onWorkspace: storeActions.setWorkspace,
+				onOperation: storeActions.setOperation,
 				onError: (text) => storeActions.notice({ level: "error", text }),
 				onDirectory: (directory) => storeActions.setDirectory(directory.sessions),
 				onModels: storeActions.setModels,
@@ -70,23 +76,20 @@ export const appActions = {
 		}
 		connection.abort();
 	},
-	selectSession(sessionId: string): void {
-		if (connection === undefined) {
-			notReady();
-			return;
-		}
-		connection.attachTo(sessionId).catch((error: unknown) => {
-			storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
-		});
+	selectSession(sessionId: string): Promise<void> {
+		return requireConnection().attachTo(sessionId);
 	},
-	createSession(): void {
-		if (connection === undefined) {
-			notReady();
-			return;
-		}
-		connection.createSession().catch((error: unknown) => {
-			storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
-		});
+	selectWorkspace(path: string): Promise<void> {
+		return requireConnection().selectWorkspace(path);
+	},
+	addWorkspace(path: string): Promise<void> {
+		return requireConnection().addWorkspace(path);
+	},
+	browse(options: NekoBrowseOptions) {
+		return requireConnection().browse(options);
+	},
+	createSession(): Promise<void> {
+		return requireConnection().createSession();
 	},
 	/** 会话级切换模型；下一次请求生效，状态条随投影 agent.model 即时更新。 */
 	configureModel(model: NekoModelRef): void {
@@ -98,22 +101,14 @@ export const appActions = {
 			storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
 		});
 	},
-	archiveSession(sessionId: string): void {
-		if (connection === undefined) {
-			notReady();
-			return;
-		}
-		connection
-			.archiveSession(sessionId)
-			.then(() => {
-				const { sessions, currentSessionId } = getState();
-				if (currentSessionId !== sessionId) return;
-				const next = sessions.find((session) => session.id !== sessionId);
-				if (next !== undefined) appActions.selectSession(next.id);
-				else connection?.clearSession().catch(() => {});
-			})
-			.catch((error: unknown) => {
-				storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
-			});
+	archiveSession(sessionId: string): Promise<void> {
+		return requireConnection().archiveSession(sessionId);
 	},
 };
+function requireConnection(): GatewayConnection {
+	if (!connection) throw new Error("网关尚未连接");
+	return connection;
+}
+export function reportError(error: unknown): void {
+	storeActions.notice({ level: "error", text: error instanceof Error ? error.message : String(error) });
+}

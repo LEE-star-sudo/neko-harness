@@ -1,142 +1,225 @@
-import { useEffect, useRef, useState } from "react";
-import { appActions } from "../lib/bootstrap";
+import { Link } from "@tanstack/react-router";
+import { useState } from "react";
+import { appActions, reportError } from "../lib/bootstrap";
+import { workspaceSessions } from "../lib/gateway";
 import { useNekoState } from "../lib/store";
+import { folderName, Icon, Modal, Popover, useMobile } from "./nav-primitives";
+import { WorkspacePicker } from "./workspace-picker";
 
-/**
- * 会话列表侧栏：目录订阅驱动（neko.session-directory），实时更新。
- * 当前会话高亮；支持新建、切换、归档（两步内联确认）。移动端抽屉式，桌面端常显。
- */
-export function SessionList(props: { open: boolean; onClose: () => void }) {
-	const { sessions, currentSessionId, phase } = useNekoState();
-	const [confirmId, setConfirmId] = useState<string | null>(null);
-	const confirmTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-	useEffect(() => {
-		return () => {
-			if (confirmTimer.current !== undefined) clearTimeout(confirmTimer.current);
-		};
-	}, []);
-
-	const requestArchive = (id: string): void => {
-		if (confirmId === id) {
-			setConfirmId(null);
-			if (confirmTimer.current !== undefined) clearTimeout(confirmTimer.current);
-			appActions.archiveSession(id);
-			return;
-		}
-		setConfirmId(id);
-		if (confirmTimer.current !== undefined) clearTimeout(confirmTimer.current);
-		confirmTimer.current = setTimeout(() => {
-			setConfirmId((current) => (current === id ? null : current));
-		}, 3000);
+export function SessionList({ open, onClose }: { open: boolean; onClose: () => void }) {
+	const state = useNekoState();
+	const mobile = useMobile();
+	const [menu, setMenu] = useState<{ anchor: HTMLElement; id?: string } | null>(null);
+	const [picker, setPicker] = useState(false);
+	const [archive, setArchive] = useState<string | null>(null);
+	const [archiveError, setArchiveError] = useState("");
+	const [query, setQuery] = useState("");
+	const disabled = state.phase !== "ready" || state.operating;
+	const sessions = workspaceSessions(state.sessions, state.workspaceRoot).filter((s) =>
+		`会话 ${s.id}`.includes(query.trim()),
+	);
+	const action = (operation: Promise<void>) => {
+		void operation
+			.then(() => {
+				if (mobile) onClose();
+			})
+			.catch(reportError);
 	};
-
-	const panelClass = props.open ? "translate-x-0" : "-translate-x-full md:translate-x-0";
-
-	return (
+	if (!open) return null;
+	const content = (
 		<>
-			{props.open && (
-				<button
-					type="button"
-					aria-label="关闭会话列表"
-					className="focus-neko fixed inset-0 z-30 cursor-default bg-ink-900/20 md:hidden"
-					onClick={props.onClose}
-				/>
-			)}
-			<aside
-				className={`fixed inset-y-0 left-0 z-40 flex w-60 transform flex-col border-r border-sakura-200 bg-surface shadow-lift transition-transform duration-200 md:static md:z-auto md:shadow-none ${panelClass}`}
-			>
-				<div className="flex items-center gap-2 border-b border-sakura-200/70 px-3 py-2.5">
-					<span className="text-sm font-bold text-sakura-800">会话</span>
-					<span aria-hidden className="text-xs text-sakura-400">
-						✦
-					</span>
-					<div className="flex-1" />
+			<div className="nav-sidebar-top">
+				<div className="nav-workspace-heading">
 					<button
 						type="button"
-						onClick={appActions.createSession}
-						disabled={phase !== "ready"}
-						className="btn-primary btn-lift focus-neko inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold disabled:opacity-40"
-						title="新建会话"
+						className="nav-workspace-trigger"
+						aria-label="切换工作区"
+						aria-expanded={menu !== null && !menu.id}
+						disabled={disabled}
+						onClick={(e) => setMenu({ anchor: e.currentTarget })}
 					>
-						<span aria-hidden>＋</span>
-						新建
+						<span className="nav-workspace-mark">
+							<Icon name="folder" />
+						</span>
+						<span className="nav-truncate">{folderName(state.workspaceRoot) || "工作区"}</span>
+						<Icon name="chevron" />
 					</button>
-				</div>
-				<div className="flex-1 overflow-y-auto px-2 py-2">
-					{sessions.length === 0 && (
-						<div className="px-2 py-6 text-center text-xs text-ink-500">
-							{phase === "ready" ? "暂无会话，点上方「新建」。" : "等待网关连接…"}
-						</div>
+					{!mobile && (
+						<button type="button" className="nav-icon" aria-label="收起侧栏" title="收起侧栏" onClick={onClose}>
+							<Icon name="panel" />
+						</button>
 					)}
-					<ul className="flex flex-col gap-1">
-						{sessions.map((session) => {
-							const active = session.id === currentSessionId;
-							const confirming = confirmId === session.id;
-							return (
-								<li key={session.id} className="group flex items-center gap-1">
+				</div>
+				<button
+					type="button"
+					className="nav-row nav-new"
+					disabled={disabled}
+					onClick={() => action(appActions.createSession())}
+				>
+					<Icon name="plus" />
+					新建会话
+				</button>
+				<div className="nav-search">
+					<Icon name="search" />
+					<input
+						aria-label="搜索当前工作区会话"
+						placeholder="搜索会话…"
+						value={query}
+						onChange={(e) => setQuery(e.target.value)}
+					/>
+				</div>
+			</div>
+			<div className="nav-section-label">
+				会话 <span>{sessions.length}</span>
+			</div>
+			<div className="nav-session-scroll">
+				<ul className="nav-session-list">
+					{sessions.map((session) => (
+						<li
+							key={session.id}
+							className={`nav-session-row ${session.id === state.currentSessionId ? "is-active" : ""}`}
+						>
+							<button
+								type="button"
+								className="nav-row nav-session-select"
+								disabled={disabled}
+								aria-current={session.id === state.currentSessionId ? "page" : undefined}
+								onClick={() => action(appActions.selectSession(session.id))}
+							>
+								<Icon name="chat" />
+								<span className="nav-truncate">会话 {session.id}</span>
+							</button>
+							<button
+								type="button"
+								className="nav-icon nav-row-more"
+								disabled={disabled}
+								aria-label={`会话 ${session.id} 的操作`}
+								title="会话操作"
+								onClick={(e) => setMenu({ anchor: e.currentTarget, id: session.id })}
+							>
+								<Icon name="more" />
+							</button>
+						</li>
+					))}
+				</ul>
+				{sessions.length === 0 && (
+					<div className="nav-empty">
+						{state.phase !== "ready" ? "等待网关连接…" : query ? "没有匹配的会话" : "此工作区暂无会话"}
+					</div>
+				)}
+			</div>
+			<div className="nav-sidebar-bottom">
+				<span className="nav-path" title={state.workspaceRoot}>
+					{state.workspaceRoot}
+				</span>
+				<Link to="/settings" className="nav-row">
+					<Icon name="settings" />
+					设置
+				</Link>
+			</div>
+		</>
+	);
+	return (
+		<>
+			{mobile ? (
+				<Modal title="工作区与会话" drawer onClose={onClose}>
+					{content}
+				</Modal>
+			) : (
+				<aside className="nav-theme nav-sidebar" aria-label="工作区与会话">
+					{content}
+				</aside>
+			)}
+			{menu && (
+				<Popover anchor={menu.anchor} label={menu.id ? "会话操作" : "选择工作区"} onClose={() => setMenu(null)}>
+					{menu.id ? (
+						<button
+							type="button"
+							className="nav-row"
+							onClick={() => {
+								setArchive(menu.id!);
+								setArchiveError("");
+								setMenu(null);
+							}}
+						>
+							<Icon name="archive" />
+							归档会话
+						</button>
+					) : (
+						<>
+							<div className="nav-section-label">工作区</div>
+							<div className="nav-workspace-options">
+								{state.workspaces.map((w) => (
 									<button
 										type="button"
+										className={`nav-workspace-option ${w.path === state.workspaceRoot ? "is-active" : ""}`}
+										key={w.path}
+										title={w.path}
 										onClick={() => {
-											appActions.selectSession(session.id);
-											props.onClose();
+											setMenu(null);
+											setQuery("");
+											action(appActions.selectWorkspace(w.path));
 										}}
-										className={`focus-neko flex min-w-0 flex-1 items-center gap-1.5 rounded-xl border px-2.5 py-2 text-left text-[13px] ${
-											active
-												? "border-sakura-300 bg-sakura-100 font-medium text-sakura-900"
-												: "border-transparent text-ink-700 hover:border-sakura-200 hover:bg-sakura-50"
-										}`}
 									>
-										<span aria-hidden className={active ? "text-sakura-500" : "text-tianyi-400"}>
-											◈
+										<Icon name="folder" />
+										<span>
+											<strong>{folderName(w.path)}</strong>
+											<small>{w.path}</small>
 										</span>
-										<span className="truncate">会话 {session.id}</span>
-										{session.id === "1" && (
-											<span className="shrink-0 rounded-full border border-tianyi-200 bg-tianyi-50 px-1.5 text-[10px] text-tianyi-800">
-												root
+										{w.path === state.workspaceRoot && (
+											<span role="img" aria-label="当前工作区">
+												✓
 											</span>
 										)}
 									</button>
-									<button
-										type="button"
-										onClick={() => {
-											requestArchive(session.id);
-										}}
-										className={`focus-neko shrink-0 rounded-md px-1.5 py-1 text-xs ${
-											confirming
-												? "border border-sakura-200 bg-sakura-100 font-medium text-sakura-800"
-												: "text-ink-400 opacity-0 group-hover:opacity-100 hover:bg-sakura-100 hover:text-sakura-700"
-										}`}
-										title={confirming ? "再次点击确认归档" : "归档会话"}
-									>
-										{confirming ? (
-											"归档？"
-										) : (
-											<svg
-												width="13"
-												height="13"
-												viewBox="0 0 24 24"
-												fill="none"
-												stroke="currentColor"
-												strokeWidth="1.8"
-												strokeLinecap="round"
-												strokeLinejoin="round"
-												aria-hidden="true"
-											>
-												<path d="M3 6h18" />
-												<path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-												<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-												<line x1="10" y1="11" x2="10" y2="17" />
-												<line x1="14" y1="11" x2="14" y2="17" />
-											</svg>
-										)}
-									</button>
-								</li>
-							);
-						})}
-					</ul>
-				</div>
-			</aside>
+								))}
+							</div>
+							<button
+								type="button"
+								className="nav-row nav-add-workspace"
+								onClick={() => {
+									setMenu(null);
+									setPicker(true);
+								}}
+							>
+								<Icon name="plus" />
+								添加工作区
+							</button>
+						</>
+					)}
+				</Popover>
+			)}
+			{picker && <WorkspacePicker initialPath={state.workspaceRoot} onClose={() => setPicker(false)} />}
+			{archive && (
+				<Modal title="归档会话" locked={state.operating} onClose={() => setArchive(null)}>
+					<div className="nav-confirm">
+						<p>归档会话 {archive}？会话将从列表中隐藏，工作区和文件仍会保留。</p>
+						{archiveError && (
+							<p role="alert" className="nav-error">
+								{archiveError}
+							</p>
+						)}
+						<div className="nav-actions">
+							<button type="button" className="nav-button" disabled={state.operating} onClick={() => setArchive(null)}>
+								取消
+							</button>
+							<button
+								type="button"
+								className="nav-button nav-primary"
+								disabled={state.operating}
+								onClick={() => {
+									void appActions
+										.archiveSession(archive)
+										.then(() => setArchive(null))
+										.catch((e: unknown) => setArchiveError(String(e)));
+								}}
+							>
+								确认归档
+							</button>
+						</div>
+					</div>
+				</Modal>
+			)}
 		</>
 	);
 }

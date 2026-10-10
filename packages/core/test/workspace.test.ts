@@ -102,3 +102,56 @@ it("rejects old storage without deleting it, and never rebinds a missing saved d
 	await expect(createNekoRuntime({ ...options, cwd: a })).rejects.toThrow("Unsupported session storage");
 	expect(readFileSync(storagePath).length).toBeGreaterThan(0);
 });
+
+it("registers independent workspaces across restart, archives and forks", async () => {
+	const a = directory(),
+		b = directory();
+	mkdirSync(join(b, "sub"));
+	symlinkSync(b, join(a, "link"));
+	const faux = fauxProvider();
+	const options = { storagePath: join(a, "registry.sqlite"), cwd: a, providers: [faux.provider], model };
+	let runtime = await createNekoRuntime(options);
+	try {
+		await Promise.all([runtime.addWorkspace(b), runtime.addWorkspace(join(a, "link"))]);
+		await runtime.addWorkspace(join(b, "sub"));
+		expect((await runtime.listConversations()).length).toBe(1);
+		expect((await runtime.listWorkspaces()).map((w) => w.path).sort()).toEqual([a, b, join(b, "sub")].sort());
+		const child = await runtime.forkConversation(runtime.root.id);
+		await runtime.archiveConversation(child.id);
+		await runtime.archiveConversation(runtime.root.id);
+		await runtime.close();
+		rmSync(join(b, "sub"), { recursive: true });
+		runtime = await createNekoRuntime(options);
+		expect(await runtime.listConversations()).toEqual([]);
+		expect((await runtime.listWorkspaces()).length).toBe(3);
+		await expect(runtime.addWorkspace(join(b, "sub"))).rejects.toThrow("Workspace");
+	} finally {
+		await runtime.close();
+	}
+});
+
+it("backfills archived pre-registry sessions without rebinding missing directories", async () => {
+	const a = directory(),
+		b = directory();
+	const faux = fauxProvider();
+	const options = { storagePath: join(a, "backfill.sqlite"), cwd: a, providers: [faux.provider], model };
+	let runtime = await createNekoRuntime(options);
+	try {
+		const older = await runtime.harness.createConversation(
+			{ ownership: { kind: "ownerless" }, agent: { model, cwd: b } },
+			runtime.context,
+		);
+		await runtime.archiveConversation(older.id);
+		expect((await runtime.listWorkspaces()).map((w) => w.path)).toEqual([a]);
+		await runtime.close();
+		rmSync(b, { recursive: true });
+		runtime = await createNekoRuntime(options);
+		expect((await runtime.listWorkspaces()).map((w) => w.path).sort()).toEqual([a, b].sort());
+		expect((await runtime.listConversations()).some((s) => s.id === older.id)).toBe(false);
+		await runtime.close();
+		runtime = await createNekoRuntime(options);
+		expect((await runtime.listWorkspaces()).length).toBe(2);
+	} finally {
+		await runtime.close();
+	}
+});
