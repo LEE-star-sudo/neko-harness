@@ -48,13 +48,16 @@
 	--color-ink-700: #554857;
 	--color-ink-900: #322b34;
 
-	/* 圆角：整体偏大 */
-	--radius-bubble: 1.375rem;
-	--radius-card: 1.125rem;
+	/* 圆角：整体偏大，气泡更大胆 */
+	--radius-bubble: 1.75rem;
+	--radius-card: 1.25rem;
 
-	/* 柔和投影（粉调为主） */
+	/* 柔和投影：粉调为主，气泡按角色分色 */
 	--shadow-soft: 0 2px 10px 0 oklch(0.53 0.13 6.2 / 0.08);
 	--shadow-bubble: 0 2px 14px 0 oklch(0.53 0.13 6.2 / 0.1), 0 1px 3px 0 oklch(0.43 0.14 232.7 / 0.06);
+	--shadow-bubble-user: 0 3px 16px 0 oklch(0.53 0.13 6.2 / 0.16), 0 1px 4px 0 oklch(0.53 0.13 6.2 / 0.1);
+	--shadow-bubble-assistant:
+		0 3px 16px 0 oklch(0.43 0.14 232.7 / 0.12), 0 1px 4px 0 oklch(0.53 0.13 6.2 / 0.06);
 	--shadow-lift: 0 10px 32px 0 oklch(0.53 0.13 6.2 / 0.14);
 
 	--font-sans:
@@ -62,7 +65,7 @@
 		"Segoe UI", sans-serif;
 	--font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-	--animate-blink: blink 1s step-end infinite;
+	--animate-blink: blink 1.2s step-end infinite;
 	--animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
 
 	@keyframes blink {
@@ -96,6 +99,9 @@ body {
 
 body {
 	background-color: var(--color-base);
+	/* 空气感：极淡粉蓝对角渐变（fixed，不随滚动） */
+	background-image: linear-gradient(150deg, #ffffff 0%, #fff5f8 42%, #eff9ff 100%);
+	background-attachment: fixed;
 	color: var(--color-ink-900);
 	font-family: var(--font-sans);
 	-webkit-font-smoothing: antialiased;
@@ -172,7 +178,7 @@ button {
 	color: var(--color-sakura-900);
 	border-radius: var(--radius-bubble);
 	border-bottom-right-radius: 0.375rem;
-	box-shadow: var(--shadow-bubble);
+	box-shadow: var(--shadow-bubble-user);
 }
 
 .bubble-assistant {
@@ -181,7 +187,182 @@ button {
 	color: var(--color-ink-900);
 	border-radius: var(--radius-bubble);
 	border-bottom-left-radius: 0.375rem;
-	box-shadow: var(--shadow-bubble);
+	box-shadow: var(--shadow-bubble-assistant);
+}
+
+/* ---- 按钮：浅色粉蓝渐变 + 深色文字，hover 轻浮起 ---- */
+
+.btn-primary {
+	background-image: linear-gradient(135deg, var(--color-sakura-200) 0%, var(--color-tianyi-200) 100%);
+	border: 1px solid color-mix(in oklab, var(--color-sakura-300) 60%, white);
+	color: var(--color-sakura-900);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.75),
+		var(--shadow-soft);
+}
+
+.btn-primary:hover {
+	filter: brightness(1.05);
+	box-shadow:
+		inset 0 1px 0 rgb(255 255 255 / 0.75),
+		var(--shadow-lift);
+}
+
+.btn-primary:disabled {
+	opacity: 0.45;
+	filter: saturate(0.5);
+}
+
+/* 中止：描边样式，与发送的渐变区分（stop 语义） */
+.btn-stop {
+	background-color: var(--color-surface);
+	border: 1px solid var(--color-sakura-300);
+	color: var(--color-sakura-800);
+}
+
+.btn-stop:hover {
+	background-color: var(--color-sakura-50);
+}
+
+.btn-lift {
+	transition:
+		transform 0.16s ease,
+		box-shadow 0.16s ease,
+		filter 0.16s ease,
+		background-color 0.16s ease;
+}
+
+.btn-lift:hover {
+	transform: translateY(-1px);
+}
+
+.btn-lift:active {
+	transform: translateY(0) scale(0.97);
+}
+
+/* ---- 文字动效（只动 opacity/transform；reduced-motion 见文件末尾逐一降级） ---- */
+
+/* 消息/卡片入场：用户右侧滑入，其余左侧滑入 */
+@keyframes msg-in-right {
+	from {
+		opacity: 0;
+		transform: translate(10px, 8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes msg-in-left {
+	from {
+		opacity: 0;
+		transform: translate(-10px, 8px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.anim-user {
+	animation: msg-in-right 0.34s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+
+.anim-other {
+	animation: msg-in-left 0.34s cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+}
+
+/* 流式气泡入场 */
+@keyframes stream-in {
+	from {
+		opacity: 0;
+		transform: translateY(10px) scale(0.985);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.stream-block {
+	animation: stream-in 0.38s ease-out backwards;
+}
+
+/* 忙碌三点（1.2s 周期，<3Hz；只动 transform） */
+@keyframes dot-bounce {
+	0%,
+	60%,
+	100% {
+		transform: translateY(0);
+		opacity: 0.55;
+	}
+	30% {
+		transform: translateY(-2.5px);
+		opacity: 1;
+	}
+}
+
+.dots {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+}
+
+.dots > span {
+	width: 5px;
+	height: 5px;
+	border-radius: 9999px;
+	background-color: var(--color-sakura-500);
+	animation: dot-bounce 1.2s ease-in-out infinite;
+}
+
+.dots > span:nth-child(2) {
+	animation-delay: 0.15s;
+}
+
+.dots > span:nth-child(3) {
+	animation-delay: 0.3s;
+}
+
+/* logo 粉蓝渐变文字（图形对比度 ≥3:1，1.4.11） */
+.logo-gradient {
+	background-image: linear-gradient(115deg, #c26279 0%, #da7f93 35%, #059fd7 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+}
+
+/* 空会话占位小猫：缓慢浮动 */
+@keyframes cat-float {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-4px);
+	}
+}
+
+.welcome-cat {
+	animation: cat-float 3.2s ease-in-out infinite;
+}
+
+/* 离散显示切换（回到底部按钮 / notice 条）：入场 fade + 上浮 */
+.discrete-in {
+	opacity: 1;
+	transform: none;
+	transition:
+		opacity 0.25s ease,
+		transform 0.25s ease,
+		display 0.25s ease allow-discrete;
+}
+
+@starting-style {
+	.discrete-in {
+		opacity: 0;
+		transform: translateY(6px);
+	}
 }
 
 /* ---- Markdown 渲染（内容经 DOMPurify 消毒后注入） ---- */
@@ -412,4 +593,34 @@ button {
 .chat-row {
 	content-visibility: auto;
 	contain-intrinsic-size: auto 120px;
+}
+
+/* ---- 动效降级：逐项关闭，不用全局 duration hack ---- */
+
+@media (prefers-reduced-motion: reduce) {
+	.anim-user,
+	.anim-other,
+	.stream-block,
+	.welcome-cat {
+		animation: none;
+	}
+
+	.dots > span {
+		animation: none;
+		opacity: 1;
+	}
+
+	.stream-caret {
+		animation: none;
+	}
+
+	.btn-lift,
+	.discrete-in {
+		transition: none;
+	}
+
+	.btn-lift:hover,
+	.btn-lift:active {
+		transform: none;
+	}
 }

@@ -13,13 +13,13 @@ export function ChatPage() {
 	const status = view?.status ?? null;
 
 	return (
-		<div className="flex h-dvh bg-base">
+		<div className="flex h-dvh">
 			<SessionList open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 			<div className="flex min-w-0 flex-1 flex-col">
 				<TopBar conn={phase} onToggleSessions={() => setSidebarOpen(!sidebarOpen)} />
 				{notice !== null && (
 					<div
-						className={`border-b px-4 py-1.5 text-center text-xs ${
+						className={`discrete-in border-b px-4 py-1.5 text-center text-xs ${
 							notice.level === "error"
 								? "border-sakura-300 bg-sakura-100 text-sakura-900"
 								: "border-tianyi-200 bg-tianyi-50 text-tianyi-900"

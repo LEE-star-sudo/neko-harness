@@ -18,7 +18,11 @@ export function StatusBar(props: { model: string; usage: UsageTotals | null; bus
 			<div className="min-w-2 flex-1" />
 			{props.busy && props.status !== null && (
 				<span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-sakura-700">
-					<span className="size-1.5 animate-pulse-soft rounded-full bg-sakura-500" />
+					<span className="dots" aria-hidden>
+						<span />
+						<span />
+						<span />
+					</span>
 					{props.status}
 				</span>
 			)}

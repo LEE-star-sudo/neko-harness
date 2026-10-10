@@ -48,12 +48,15 @@ export function SessionList(props: { open: boolean; onClose: () => void }) {
 			>
 				<div className="flex items-center gap-2 border-b border-sakura-200/70 px-3 py-2.5">
 					<span className="text-sm font-bold text-sakura-800">会话</span>
+					<span aria-hidden className="text-xs text-sakura-400">
+						✦
+					</span>
 					<div className="flex-1" />
 					<button
 						type="button"
 						onClick={appActions.createSession}
 						disabled={phase !== "ready"}
-						className="focus-neko inline-flex items-center gap-1 rounded-full bg-sakura-700 px-2.5 py-1 text-xs font-semibold text-white shadow-soft hover:bg-sakura-800 disabled:opacity-40"
+						className="btn-primary btn-lift focus-neko inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold disabled:opacity-40"
 						title="新建会话"
 					>
 						<span aria-hidden>＋</span>

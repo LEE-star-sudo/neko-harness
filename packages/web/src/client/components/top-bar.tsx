@@ -23,7 +23,7 @@ export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void })
 				<span aria-hidden>☰</span>
 			</button>
 			<Link to="/" className="focus-neko flex items-baseline gap-1.5 rounded-lg no-underline">
-				<span className="text-xl font-extrabold tracking-tight text-sakura-800">neko</span>
+				<span className="logo-gradient text-xl font-extrabold tracking-tight">neko</span>
 				<span className="text-xs font-medium text-tianyi-600">web</span>
 			</Link>
 			<div className="min-w-0 flex-1" />

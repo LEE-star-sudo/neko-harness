@@ -54,7 +54,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 					<button
 						type="button"
 						onClick={abort}
-						className="focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-sakura-700 px-4 text-sm font-semibold text-white shadow-soft hover:bg-sakura-800"
+						className="btn-stop btn-lift focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-4 text-sm font-semibold shadow-soft"
 					>
 						<span aria-hidden>■</span>
 						中止
@@ -64,7 +64,7 @@ export function Composer(props: { busy: boolean; status: string | null }) {
 						type="button"
 						onClick={submit}
 						disabled={value.trim() === ""}
-						className="focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-2xl bg-sakura-700 px-4 text-sm font-semibold text-white shadow-soft hover:bg-sakura-800 disabled:cursor-not-allowed disabled:opacity-40"
+						className="btn-primary btn-lift focus-neko inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-4 text-sm font-semibold disabled:cursor-not-allowed"
 					>
 						<span aria-hidden>➤</span>
 						发送
