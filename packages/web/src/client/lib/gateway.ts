@@ -2,6 +2,7 @@ import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } f
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
 import type { ChatView, NekoConversationChange, NekoModelInfo } from "@neko-harness/core";
+import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
 import {
 	type NekoBrowseOptions,
@@ -203,7 +204,13 @@ export class GatewayConnection {
 		this.#assert(epoch);
 		const binding = createRemoteServiceBinding({
 			services: [NekoChat],
-			transport: createClientServiceTransport(client, () => client.attachment),
+			transport: createClientServiceTransport(
+				client,
+				(
+					(attachment) => () =>
+						attachment
+				)(client.attachment),
+			),
 		});
 		this.#session = binding;
 		await binding.ready(CONTEXT);
@@ -234,9 +241,41 @@ export class GatewayConnection {
 		if (!this.ready) throw new Error("会话未就绪");
 		await this.#chat!.configure(change, CONTEXT);
 	}
-	submit(content: string): void {
-		if (!this.ready) return;
-		void this.#chat!.submit({ content }, CONTEXT).catch((e: unknown) => this.#error(e));
+	async submit(
+		content: string,
+		files: ImageFile[] = [],
+		requestId: string = crypto.randomUUID(),
+		sessionId?: string,
+	): Promise<void> {
+		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
+		if (!this.ready) throw new Error("会话未就绪");
+		const chat = this.#chat!;
+		const ids: string[] = [];
+		try {
+			for (const file of files)
+				ids.push(
+					await uploadImage(file, {
+						begin: (i) => chat.beginImage(i, CONTEXT),
+						append: (i) => chat.appendImage(i, CONTEXT),
+						finish: (id) => chat.finishImage(id, CONTEXT),
+						release: (id) => chat.releaseImage(id, CONTEXT),
+					}),
+				);
+			await chat.submit({ content, requestId, images: ids }, CONTEXT);
+		} finally {
+			for (const id of ids) await chat.releaseImage(id, CONTEXT).catch(() => {});
+		}
+	}
+	async compact(instructions: string, sessionId?: string): Promise<void> {
+		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
+		if (!this.ready) throw new Error("会话未就绪");
+		await this.#chat!.compact({ instructions }, CONTEXT);
+	}
+	async image(entryId: number, contentIndex: number, sessionId?: string): Promise<ImageFile> {
+		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
+		if (!this.ready) throw new Error("会话未就绪");
+		const chat = this.#chat!;
+		return downloadImage((offset) => chat.getImage({ entryId, contentIndex, offset }, CONTEXT));
 	}
 	abort(): void {
 		if (this.ready) void this.#chat!.abort(CONTEXT).catch((e: unknown) => this.#error(e));

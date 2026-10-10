@@ -1,4 +1,5 @@
 import type { NekoConversationChange, NekoModelRef } from "@neko-harness/core";
+import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { NekoBrowseOptions } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
 import { storeActions } from "./store.ts";
@@ -75,12 +76,14 @@ export const appActions = {
 			return Promise.reject(new Error("会话已变化，请重试"));
 		return current.configure(change);
 	},
-	submit(content: string): void {
-		if (connection?.ready !== true) {
-			notReady();
-			return;
-		}
-		connection.submit(content);
+	submit(content: string, files: ImageFile[] = [], requestId?: string, sessionId?: string): Promise<void> {
+		return requireConnection().submit(content, files, requestId, sessionId);
+	},
+	compact(instructions: string, sessionId?: string): Promise<void> {
+		return requireConnection().compact(instructions, sessionId);
+	},
+	image(entryId: number, contentIndex: number, sessionId?: string) {
+		return requireConnection().image(entryId, contentIndex, sessionId);
 	},
 	abort(): void {
 		if (connection?.ready !== true) {

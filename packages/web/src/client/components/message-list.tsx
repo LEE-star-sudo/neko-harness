@@ -1,5 +1,6 @@
 import type { ChatItem, ChatView, StreamingView } from "@neko-harness/core";
 import { useEffect, useRef, useState } from "react";
+import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
 import { ThinkingBlock } from "./thinking";
 import { ToolCard } from "./tool-card";
@@ -29,10 +30,13 @@ function WelcomeCat() {
 	);
 }
 
-function UserRow({ text }: { text: string }) {
+function UserRow({ text, images }: { text: string; images?: import("@neko-harness/core").ChatImage[] }) {
 	return (
 		<div className="chat-row anim-user flex justify-end">
-			<div className="bubble-user max-w-[85%] px-4 py-2.5 text-[15px] whitespace-pre-wrap sm:max-w-[75%]">{text}</div>
+			<div className="bubble-user max-w-[85%] px-4 py-2.5 text-[15px] whitespace-pre-wrap sm:max-w-[75%]">
+				{text}
+				{images && <ImageGallery images={images} />}
+			</div>
 		</div>
 	);
 }
@@ -83,6 +87,7 @@ function ToolRow({ item }: { item: Extract<ChatItem, { type: "tool" }> }) {
 					durationMs={item.durationMs}
 					note={item.note}
 				/>
+				{item.images && <ImageGallery images={item.images} />}
 			</div>
 		</div>
 	);
@@ -167,7 +172,7 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 					{items.map((item) => {
 						switch (item.type) {
 							case "user":
-								return <UserRow key={item.key} text={item.text} />;
+								return <UserRow key={item.key} text={item.text} images={item.images} />;
 							case "assistant":
 								return <AssistantRow key={item.key} item={item} />;
 							case "tool":

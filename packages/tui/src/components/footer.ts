@@ -8,6 +8,8 @@ export type FooterStats = {
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;
+	readonly compaction?: string;
+	readonly canAbort?: boolean;
 	readonly usageText: string;
 	readonly cwd: string;
 };
@@ -23,14 +25,20 @@ export class StatusFooter implements Component {
 		const s = this.#stats;
 		if (!s) return [labels.connecting, ""].map((x) => truncateToWidth(x, width));
 		const space = Math.max(1, width - 2);
-		const status = truncateToWidth(s.busy ?? labels.ready, Math.min(28, Math.floor(space / 2)));
+		const status = truncateToWidth(s.compaction ?? s.busy ?? labels.ready, Math.min(28, Math.floor(space / 2)));
 		const workspace = truncateToWidth(basename(s.cwd) || s.cwd, Math.max(1, space - visibleWidth(status) - 3));
 		let first = `${workspace} | ${s.busy ? theme.accent(status) : theme.ok(status)}`;
 		for (const field of [s.model.split("/").at(-1) ?? s.model, s.thinkingLevel ? `Think: ${s.thinkingLevel}` : ""]) {
 			if (field && visibleWidth(first) + visibleWidth(field) + 3 <= space) first += ` | ${theme.model(field)}`;
 		}
-		const hints = this.panelOpen ? labels.close : s.busy ? labels.busyHints : labels.idleHints;
-		const compactHints = s.busy ? labels.busyCompact : labels.idleCompact;
+		const hints = this.panelOpen
+			? labels.close
+			: s.canAbort && !s.busy
+				? "Esc: stop compaction"
+				: s.busy
+					? labels.busyHints
+					: labels.idleHints;
+		const compactHints = s.canAbort && !s.busy ? "Esc: stop" : s.busy ? labels.busyCompact : labels.idleCompact;
 		const compactUsage = s.usageText.replace(/ Cache: \S+/, "");
 		const second = this.panelOpen
 			? hints

@@ -82,6 +82,9 @@ function ModelForm(props: {
 						>
 							{model.name}
 							{model === selected ? " ✓" : ""}
+							<span className="mt-1 block text-xs text-ink-500">
+								{model.input.includes("image") ? "支持图片" : "仅文本"}
+							</span>
 						</button>
 					))}
 				</fieldset>

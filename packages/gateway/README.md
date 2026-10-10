@@ -51,3 +51,11 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 `neko.credentials` 是无需 attach 的服务器级服务，提供脱敏状态订阅和 save/remove；持久化成功后发布 revision。Unix 与 WebSocket 使用同一服务。
 
 宿主集成和隔离测试可通过 `credentialsPath` 或 `neko serve --credentials <path>` 指定凭据文件；默认仍为用户级共享路径。
+
+### 压缩与图片传输
+
+会话聊天服务提供 `compact`，状态独立于回答运行，并区分摘要等待写入、成功、无需执行、跳过、取消和失败。重连恢复真实状态，不把命令作为用户消息计入最近活动。
+
+图片通过 `beginImage` / `appendImage` / `finishImage` 准备，再由 `submit.images` 与文字一次提交。每块最多 256 KiB，同一 attachment 最多两个进行中上传、八个暂存附件，15 分钟过期；断连释放该 attachment 的暂存数据。相同 requestId 的重试先查已受理结果，不要求旧上传仍存在。临时数据仅在内存中，不建立永久附件文件库。
+
+`getImage` 按会话历史条目及内容位置分块读取，包含合法 fork 历史，不接受宿主路径。实时投影只包含图片描述，不随回答片段广播 base64；压缩后的历史仍可查看。

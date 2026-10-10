@@ -1,3 +1,4 @@
+export { CompactionDoc, type CompactionRecord } from "./compaction.ts";
 export {
 	DEFAULT_NEKO_CONFIG,
 	findNekoConfigFile,
@@ -15,7 +16,10 @@ export {
 	FileCredentialStore,
 	MemoryCredentialStore,
 } from "./credentials.ts";
+export { ImageMetadataDoc } from "./image-metadata.ts";
+export { decodeImage, IMAGE_LIMITS, type ImageInfo, prepareImage, terminalImage } from "./images.ts";
 export {
+	type ChatImage,
 	type ChatItem,
 	type ChatView,
 	projectChatView,

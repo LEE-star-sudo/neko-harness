@@ -66,7 +66,11 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 				await sessionBinding?.dispose(BACKGROUND_CONTEXT).catch(() => {});
 				await management.attach(sessionId, BACKGROUND_CONTEXT);
 				await waitForAttachment(client, sessionId);
-				const sessionTransport = createClientServiceTransport(client, () => client.attachment);
+				const attached = client.attachment;
+				const sessionTransport = createClientServiceTransport(client, () => {
+					if (client.attachment !== attached) throw new Error("Session unavailable: attachment has changed");
+					return attached;
+				});
 				sessionBinding = createRemoteServiceBinding({ services: [NekoChat], transport: sessionTransport });
 				const facade = sessionBinding.use(NekoChat);
 				await sessionBinding.ready(BACKGROUND_CONTEXT);
@@ -74,10 +78,17 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 				// async 返回值的 thenable 判定；包一层普通对象再交给调用方。
 				const chat: NekoChatFacade = {
 					view: facade.view,
-					submit: (input, context) => facade.submit(input, context),
-					abort: (context) => facade.abort(context),
-					usage: (context) => facade.usage(context),
-					configure: (change, context) => facade.configure(change, context),
+					compact: async (input, context) => facade.compact(input, context),
+					beginImage: async (input, context) => facade.beginImage(input, context),
+					appendImage: async (input, context) => facade.appendImage(input, context),
+					finishImage: async (input, context) => facade.finishImage(input, context),
+					releaseImage: async (input, context) => facade.releaseImage(input, context),
+					getImage: async (input, context) => facade.getImage(input, context),
+
+					submit: async (input, context) => facade.submit(input, context),
+					abort: async (context) => facade.abort(context),
+					usage: async (context) => facade.usage(context),
+					configure: async (change, context) => facade.configure(change, context),
 				};
 				return chat;
 			},

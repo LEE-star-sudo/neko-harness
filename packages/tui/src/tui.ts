@@ -3,6 +3,7 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	CombinedAutocompleteProvider,
 	Container,
+	isKeyRelease,
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
@@ -20,9 +21,11 @@ import type {
 	StreamingView,
 } from "@neko-harness/core";
 import { normalizeWorkspace } from "@neko-harness/core";
+import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
+import { HistoryImage, ImageTranscript } from "./components/history-image.ts";
 import { LoginPanel } from "./components/login.ts";
 import { PickerPanel } from "./components/picker.ts";
 import { type ToolCardState, ToolExecutionComponent } from "./components/tool-execution.ts";
@@ -30,6 +33,7 @@ import { UserMessageComponent } from "./components/user-message.ts";
 import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
 import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
+import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
 import {
@@ -77,15 +81,17 @@ class NekoTuiApp {
 	readonly #gateway: NekoTuiGateway;
 	readonly #options: NekoTuiOptions;
 	readonly #ui: TuiAltScreen;
-	readonly #chat = new Container();
+	readonly #chat = new ImageTranscript(() => this.#transcript);
 	readonly #notices = new Container();
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
 	readonly #login: LoginPanel;
 	#thinkingModel: string | undefined;
+	#imageWarningModel: string | undefined;
 	#sessionPanelTimer: ReturnType<typeof setInterval> | undefined;
 	#sessionOperation = false;
 	#noticeTimer: ReturnType<typeof setTimeout> | undefined;
+	#compactionTimer: ReturnType<typeof setTimeout> | undefined;
 	readonly #editor: BoundedEditor;
 	readonly #footer = new StatusFooter();
 
@@ -97,10 +103,20 @@ class NekoTuiApp {
 	/** 已渲染条目 key 序列（前缀比较检测重建）。 */
 	#renderedKeys: string[] = [];
 	#items = new Map<string, ItemEntry>();
+	#imageKeys = new Set<string>();
+	#imageComponents = new Map<string, HistoryImage>();
 	#toolCards = new Map<string, ToolExecutionComponent>();
 	#streamingComp: AssistantMessageComponent | undefined;
 	#transcript: ScrollView | undefined;
 	#busyText: string | undefined;
+	#imageCounter = 0;
+	#clipboardPending = false;
+	#draftEpoch = 0;
+	#imageDrafts = new Map<string, Map<string, Promise<ImageFile>>>();
+	#texts = new Map<string, string>();
+	#sending = new Set<string>();
+	#retryRequests = new Map<string, { text: string; id: string }>();
+
 	#lastView: ChatView | undefined;
 	#applying = false;
 	#applyQueued = false;
@@ -133,7 +149,33 @@ class NekoTuiApp {
 			save: (key) => this.#gateway.client.credentials.save({ key }, BACKGROUND_CONTEXT),
 			remove: () => this.#gateway.client.credentials.remove(BACKGROUND_CONTEXT),
 		});
-		this.#editor.setAutocompleteProvider(new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd()));
+		const complete = new CombinedAutocompleteProvider(commands, options.cwd ?? process.cwd());
+		const original = complete.applyCompletion.bind(complete);
+		complete.applyCompletion = (lines, line, col, item, prefix) => {
+			const result = original(lines, line, col, item, prefix);
+			const paths = imagePaths(item.value.replace(/^@/, ""));
+			if (paths?.length === 1) {
+				queueMicrotask(() => {
+					const before = this.#editor.getText();
+					const session = this.#sessionId;
+					void this.addImagePaths(paths)
+						.then((refs) => {
+							if (session === this.#sessionId && this.#editor.getText() === before)
+								this.#editor.setText(before.replace(item.value, refs));
+							this.#ui.requestRender();
+						})
+						.catch((e) => this.addNotice(messageOf(e), true));
+				});
+			}
+			return result;
+		};
+		this.#editor.setAutocompleteProvider(complete);
+		this.#editor.isImageReference = (ref) => this.#imageDrafts.get(this.#sessionId)?.has(ref) ?? false;
+		this.#editor.onClearDraft = () => {
+			this.#draftEpoch++;
+			this.#texts.delete(this.#sessionId);
+			this.#retryRequests.delete(this.#sessionId);
+		};
 		this.#editor.onSubmit = (text) => {
 			this.submit(text);
 		};
@@ -141,6 +183,16 @@ class NekoTuiApp {
 			this.#resolveExit = resolve;
 		});
 		this.#ui.addInputListener((data) => {
+			if (isKeyRelease(data)) return { consume: true };
+			if (
+				!matchesKey(data, "escape") ||
+				this.#panel.open ||
+				this.#login.open ||
+				this.#busyText !== undefined ||
+				this.#lastView?.compaction?.active.length
+			)
+				this.#editor.resetEscapeSequence();
+
 			if (!usableSize(this.#terminal.columns, this.#terminal.rows)) {
 				if (matchesKey(data, "ctrl+c")) this.exit();
 				return { consume: true };
@@ -150,13 +202,37 @@ class NekoTuiApp {
 				return undefined;
 			}
 			if (this.#sessionOperation) return { consume: true };
+			if (matchesKey(data, process.platform === "win32" ? "alt+v" : "ctrl+v")) {
+				if (isClipboardShortcut(data)) void this.pasteClipboard();
+				return { consume: true };
+			}
+			if (
+				(data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")) ||
+				(data.length > 3 && /^["']?[~/]/.test(data))
+			) {
+				const paths = imagePaths(data.startsWith("\x1b[200~") ? data.slice(6, -6) : data);
+				if (paths) {
+					const session = this.#sessionId;
+					void this.addImagePaths(paths)
+						.then((refs) => {
+							if (session === this.#sessionId) this.#editor.insertTextAtCursor(refs);
+							this.#ui.requestRender();
+						})
+						.catch((e) => this.addNotice(messageOf(e), true));
+					return { consume: true };
+				}
+			}
 			if (matchesKey(data, "ctrl+c")) {
 				if (this.#busyText !== undefined) this.abort();
 				else this.exit();
 				return { consume: true };
 			}
 			// 会话浮层打开时把 Escape 留给浮层（SelectList 取消）。
-			if (matchesKey(data, "escape") && this.#busyText !== undefined) {
+			if (
+				matchesKey(data, "escape") &&
+				(this.#busyText !== undefined ||
+					this.#lastView?.compaction?.active.some((c) => c.reason === "manual" || c.blocking))
+			) {
 				this.abort();
 				return { consume: true };
 			}
@@ -218,6 +294,7 @@ class NekoTuiApp {
 		this.#terminalSchemeUnsubscribe?.();
 		this.#closeOverlay();
 		clearTimeout(this.#noticeTimer);
+		clearTimeout(this.#compactionTimer);
 		this.#ui.stop();
 	}
 
@@ -230,6 +307,19 @@ class NekoTuiApp {
 	submit(text: string): void {
 		const trimmed = text.trim();
 		if (trimmed === "") return;
+		const instructions = compactInstructions(trimmed);
+		if (instructions !== null) {
+			const chat = this.#chatFacade;
+			const session = this.#sessionId;
+			if (chat)
+				void chat.compact({ instructions }, BACKGROUND_CONTEXT).catch((e) => {
+					if (session === this.#sessionId) {
+						this.#editor.setText(text);
+						this.addNotice(messageOf(e), true);
+					}
+				});
+			return;
+		}
 		if (EXIT_COMMANDS.has(trimmed)) {
 			this.exit();
 			return;
@@ -276,21 +366,108 @@ class NekoTuiApp {
 			this.addNotice("Configure DeepSeek with /login before sending.", true);
 			return;
 		}
-		chat
-			.submit({ content: trimmed, ...(this.#busyText !== undefined ? { whenBusy: "steer" } : {}) }, BACKGROUND_CONTEXT)
-			.catch((error: unknown) => this.addNotice(messageOf(error), true));
+		void this.sendImages(text, this.#busyText !== undefined ? "steer" : undefined);
 	}
-
-	/** Alt+Enter（忙碌时）：follow-up，排队等当前 run 结束。 */
 	submitFollowUp(): void {
+		const text = this.#editor.getText();
+		if (text.trim()) void this.sendImages(text, "followUp");
+	}
+	private async addImagePaths(paths: string[]): Promise<string> {
+		return paths
+			.map((path) =>
+				this.addImage(readImageFile(path, this.#options.cwd ?? process.cwd()), path.split("/").at(-1) ?? "Image"),
+			)
+			.join(" ");
+	}
+	private addImage(file: Promise<ImageFile>, name: string): string {
+		const ref = `[Image ${++this.#imageCounter}: ${name.replace(/[\]\r\n]/g, "")}]`;
+		let images = this.#imageDrafts.get(this.#sessionId);
+		if (!images) {
+			images = new Map();
+			this.#imageDrafts.set(this.#sessionId, images);
+		}
+		images.set(ref, file);
+		void file.catch(() => {});
+		return ref;
+	}
+	private async pasteClipboard(): Promise<void> {
+		if (this.#clipboardPending) return;
+		this.#clipboardPending = true;
+		const epoch = this.#draftEpoch;
+		const session = this.#sessionId;
+		try {
+			const data = await clipboard();
+			if (
+				epoch !== this.#draftEpoch ||
+				session !== this.#sessionId ||
+				this.#exitStarted ||
+				this.#login.open ||
+				this.#panel.open
+			)
+				return;
+			const text = data.image
+				? this.addImage(Promise.resolve(data.image), data.image.name)
+				: data.paths
+					? await this.addImagePaths(data.paths)
+					: (data.text ?? "");
+			this.#editor.insertTextAtCursor(text);
+			this.#ui.requestRender();
+		} catch (e) {
+			this.addNotice(`Clipboard unavailable. Use an image path: ${messageOf(e)}`, true);
+		} finally {
+			this.#clipboardPending = false;
+		}
+	}
+	private async sendImages(text: string, whenBusy?: "steer" | "followUp"): Promise<void> {
 		const chat = this.#chatFacade;
-		if (chat === undefined) return;
-		const trimmed = this.#editor.getText().trim();
-		if (trimmed === "") return;
-		this.#editor.setText("");
-		chat.submit({ content: trimmed, whenBusy: "followUp" }, BACKGROUND_CONTEXT).catch((error: unknown) => {
-			this.addNotice(messageOf(error), true);
-		});
+		const session = this.#sessionId;
+		if (!chat || this.#sending.has(session)) return;
+		this.#sending.add(session);
+		this.#editor.setText(text);
+		const refs = [...(this.#imageDrafts.get(session) ?? [])]
+			.filter(([ref]) => text.includes(ref))
+			.sort((a, b) => text.indexOf(a[0]) - text.indexOf(b[0]));
+		const ids: string[] = [];
+		const before = text;
+		const modelRef = this.#lastView?.agent.model;
+		const old = this.#retryRequests.get(session);
+		const requestId = old?.text === text ? old.id : crypto.randomUUID();
+		this.#retryRequests.set(session, { text, id: requestId });
+		try {
+			const models = await this.#gateway.client.listModels();
+			const model = models.find((m) => m.provider === modelRef?.provider && m.modelId === modelRef?.modelId);
+			if (refs.length && !model?.input.includes("image"))
+				throw new Error("This model does not support images. Switch model or remove the image references.");
+			if (refs.length > 4) throw new Error("At most four images per message");
+			let content = text;
+			for (const [ref, promise] of refs) {
+				const file = await promise;
+				ids.push(
+					await uploadImage(file, {
+						begin: (i) => chat.beginImage(i, BACKGROUND_CONTEXT),
+						append: (i) => chat.appendImage(i, BACKGROUND_CONTEXT),
+						finish: (id) => chat.finishImage(id, BACKGROUND_CONTEXT),
+						release: (id) => chat.releaseImage(id, BACKGROUND_CONTEXT),
+					}),
+				);
+				content = content.replaceAll(ref, "");
+			}
+			await chat.submit(
+				{ content: content.trim(), images: ids, requestId, ...(whenBusy ? { whenBusy } : {}) },
+				BACKGROUND_CONTEXT,
+			);
+			if (session === this.#sessionId && this.#editor.getText() === before) this.#editor.setText("");
+			if (this.#texts.get(session) === before) this.#texts.delete(session);
+			const remaining = session === this.#sessionId ? this.#editor.getText() : (this.#texts.get(session) ?? "");
+			for (const [ref] of refs) if (!remaining.includes(ref)) this.#imageDrafts.get(session)?.delete(ref);
+			this.#retryRequests.delete(session);
+		} catch (e) {
+			if (session === this.#sessionId) this.addNotice(messageOf(e), true);
+		} finally {
+			for (const id of ids) await chat.releaseImage(id, BACKGROUND_CONTEXT).catch(() => {});
+			this.#sending.delete(session);
+			this.#ui.requestRender();
+		}
 	}
 
 	abort(): void {
@@ -309,11 +486,13 @@ class NekoTuiApp {
 
 	/** 切换 attach 的会话：重建转录（提交后的状态为准，重连即取最新快照）。 */
 	async switchSession(id: string): Promise<void> {
+		if (this.#sessionId) this.#texts.set(this.#sessionId, this.#editor.getText());
 		this.#viewUnsubscribe?.();
 		this.#viewUnsubscribe = undefined;
 		const facade = await this.#gateway.client.attach(id);
 		this.#chatFacade = facade;
 		this.#sessionId = id;
+		this.#editor.setText(this.#texts.get(id) ?? "");
 		this.#resetTranscript();
 		const view = facade.view;
 		if (view.value !== undefined) this.applyView(view.value);
@@ -399,7 +578,7 @@ class NekoTuiApp {
 					.map((model) => ({
 						value: keyOf(model),
 						label: `${model.name}${keyOf(model) === currentKey ? " (Current)" : ""}`,
-						description: `${keyOf(model)} | ${formatContextWindow(model.contextWindow)} context${model.reasoning ? " | Thinking" : ""}`,
+						description: `${keyOf(model)} | ${formatContextWindow(model.contextWindow)} context${model.reasoning ? " | Thinking" : ""} | ${model.input.includes("image") ? "Images" : "Text only"}`,
 					}));
 			},
 			async (value) => {
@@ -492,6 +671,42 @@ class NekoTuiApp {
 
 	applyView(view: ChatView): void {
 		this.#lastView = view;
+		const imageModel = `${this.#sessionId}:${view.agent.model?.provider}/${view.agent.model?.modelId}`;
+		if (
+			this.#imageWarningModel !== imageModel &&
+			view.items.some((i) => (i.type === "user" || i.type === "tool") && i.images?.length)
+		) {
+			this.#imageWarningModel = imageModel;
+			void this.#gateway.client
+				.listModels()
+				.then((models) => {
+					if (
+						this.#imageWarningModel === imageModel &&
+						!models
+							.find((m) => m.provider === view.agent.model?.provider && m.modelId === view.agent.model?.modelId)
+							?.input.includes("image")
+					)
+						this.addNotice(
+							"Text-only model: previous images are unavailable to the model; written analysis is retained.",
+						);
+				})
+				.catch(() => {});
+		}
+		clearTimeout(this.#compactionTimer);
+		const latest = view.compaction?.latest;
+		if (
+			latest &&
+			latest.phase !== "waiting-to-apply" &&
+			latest.phase !== "summarizing" &&
+			Date.now() - latest.at < 10000
+		) {
+			this.#compactionTimer = setTimeout(
+				() => {
+					if (!this.#exitStarted && this.#lastView) this.applyView(this.#lastView);
+				},
+				Math.max(1, 10000 - (Date.now() - latest.at)),
+			);
+		}
 		if (this.#thinkingModel && this.#thinkingModel !== `${view.agent.model?.provider}/${view.agent.model?.modelId}`) {
 			this.#panel.close();
 			this.addNotice("Model changed. Open /think to choose its supported levels.");
@@ -521,6 +736,13 @@ class NekoTuiApp {
 			} else {
 				this.#appendItem(item);
 			}
+			if (item.type === "tool" || item.type === "user")
+				for (const image of item.images ?? [])
+					this.#imageComponents.get(`${image.entryId}:${image.contentIndex}`)?.updateInfo(image);
+			if ((item.type === "tool" || item.type === "user") && item.images?.length && !this.#imageKeys.has(item.key)) {
+				this.#imageKeys.add(item.key);
+				this.#appendImages(item.images);
+			}
 			if (item.type === "tool") streamByCall.delete(item.callId);
 		}
 		// 条目还没提交的工具调用（assistant entry 未落库）：暂存卡片，条目到达后由条目路径接管。
@@ -528,6 +750,26 @@ class NekoTuiApp {
 			this.#toolCard(call).sync(streamingCardState(call));
 		}
 		this.#renderedKeys = keys;
+	}
+
+	#appendImages(images: readonly import("@neko-harness/core").ChatImage[]): void {
+		const chat = this.#chatFacade;
+		const session = this.#sessionId;
+		if (!chat) return;
+		for (const image of images) {
+			const component = new HistoryImage(
+				image,
+				() =>
+					downloadImage((offset) =>
+						chat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }, BACKGROUND_CONTEXT),
+					),
+				() => {
+					if (session === this.#sessionId) this.#ui.requestRender();
+				},
+			);
+			this.#imageComponents.set(`${image.entryId}:${image.contentIndex}`, component);
+			this.#chat.addChild(component);
+		}
 	}
 
 	#appendItem(item: ChatItem): void {
@@ -627,6 +869,25 @@ class NekoTuiApp {
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,
 			busy: this.#busyText,
+			canAbort: view.compaction?.active.some((c) => c.reason === "manual" || c.blocking),
+			compaction: view.compaction?.active.length
+				? view.compaction.active.some((c) => c.retry)
+					? "Retrying compaction"
+					: view.compaction.active.some((c) => c.blocking)
+						? "Waiting for compaction"
+						: "Compacting context"
+				: view.compaction?.latest &&
+						(view.compaction.latest.phase === "waiting-to-apply" || Date.now() - view.compaction.latest.at < 10000)
+					? {
+							applied: "Context compacted",
+							nothing: "Nothing to compact",
+							skipped: "Summary skipped",
+							cancelled: "Compaction cancelled",
+							failed: "Compaction failed",
+							summarizing: "Compacting context",
+							"waiting-to-apply": "Applying summary",
+						}[view.compaction.latest.phase]
+					: undefined,
 			usageText: usageText(view.usage.input, view.usage.output, view.usage.cacheRead, view.usage.cost),
 			cwd: view.cwd,
 		});
@@ -634,6 +895,8 @@ class NekoTuiApp {
 
 	#resetTranscript(): void {
 		this.#chat.clear();
+		this.#imageKeys.clear();
+		this.#imageComponents.clear();
 		this.#items.clear();
 		this.#toolCards.clear();
 		this.#streamingComp = undefined;

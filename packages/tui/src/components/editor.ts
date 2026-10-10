@@ -1,6 +1,9 @@
 import {
 	CURSOR_MARKER,
 	Editor,
+	isKeyRelease,
+	isKeyRepeat,
+	matchesKey,
 	stripTerminalSequences,
 	type TuiMouseEvent,
 	type TuiMouseEventResult,
@@ -9,6 +12,64 @@ import {
 /** Bound input height while retaining the cursor and nearby completion rows. */
 export class BoundedEditor extends Editor {
 	maxRows = 7;
+	isImageReference: (ref: string) => boolean = () => false;
+	onClearDraft?: () => void;
+	#lastEscape = 0;
+	resetEscapeSequence(): void {
+		this.#lastEscape = 0;
+	}
+	override setText(text: string): void {
+		this.resetEscapeSequence();
+		super.setText(text);
+	}
+
+	override handleInput(data: string): void {
+		if (isKeyRelease(data)) return;
+		if (matchesKey(data, "escape")) {
+			if (isKeyRepeat(data)) return;
+			const now = Date.now();
+			if (this.#lastEscape && now - this.#lastEscape <= 400) {
+				this.#lastEscape = 0;
+				this.setText("");
+				this.onClearDraft?.();
+				return;
+			}
+			this.#lastEscape = now;
+			super.handleInput(data);
+			return;
+		}
+		this.#lastEscape = 0;
+		const backward = matchesKey(data, "backspace");
+		const forward = matchesKey(data, "delete") || matchesKey(data, "ctrl+d");
+		if (backward || forward) {
+			const { line, col } = this.getCursor();
+			const lines = this.getLines();
+			const offset = lines.slice(0, line).reduce((n, s) => n + s.length + 1, 0) + col;
+			const raw = this.getText();
+			for (const match of raw.matchAll(/\[Image \d+: [^\]\r\n]*\]/g)) {
+				const start = match.index,
+					end = start + match[0].length;
+				if (
+					!this.isImageReference(match[0]) ||
+					!(backward ? offset > start && offset <= end : offset >= start && offset < end)
+				)
+					continue;
+				// Expand Pi's large-paste markers before setText clears their registry.
+				const expanded = this.getExpandedText();
+				const occurrence = raw.slice(0, start).split(match[0]).length - 1;
+				let at = -1;
+				for (let n = 0; n <= occurrence; n++) at = expanded.indexOf(match[0], at + 1);
+				const suffix = expanded.slice(at + match[0].length);
+				this.setText(expanded.slice(0, at) + suffix);
+				// setText records one native undo snapshot and places the cursor at the end.
+				for (const _ of new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(suffix))
+					super.handleInput("\x1b[D");
+				return;
+			}
+		}
+		super.handleInput(data);
+	}
+
 	#rowMap: number[] = [];
 	override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
 		return super.handleMouse({ ...event, y: this.#rowMap[event.y] ?? event.y });

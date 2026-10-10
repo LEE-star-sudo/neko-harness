@@ -2,7 +2,13 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AttachedReplicatedState, Context } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import type { CredentialStore, ModelThinkingLevel, Provider } from "@earendil-works/pi-ai";
+import type {
+	CredentialStore,
+	ModelInputLimits,
+	ModelThinkingLevel,
+	Provider,
+	UserMessage,
+} from "@earendil-works/pi-ai";
 import { clampThinkingLevel, createModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import {
@@ -27,7 +33,11 @@ import {
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { CompactionManager } from "./compaction.ts";
 import { type CredentialStatus, FileCredentialStore, MemoryCredentialStore } from "./credentials.ts";
+import { ImageMetadataDoc, imageKey, trackImageMetadata } from "./image-metadata.ts";
+import { imagePrompt, prepareInput } from "./images.ts";
+import { ImageTools } from "./read-image.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import {
 	accessibleWorkspace,
@@ -72,6 +82,7 @@ export type NekoRuntimeOptions = {
 
 export type NekoSubmitOptions = {
 	readonly requestId?: string;
+	readonly imageNames?: readonly string[];
 	readonly whenBusy?: "steer" | "followUp" | "reject";
 };
 
@@ -87,7 +98,7 @@ export type NekoSession = {
 	/** The underlying pi-durable conversation. */
 	readonly conversation: Conversation;
 	/** Durably admit user input; the returned submission settles when the run answers it. */
-	submit(content: string, options?: NekoSubmitOptions): Promise<Submission>;
+	submit(content: UserMessage["content"], options?: NekoSubmitOptions): Promise<Submission>;
 	/** Wait for a submission and extract the answer text. */
 	waitAnswer(submission: Submission): Promise<NekoAnswer>;
 	/** The conversation's structural view as a read-only Chord state, updated after every commit. */
@@ -100,6 +111,7 @@ export type NekoSession = {
 	usage(): Promise<UsageState>;
 	/** Withdraw queued inputs and abort the current run. */
 	abort(): Promise<void>;
+	compact(instructions?: string): Promise<void>;
 };
 
 /** Directory entry of `listConversations()`. */
@@ -123,6 +135,8 @@ export type NekoModelInfo = {
 	readonly modelId: string;
 	readonly name: string;
 	readonly contextWindow: number;
+	readonly input: readonly string[];
+	readonly inputLimits?: ModelInputLimits;
 	/** Whether the model supports thinking/reasoning levels. */
 	readonly reasoning: boolean;
 	readonly supportedThinkingLevels: readonly ModelThinkingLevel[];
@@ -193,7 +207,7 @@ export type NekoRuntime = {
 	readonly root: NekoSession;
 
 	/** Durably admit user input to the root conversation; the returned submission settles when the run answers it. */
-	submit(content: string, options?: NekoSubmitOptions): Promise<Submission>;
+	submit(content: UserMessage["content"], options?: NekoSubmitOptions): Promise<Submission>;
 	/** Wait for a submission on the root conversation and extract the answer text. */
 	waitAnswer(submission: Submission): Promise<NekoAnswer>;
 	/** The root conversation's structural view as a read-only Chord state, updated after every commit. */
@@ -206,6 +220,7 @@ export type NekoRuntime = {
 	usage(id?: ConversationId): Promise<UsageState>;
 	/** Withdraw queued inputs and abort the current run (default: root). */
 	abort(id?: ConversationId): Promise<void>;
+	compact(instructions?: string, id?: ConversationId): Promise<void>;
 
 	/** Every conversation of this storage, root included, with its soft-delete state. */
 	listConversations(): Promise<NekoConversationInfo[]>;
@@ -276,6 +291,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 
 	const registry = createRegistry();
 	registry.install(CodingTools);
+	registry.install(ImageTools);
 	for (const extension of options.extensions ?? []) registry.install(extension);
 
 	const storage =
@@ -357,42 +373,102 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	if (existing.length === 0) await metadata.initialize(conversation.id);
 	for (const record of existing)
 		if (!(await harness.snapshot(ArchivedDoc, record.id, context))?.archived) await metadata.restore(record.id);
+	const imageMetadata = trackImageMetadata(harness, storage, context);
+	for (const record of existing) await imageMetadata.reconcile(record.id);
+	const compactions = new CompactionManager(harness, context, storage);
+	for (const record of existing) await compactions.restore(record.id);
 	harness.resume();
 
+	// Serialize admission and configuration; preprocessing must use the admitted model.
+	const admissions = new Map<ConversationId, Promise<unknown>>();
+	const admit = async <T>(id: ConversationId, operation: () => Promise<T>): Promise<T> => {
+		const work = (admissions.get(id) ?? Promise.resolve()).catch(() => {}).then(operation);
+		admissions.set(id, work);
+		try {
+			return await work;
+		} finally {
+			if (admissions.get(id) === work) admissions.delete(id);
+		}
+	};
 	const submitTo = async (
 		target: Conversation,
-		content: string,
+		content: UserMessage["content"],
 		submitOptions?: NekoSubmitOptions,
-	): Promise<Submission> => {
-		const agent = await target.agent(context);
-		executionWorkspace(agent.cwd);
-		const duplicate =
-			submitOptions?.requestId !== undefined &&
-			(await storage.submissionByRequest(target.id, submitOptions.requestId, context));
-		if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
-			throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
-		}
-		const requestId = submitOptions?.requestId ?? crypto.randomUUID();
-		await metadata.prepare(target.id, requestId, content);
-		let result: Submission;
-		try {
-			result = await target.submit(
-				{
-					type: "input",
-					content,
-					requestId,
-					...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
-				},
-				context,
-			);
-		} catch (error) {
-			await metadata.discard(target.id, requestId);
-			throw error;
-		}
-		await touchConversation(target.id);
-		await metadata.reconcile(target.id);
-		return result;
-	};
+	): Promise<Submission> =>
+		admit(target.id, async () => {
+			const agent = await target.agent(context);
+			executionWorkspace(agent.cwd);
+			const duplicate =
+				submitOptions?.requestId !== undefined &&
+				(await storage.submissionByRequest(target.id, submitOptions.requestId, context));
+			if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
+				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
+			}
+			if (!duplicate && agent.model) {
+				const resolved = models.getModel(agent.model.provider, agent.model.modelId);
+				if (resolved) content = await prepareInput(content, resolved);
+			}
+
+			const requestId = submitOptions?.requestId ?? crypto.randomUUID();
+			if (!duplicate && Array.isArray(content)) {
+				const infos: {
+					key: string;
+					contentIndex: number;
+					name: string;
+					mimeType: string;
+					width: number;
+					height: number;
+					bytes: number;
+				}[] = [];
+				let index = 0;
+				for (const [contentIndex, block] of content.entries())
+					if (block.type === "image") {
+						const data = Buffer.from(block.data, "base64");
+						const { default: sharp } = await import("sharp");
+						const info = await sharp(data).metadata();
+						infos.push({
+							key: imageKey(block.data),
+							contentIndex,
+							name: (submitOptions?.imageNames?.[index++] ?? "Image").replace(/\p{Cc}/gu, "").slice(0, 200),
+							mimeType: block.mimeType,
+							width: info.width!,
+							height: info.height!,
+							bytes: data.length,
+						});
+					}
+				if (infos.length)
+					await target.commit(async (tx) => {
+						const doc = await tx.doc(ImageMetadataDoc, target.id);
+						doc.pending ??= {};
+						doc.pending[requestId] = infos.map(({ key: _key, ...info }) => info);
+						for (const { key, contentIndex: _index, ...info } of infos) doc.images[key] ??= info;
+					}, context);
+			}
+			await metadata.prepare(target.id, requestId, imagePrompt(content));
+			let result: Submission;
+			try {
+				result = await target.submit(
+					{
+						type: "input",
+						content,
+						requestId,
+						...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
+					},
+					context,
+				);
+			} catch (error) {
+				await metadata.discard(target.id, requestId);
+				await target.commit(async (tx) => {
+					const doc = await tx.doc(ImageMetadataDoc, target.id);
+					if (doc.pending) delete doc.pending[requestId];
+				}, context);
+				throw error;
+			}
+			await imageMetadata.reconcile(target.id);
+			await touchConversation(target.id);
+			await metadata.reconcile(target.id);
+			return result;
+		});
 
 	const waitAnswerOf = async (target: Conversation, submission: Submission): Promise<NekoAnswer> => {
 		const settled = await submission.wait(context);
@@ -439,6 +515,12 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				(await harness.snapshot(SessionMetadataDoc, target.id, context))?.namingUsage ?? { models: {}, tools: {} },
 			);
 		},
+		async compact(instructions) {
+			const agent = await target.agent(context);
+			if (agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek")))
+				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.");
+			await compactions.compact(target, instructions);
+		},
 		abort() {
 			return target.abort(context);
 		},
@@ -464,6 +546,9 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 
 	return {
 		context,
+		async compact(instructions, id) {
+			await (await sessionFor(id)).compact(instructions);
+		},
 		onDirectoryChange: (listener) => metadata.subscribe(listener),
 		async namingUsage(id = conversation.id) {
 			return structuredClone((await harness.snapshot(SessionMetadataDoc, id, context))!.namingUsage);
@@ -595,17 +680,19 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			}, context);
 		},
 		async configureConversation(id, change) {
-			const session = await getConversation(id);
-			if (session === undefined) return false;
-			const current = await session.conversation.agent(context);
-			const ref = change.model ?? current.model;
-			const targetModel = ref && models.getModel(ref.provider, ref.modelId);
-			if (!targetModel) throw new Error("Unknown model");
-			await session.conversation.configure(
-				{ model: ref, thinkingLevel: clampThinkingLevel(targetModel, change.thinkingLevel ?? current.thinkingLevel) },
-				context,
-			);
-			return true;
+			return admit(id, async () => {
+				const session = await getConversation(id);
+				if (session === undefined) return false;
+				const current = await session.conversation.agent(context);
+				const ref = change.model ?? current.model;
+				const targetModel = ref && models.getModel(ref.provider, ref.modelId);
+				if (!targetModel) throw new Error("Unknown model");
+				await session.conversation.configure(
+					{ model: ref, thinkingLevel: clampThinkingLevel(targetModel, change.thinkingLevel ?? current.thinkingLevel) },
+					context,
+				);
+				return true;
+			});
 		},
 		async credentialStatus() {
 			const saved = await credentials.read("deepseek");
@@ -644,6 +731,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				modelId: model.id,
 				name: model.name,
 				contextWindow: model.contextWindow,
+				input: model.input,
+				...(model.inputLimits ? { inputLimits: model.inputLimits } : {}),
 				reasoning: model.reasoning,
 				supportedThinkingLevels: getSupportedThinkingLevels(model),
 				thinkingLevelAdjustments: Object.fromEntries(
@@ -668,6 +757,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			registry.install(extension);
 		},
 		async close() {
+			await compactions.close();
+			await imageMetadata.close();
 			await metadata.close();
 			return harness.close(context);
 		},

@@ -1,5 +1,6 @@
 /** Product language is English; conversation and tool payloads are never translated. */
 export const commands = [
+	{ name: "compact", description: "Compact context (/compact optional instructions)" },
 	{ name: "exit", description: "Exit neko TUI" },
 	{ name: "sessions", description: "Switch or create a session" },
 	{ name: "login", description: "Configure DeepSeek API key" },
@@ -17,7 +18,7 @@ export const labels = {
 	close: "Esc Close",
 	retry: "Enter Retry  Esc Close",
 	select: "Up/Down Select  Enter Apply  Esc Close",
-	idleHints: "Enter Send  Ctrl+S Sessions  / Commands  Ctrl+C Exit",
+	idleHints: "Enter Send  Ctrl+S Sessions  / Commands  Esc Esc Clear  Ctrl+C Exit",
 	busyHints: "Enter Steer  Alt+Enter Queue  Esc Stop  Ctrl+C Stop",
 	idleCompact: "Enter Send  / Commands",
 	busyCompact: "Enter Steer  Esc Stop",

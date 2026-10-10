@@ -13,6 +13,11 @@
 			"neko-source": "./src/session-display.ts",
 			"types": "./dist/session-display.d.ts",
 			"import": "./dist/session-display.js"
+		},
+		"./image-transfer": {
+			"neko-source": "./src/image-transfer.ts",
+			"types": "./dist/image-transfer.d.ts",
+			"import": "./dist/image-transfer.js"
 		}
 	},
 	"scripts": {
@@ -21,6 +26,7 @@
 	"dependencies": {
 		"@earendil-works/chord": "1.1.0",
 		"@earendil-works/pi-ai": "1.1.0",
-		"@earendil-works/pi-durable": "1.1.0"
+		"@earendil-works/pi-durable": "1.1.0",
+		"sharp": "0.35.5"
 	}
 }

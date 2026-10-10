@@ -144,3 +144,33 @@ it("bounds real multiline editing and slash completion without losing cursor or 
 	expect(frame.lines.join("\n")).toContain("Ready");
 	expect(frame.lines.join("\n")).toContain("Choose a model");
 });
+it("preserves image fallback, editor and compaction stop hints at all supported sizes", () => {
+	for (const [width, height] of [
+		[120, 40],
+		[80, 24],
+		[60, 16],
+	] as const) {
+		const f = footer();
+		f.setStats({
+			cwd: "/workspace",
+			model: "Flash",
+			thinkingLevel: "high",
+			busy: undefined,
+			compaction: "Waiting for compaction",
+			canAbort: true,
+			usageText: "In: 12k Out: 2k $0.001",
+		});
+		const root = createAppLayout({
+			transcript: new ScrollView(new Text("[Image: photo.png · 800x500]\n".repeat(100))),
+			panel: { height: 1, render: () => [], invalidate: () => {} },
+			editor: new Text("[Image 1: photo.png]\n/compact keep decisions\n"),
+			footer: f,
+			notices: new Container(),
+			panelOpen: () => false,
+		});
+		const frame = renderLayoutFrame(root, width, height, () => {});
+		expect(frame.lines.map(stripTerminalSequences).join("\n")).toContain("Esc: stop");
+		expect(frame.lines.every((l) => visibleWidth(l) <= width)).toBe(true);
+		expect(frame.lines.length).toBe(height);
+	}
+});

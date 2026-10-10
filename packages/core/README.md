@@ -78,3 +78,11 @@ TUI 只列出当前工作区的会话，并恢复最近激活或提交过输入�
 默认新会话使用 DeepSeek V4.1 Flash + high，显式配置和已有会话保留自身设置。TUI `/model`、`/think` 与 Web 聊天区模型面板共用 Pi 1.1.0 能力：Flash 为 off/low/high/max，Pro 为 off/high/max。Flash low 切换到 Pro 时遵循 Pi 调整为 high。变更仅作用于当前会话后续请求，标题总结仍使用非思考模式。
 
 编程入口可注入 `credentials: CredentialStore` 或 `credentialsPath`，测试应使用隔离存储。显式 `apiKey` 为最高优先级临时覆盖，状态显示 runtime；默认 memory runtime 使用内存凭据。
+
+### 上下文压缩与图片
+
+`runtime.compact(instructions?, conversationId?)` / `session.compact(instructions?)` 调用原生 pi-durable 压缩，默认策略不变：预留 16384 tokens，保留近期约 20000 tokens，提前 32768 tokens 后台压缩。摘要沿用会话模型和思考强度；历史不删除，压缩不改变最近消息排序或标题。任务结束后仍可能等待摘要写入，只有实际应用才报告成功。中止沿用会话整体语义，后台任务是否可中止由 Pi 决定。
+
+输入支持 Pi 文字/图片内容块及仅图片。图片经统一管线验证和处理后持久化，原文件被删除不影响历史。`read_image({ path })` 独立读取工作区图片，也接受显式绝对路径，不修改 `read`。Flash 支持图片，Pro 对新图片输入明确报错；已有历史图片转换遵循 Pi。文字压缩不会重新分析旧图片，需要在对话中保留相关文字观察。
+
+支持静态 PNG/JPEG/WebP，单图原始大小最多 20 MiB、40M 像素；每消息最多 4 张、原始总量 40 MiB、处理后总量 18 MiB。单图还受模型限制约束：Pi 的 `resize.maxBytes` 是 **base64 编码后的大小**。拒绝动画、GIF、SVG、PDF 和远程 URL，不自动上传项目其他文件。

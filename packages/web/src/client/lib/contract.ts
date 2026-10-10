@@ -61,6 +61,7 @@ export const NekoModels = defineService<NekoModels>("neko.models");
 
 export type NekoSubmitInput = {
 	readonly content: string;
+	readonly images?: readonly string[];
 	readonly requestId?: string;
 	/** 忙碌时 admission 策略：steer 插入当前工具轮后；followUp 排队等当前 run 结束。缺省由 pi-durable 排队。 */
 	readonly whenBusy?: "steer" | "followUp";
@@ -68,6 +69,15 @@ export type NekoSubmitInput = {
 
 export interface NekoChat {
 	readonly view: ReplicatedState<ChatView>;
+	compact(input: { instructions?: string }, context: Context): Promise<void>;
+	beginImage(input: { name: string; mimeType: string; size: number }, context: Context): Promise<string>;
+	appendImage(input: { id: string; offset: number; data: string }, context: Context): Promise<void>;
+	finishImage(id: string, context: Context): Promise<void>;
+	releaseImage(id: string, context: Context): Promise<void>;
+	getImage(
+		input: { entryId: number; contentIndex: number; offset: number },
+		context: Context,
+	): Promise<{ data: string; total: number; mimeType: string }>;
 	submit(input: NekoSubmitInput, context: Context): Promise<void>;
 	abort(context: Context): Promise<void>;
 	usage(context: Context): Promise<UsageTotals>;
