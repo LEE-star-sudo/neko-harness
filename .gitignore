@@ -1,1 +1,7 @@
 reference/
+node_modules/
+dist/
+.neko/
+coverage/
+*.log
+.DS_Store
