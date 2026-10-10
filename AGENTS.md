@@ -8,10 +8,14 @@ neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord 1.1.0，全部精�
 
 ```bash
 npm install                # 安装（建议加 --ignore-scripts）
-npm run build              # tsc 构建全部 workspace 包
+npm run build              # tsc 构建全部 workspace 包（web 含 vite build）
 npm test                   # vitest run（根 vitest.config.ts，别名指向各包 src）
 npm run check              # biome check . + tsc --noEmit
 npm run check:write        # biome check --write . + tsc --noEmit
+
+npm run neko -- tui        # 启动终端 UI（需 DEEPSEEK_API_KEY）
+npm run neko -- web        # 启动 Web UI（默认 http://127.0.0.1:8321）
+# 或构建后：node packages/cli/dist/main.js tui|web（bin 名 neko）
 ```
 
 单个示例（需要 `DEEPSEEK_API_KEY`）：`npx tsx packages/core/examples/chat.ts`

@@ -1,20 +1,24 @@
 # Tasks
 
+> v1 范围（用户决策 2026-10-10）：对话 + 内置工具 + TUI/Web 双前端，`neko tui` / `neko web` 启动。
+> 网关（第 3 组）、崩溃恢复/幂等/配置层（2.2–2.5）、steer 与多会话（4.3/4.4/5.5）缓建至后续变更。
+
 ## 1. 项目骨架
 
-- [ ] 1.1 初始化 npm workspaces + TypeScript + Biome + Vitest（参照 reference/pi 根配置），`npm install && npm run build` 全绿
-- [ ] 1.2 创建 packages/{core,gateway,tui,web,cli} 五个包骨架，包间依赖按 design.md D2 接线，`vitest run` 通过（空测试套件）
-- [ ] 1.3 锁版本安装 pi 依赖（pi-durable/pi-ai/chord/pi-server/pi-client 精确版本），写 AGENTS.md 与 README 项目说明
+- [x] 1.1 初始化 npm workspaces + TypeScript + Biome + Vitest（参照 reference/pi 根配置），`npm install && npm run build` 全绿
+- [x] 1.2 创建 packages/{core,gateway,tui,web,cli} 五个包骨架，包间依赖按 design.md D2 接线，`vitest run` 通过（空测试套件）
+- [x] 1.3 锁版本安装 pi 依赖（pi-durable/pi-ai/chord 精确 1.1.0），写 AGENTS.md 与 README 项目说明
+- [ ] 1.4 安装 pi-server/pi-client（随 gateway 变更一起，v1 缓建）
 
 ## 2. core：运行时与 DeepSeek 打通
 
-- [ ] 2.1 实现 core 包：`Harness.open` 封装（SQLite 存储、内置 deepseek provider、CodingTools 扩展），以脚本验证：提交"1+1=?"并拿到回答（需 DEEPSEEK_API_KEY）
+- [x] 2.1 实现 core 包：`Harness.open` 封装（SQLite 存储、内置 deepseek provider、CodingTools 扩展），真实 API 验证：问答 + 工具调用（write/read 落盘核对一致）
 - [ ] 2.2 验证持久化与恢复：进程在工具执行中 kill 后重启，`resume()` 继续未完成任务；测试断言 pi.tool 任务不被重放（spec: agent-runtime）
 - [ ] 2.3 验证 requestId 幂等：相同 requestId 重复提交返回同一 submission（spec: agent-runtime）
 - [ ] 2.4 实现配置层 `neko.config.json`（$ENV 插值、默认模型、thinking level、存储路径），单测覆盖解析与缺省值（spec: model-providers）
 - [ ] 2.5 验证用量统计：按会话查询 docs["pi.usage"]，断言含模型与工具分组（spec: agent-runtime）
 
-## 3. gateway：会话网关
+## 3. gateway：会话网关（v1 缓建，见 design.md D3 偏差说明）
 
 - [ ] 3.1 基于 pi-server 实现网关宿主：会话目录（创建/列出/删除）+ Unix socket 传输，集成测试覆盖目录广播（spec: session-gateway）
 - [ ] 3.2 实现多前端 attach：两客户端 attach 同一会话，一方提交输入，断言双方均收到流式事件（spec: session-gateway）
@@ -24,24 +28,24 @@
 
 ## 4. tui：终端前端
 
-- [ ] 4.1 基于 pi-tui 搭建 TUI 骨架：输入框 + 滚动视图 + 流式渲染，参考 reference/pi/packages/tui 与 coding-agent 用法
-- [ ] 4.2 实现交互式对话：提交输入、流式渲染回答与工具调用（spec: terminal-ui）
+- [x] 4.1 基于 pi-tui 搭建 TUI 骨架：输入框 + 滚动视图 + 流式渲染，参考 reference/pi/packages/tui 与 coding-agent 用法
+- [x] 4.2 实现交互式对话：提交输入、流式渲染回答与工具调用（spec: terminal-ui）——真实 API 冒烟通过（bash 工具卡片 + 流式回答 + 状态栏用量）
 - [ ] 4.3 实现 steer / follow-up 插话，agent 执行中 steer 在当前工具轮后生效（spec: terminal-ui）
-- [ ] 4.4 实现会话列表/切换/fork 与状态栏（模型、用量、忙碌状态）（spec: terminal-ui）
+- [ ] 4.4 实现会话列表/切换/fork 与状态栏（模型、用量、忙碌状态）（spec: terminal-ui）——状态栏已完成，会话管理缓建
 
 ## 5. web：浏览器前端
 
-- [ ] 5.1 web 包构建链：React 19 + Vite + Tailwind CSS v4 + TanStack Query/Router/Store（design.md D7），构建为静态资源并由网关托管，浏览器访问网关地址可加载页面（spec: web-ui）
-- [ ] 5.2 实现二次元主题系统：Tailwind v4 `@theme` design tokens，浅色蓝粉白配色（樱花粉 #FFB7C5 / 天依蓝 #66CCFF / 白底，OKLCH 定义，文本用加深档过 WCAG AA 对比度），遵循 modern-web-guidance 的 color 指南（spec: web-ui）
-- [ ] 5.3 实现对话界面：会话选择、历史渲染、流式回答与工具调用详情；Markdown 渲染经消毒（遵循 sanitize-untrusted-html 指南）（spec: web-ui）
-- [ ] 5.4 实现断线自动重连与快照恢复（spec: web-ui）
-- [ ] 5.5 双前端联调：TUI 与 Web 同时 attach 同一会话，操作互可见（spec: session-gateway）
+- [x] 5.1 web 包构建链：React 19 + Vite + Tailwind CSS v4 + TanStack Query/Router（design.md D7），构建为静态资源并由 web 服务器托管，浏览器访问可加载（spec: web-ui）
+- [x] 5.2 实现二次元主题系统：Tailwind v4 `@theme` design tokens，浅色蓝粉白配色（sakura/tianyi OKLCH scale，文本用加深档过 WCAG AA 对比度，已实测数值）（spec: web-ui）
+- [x] 5.3 实现对话界面：历史渲染、流式回答与工具调用详情；Markdown 渲染经 DOMPurify 消毒（Playwright 实测 scripts/onclick 为零）（spec: web-ui）
+- [x] 5.4 实现断线自动重连与快照恢复（spec: web-ui）——指数退避重连 + 重连收最新快照，已实测
+- [ ] 5.5 双前端联调：TUI 与 Web 同时 attach 同一会话，操作互可见（spec: session-gateway，依赖第 3 组）
 
 ## 6. 集成验收
 
-- [ ] 6.1 CLI 入口 `neko serve` / `neko tui` / `neko -p "..."` 三种模式端到端可跑
-- [ ] 6.2 全量 `vitest run` + `biome check` 通过；按 specs 逐条走查场景
+- [x] 6.1 CLI 入口端到端可跑：`neko tui` 与 `neko web`（用户决策 v1 命令；`neko serve` / `neko -p` 缓建）——均经真实 DeepSeek API 验证
+- [ ] 6.2 全量 `vitest run` + `biome check` 通过；按 specs 逐条走查场景（检查全绿；spec 走查待缓建项完成后进行）
 
 ## Workflow follow-up
 
-- 归档：`/skill:openspec-archive-change`
+- 归档：`/skill:openspec-archive-change`（待缓建项完成或拆分后）

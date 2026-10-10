@@ -12,7 +12,8 @@
 		"build": "npm run build --workspaces --if-present",
 		"check": "biome check . && tsc --noEmit",
 		"check:write": "biome check --write . && tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"neko": "tsx packages/cli/src/main.ts"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.3.5",

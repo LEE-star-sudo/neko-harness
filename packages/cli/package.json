@@ -17,5 +17,8 @@
 		"@neko-harness/gateway": "*",
 		"@neko-harness/tui": "*",
 		"@neko-harness/web": "*"
+	},
+	"bin": {
+		"neko": "./dist/main.js"
 	}
 }

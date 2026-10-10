@@ -56,9 +56,11 @@ packages/
 
 **备选**：单包。否决——四个可部署单元边界清晰，且 web 前端有独立构建链。
 
-### D3: 网关复用 pi-server 的路由模型
+### D3: 网关复用 pi-server 的路由模型（v1 缓建）
 
 gateway 以 `RoutedServerServiceHost` 托管 durable Session，attachment 语义（幂等 attach、断连延迟释放、`{serverId, sessionId, attachmentId}` 路由）直接继承，不自研协议。WebSocket 传输按 `pi-client` 的 `ByteTransportFactory` 契约实现一个薄适配层。
+
+**v1 偏差（用户决策 2026-10-10）**：第一版只做对话 + 内置工具，`neko tui` / `neko web` 各自在进程内直接挂 core runtime；Web 端用 web 包内的极简 WebSocket 快照协议（submit/abort + 全量 ChatView 快照）代替 pi-server 网关。pi-server 网关、多前端 attach、Unix socket 移至后续变更实现，gateway 包暂为占位。
 
 **风险**：pi-server 是实验性包、API 可能变 → 锁版本 + 将路由代码收敛在 gateway 包内，升级时只动一处。
 
