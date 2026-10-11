@@ -8,6 +8,10 @@
 			"neko-source": "./src/index.ts",
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./cli": {
+			"neko-source": "./src/main.ts",
+			"import": "./dist/main.js"
 		}
 	},
 	"scripts": {
@@ -17,7 +21,7 @@
 		"@earendil-works/pi-client": "1.1.0",
 		"@earendil-works/pi-protocol": "1.1.0",
 		"@earendil-works/pi-server": "1.1.0",
-		"@neko-harness/core": "*",
+		"@neko-harness/core": "workspace:*",
 		"ws": "8.22.0"
 	},
 	"devDependencies": {

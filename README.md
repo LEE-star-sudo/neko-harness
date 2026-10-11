@@ -1,74 +1,75 @@
 # neko-harness
 
-基于 Pi 生态包（[`@earendil-works/pi-durable`](https://www.npmjs.com/package/@earendil-works/pi-durable) / `pi-ai` / `chord`）构建的极简 agent harness，同时服务终端（TUI）与浏览器（Web）两类前端。模型默认走 DeepSeek（OpenAI Chat Completions 格式，pi-ai 内置 `deepseek` provider）。
+在终端或浏览器中使用的本地 AI 编程助手。支持工作区与会话管理、文件读写、命令执行、图片输入、网页搜索和技能调用，默认使用 DeepSeek V4.1 Flash，思考强度为 high。
 
-## 状态
+## 安装
 
-- `packages/core`：可用。pi-durable 薄封装（SQLite 存储、内置 DeepSeek provider、CodingTools 扩展）。
-- `packages/gateway` / `tui` / `web` / `cli`：本地网关、终端/Web 前端与统一 CLI 入口。
+需要 **Bun 1.4.2 或更新的 1.4.x 版本**。当前支持 macOS 和 Linux。
 
-## 快速开始
-
-要求 Bun 1.4.2。DeepSeek Key 可在 TUI `/login`、Web 设置页中保存，或使用 `DEEPSEEK_API_KEY`。
+先按 [Bun 安装说明](https://bun.sh/docs/installation)安装 Bun，然后运行：
 
 ```bash
-bun install --frozen-lockfile
-bun run build        # tsc 构建全部包
-bun run test             # Bun test（源码、文件隔离）
-bun run check        # biome check + tsc --noEmit
-
-# 真实 API 冒烟（需要 DEEPSEEK_API_KEY）
-bun --conditions=neko-source packages/core/examples/chat.ts
-bun --conditions=neko-source packages/core/examples/coding-tools.ts
+bun add --global neko-harness
+neko --version
 ```
 
-## 开发与运行
+如果找不到 `neko` 命令，请将 Bun 的全局可执行目录（通常是 `~/.bun/bin`）加入 `PATH`。
 
-固定使用 `.bun-version` / `packageManager` 指定的 Bun 1.4.2；无需 Node、npm 或 tsx。
-`bun.lock` 是唯一依赖锁文件，采用 hoisted 布局，依赖安装脚本默认全部禁用（`trustedDependencies: []`）。
-现有原生工具通过平台可选包提供，干净安装及构建已纳入迁移验收。
+## 开始使用
+
+进入你要处理的项目目录，选择一种界面：
 
 ```bash
-bun run neko tui
-bun run neko web
-bun run neko serve
-# 构建后直接执行产物（不启用源码条件）
-bun packages/cli/dist/main.js web
-# 仅启动 Vite 开发服务
-bun run --cwd packages/web dev
+cd /path/to/your/project
+neko tui
+# 或打开浏览器界面
+neko web
 ```
 
-首次在无 dist 状态安装时，Bun 尚不能链接 CLI bin；构建后再次运行 `bun install --frozen-lockfile`
-即可使用 `./node_modules/.bin/neko`。上面的 `bun run neko` 和直接执行产物不依赖该链接。
+Web 默认自动打开 `http://127.0.0.1:8322`。两种界面都会按需启动本地网关，无需另行启动服务。
 
-源码入口和测试使用 `--conditions=neko-source`，仅解析本项目 workspace 的 src；默认 exports 仍指向 dist。
-`bun run test` 调用 `bun test --conditions=neko-source --isolate`，测试文件各自隔离，文件内顺序执行；
-`bunfig.toml` 限定扫描 packages 并排除 dist/node_modules，不扫描 reference。筛选测试可用
-`bun run test core/test/config`。直接执行 `bun test` 不会自动应用脚本里的参数。
+首次使用，在 TUI 输入 `/login`，或打开 Web 设置页，填入 [DeepSeek API Key](https://platform.deepseek.com/api_keys)。也可以在启动前设置环境变量：
 
-`bun run build` 按 core → gateway → tui → web → cli 构建，保留 tsc 声明输出和 Vite 客户端构建；
-`bun run check` 检查格式、根项目类型与 Web 客户端类型。TUI/Web 自动启动的 gateway 同样使用 Bun，
-源码模式运行 main.ts，产物模式运行 main.js；退出时仅关闭自己启动的 gateway。
-
-## 布局
-
-```
-packages/
-  core/       # pi-durable 封装：createNekoRuntime（运行时、DeepSeek、read/write/edit/bash 工具）
-  gateway/    # 会话网关（pi-server/pi-client）
-  tui/        # 终端前端（pi-tui）
-  web/        # 浏览器前端（React + Vite + Tailwind v4 + TanStack）
-  cli/        # 单一入口 neko serve / neko tui / neko web
+```bash
+export DEEPSEEK_API_KEY='你的 API Key'
+neko tui
 ```
 
-本地数据默认存于 `~/.neko/neko.sqlite`（可用 `createNekoRuntime({ storagePath })` 覆盖）。
+界面保存的 Key 优先于环境变量；删除已保存 Key 后恢复使用环境变量。Key 保存在本机 `~/.neko/credentials.json`，请勿分享此文件。
 
-## 设计
+## 日常操作
 
-见 `openspec/changes/archive/2026-10-11-bootstrap-neko-harness/design.md`（D1–D7）。`reference/pi/` 为 Pi monorepo 本地浅克隆（gitignored，只读参考）。
+- **工作区**：默认使用启动目录；可通过 `neko tui --cwd /path/to/project` 或 `neko web --cwd /path/to/project` 指定。Web 也可添加目录并切换工作区。
+- **会话**：TUI 输入 `/sessions` 切换会话；Web 使用侧栏。会话自动保存。
+- **模型与思考强度**：TUI 使用 `/model` 和 `/think`；Web 点击聊天区的模型选择器。
+- **文件引用**：输入 `@`，选择工作区中的文件或目录。
+- **图片**：TUI 使用 `Ctrl+V` 粘贴剪贴板图片；Web 支持粘贴、拖放和选择图片。是否能够识图取决于当前模型。
+- **压缩上下文**：输入 `/compact`。内容不足以压缩时会显示提示。
+- **技能**：输入 `/skill:` 选择技能。技能从 `~/.agents/skills/` 和工作区 `.agents/skills/` 加载。
+- **网页搜索**：默认使用有速率限制的 Tavily 免 Key 模式；也可在凭据设置中配置自己的 Key，或使用 `TAVILY_API_KEY` 环境变量。
 
-## DeepSeek 凭据与思考配置
+工作区用于组织会话和确定默认目录，**不是文件访问沙箱**；助手可以执行命令和修改文件，请在可信项目中使用。
 
-未配置 Key 也可启动、浏览会话；发送前通过 TUI `/login` 或 Web 设置页配置。保存值位于宿主用户的 `~/.neko/credentials.json`（权限 `0600`），所有工作区共用，重启后保留；优先于网关进程的 `DEEPSEEK_API_KEY`，移除后回退环境变量。两端只显示配置状态和生效来源，不回显已有 Key；“已配置”不代表已通过远端认证。获取 Key：https://platform.deepseek.com/api_keys 。
+## 常用选项
 
-默认新会话使用 DeepSeek V4.1 Flash + high，显式配置和已有会话保留自身设置。TUI `/model`、`/think` 与 Web 聊天区模型面板共用 Pi 1.1.0 能力：Flash 为 off/low/high/max，Pro 为 off/high/max。Flash low 切换到 Pro 时遵循 Pi 调整为 high。变更仅作用于当前会话后续请求，标题总结仍使用非思考模式。
+```bash
+neko web --port 8333        # 更换网页端口
+neko web --no-open          # 启动后不打开浏览器
+neko tui --theme dark       # 使用深色终端主题
+neko serve                 # 独立运行网关
+neko tui --help
+neko web --help
+neko serve --help
+```
+
+本地数据默认保存在 `~/.neko/`，会话数据库为 `neko.sqlite`。退出界面不会删除会话。备份数据前请先停止正在使用该目录的 neko 进程。
+
+升级：
+
+```bash
+bun add --global neko-harness@latest
+```
+
+## 许可证
+
+[MIT](LICENSE)。基于 [Pi](https://github.com/earendil-works/pi) 生态构建。

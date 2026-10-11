@@ -1,6 +1,4 @@
 #!/usr/bin/env bun
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const USAGE = `用法: neko <command> [options]
 
@@ -12,11 +10,6 @@ const USAGE = `用法: neko <command> [options]
 各命令的选项透传，详见 neko <command> --help。
 可通过 TUI /login、Web 设置页或 DEEPSEEK_API_KEY / TAVILY_API_KEY 配置凭据。`;
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const isSource = path.basename(here) === "src";
-const entry = (pkg: string): string =>
-	path.join(here, "..", "..", pkg, isSource ? "src" : "dist", isSource ? "main.ts" : "main.js");
-
 const [command, ...rest] = process.argv.slice(2);
 
 switch (command) {
@@ -25,10 +18,15 @@ switch (command) {
 	case "serve": {
 		// 子命令的 main 自行解析 process.argv.slice(2)，剥离子命令名后透传
 		process.argv = [process.argv[0] ?? "bun", process.argv[1] ?? "neko", ...rest];
-		const pkg = command === "serve" ? "gateway" : command;
-		await import(entry(pkg));
+		if (command === "tui") await import("@neko-harness/tui/cli");
+		else if (command === "web") await import("@neko-harness/web/cli");
+		else await import("@neko-harness/gateway/cli");
 		break;
 	}
+	case "--version":
+	case "-v":
+		console.log(process.env.NEKO_RELEASE_VERSION ?? "development");
+		break;
 	case undefined:
 	case "-h":
 	case "--help":

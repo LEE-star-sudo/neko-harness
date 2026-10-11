@@ -8,7 +8,12 @@ export function gatewayCommand(args: readonly string[]): { binary: string; args:
 		binary: process.execPath,
 		args: [
 			...(source ? ["--conditions=neko-source"] : []),
-			fileURLToPath(new URL(source ? "./main.ts" : "./main.js", import.meta.url)),
+			fileURLToPath(
+				new URL(
+					process.env.NEKO_RELEASE_BUILD === "1" ? "./gateway.js" : source ? "./main.ts" : "./main.js",
+					import.meta.url,
+				),
+			),
 			...args,
 		],
 	};

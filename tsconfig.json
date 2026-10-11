@@ -3,7 +3,8 @@
 	"include": [
 		"packages/*/src/**/*.ts",
 		"packages/*/test/**/*.ts",
-		"packages/*/examples/**/*.ts"
+		"packages/*/examples/**/*.ts",
+		"scripts/**/*.ts"
 	],
 	"exclude": [
 		"packages/web/src/client"

@@ -14,10 +14,10 @@
 		"build": "bun --bun run tsc -p tsconfig.build.json"
 	},
 	"dependencies": {
-		"@neko-harness/core": "*",
-		"@neko-harness/gateway": "*",
-		"@neko-harness/tui": "*",
-		"@neko-harness/web": "*"
+		"@neko-harness/core": "workspace:*",
+		"@neko-harness/gateway": "workspace:*",
+		"@neko-harness/tui": "workspace:*",
+		"@neko-harness/web": "workspace:*"
 	},
 	"bin": {
 		"neko": "./dist/main.js"

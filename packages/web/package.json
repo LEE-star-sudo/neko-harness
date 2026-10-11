@@ -8,6 +8,10 @@
 			"neko-source": "./src/index.ts",
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./cli": {
+			"neko-source": "./src/main.ts",
+			"import": "./dist/main.js"
 		}
 	},
 	"scripts": {
@@ -21,8 +25,8 @@
 		"@earendil-works/pi-client": "1.1.0",
 		"@earendil-works/pi-protocol": "1.1.0",
 		"@floating-ui/react": "0.27.20",
-		"@neko-harness/core": "*",
-		"@neko-harness/gateway": "*",
+		"@neko-harness/core": "workspace:*",
+		"@neko-harness/gateway": "workspace:*",
 		"highlight.js": "11.12.0"
 	},
 	"devDependencies": {

@@ -32,7 +32,9 @@ export type NekoWebServer = {
 const DEFAULT_PORT = 8322;
 const DEFAULT_HOST = "127.0.0.1";
 /** src/ 与 dist/ 下都解析到 packages/web/dist/client。 */
-const DEFAULT_STATIC_DIR = fileURLToPath(new URL("../dist/client", import.meta.url));
+const DEFAULT_STATIC_DIR = fileURLToPath(
+	new URL(process.env.NEKO_RELEASE_BUILD === "1" ? "./client" : "../dist/client", import.meta.url),
+);
 
 const MIME: Readonly<Record<string, string>> = {
 	".html": "text/html; charset=utf-8",

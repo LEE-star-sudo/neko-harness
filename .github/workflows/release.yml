@@ -1,0 +1,48 @@
+name: Release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.x'
+      - name: Verify stable release tag
+        run: |
+          bun -e 'const p = await Bun.file("package.json").json(); if (!/^\d+\.\d+\.\d+$/.test(p.version) || process.env.GITHUB_REF_NAME !== `v${p.version}`) process.exit(1)'
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run test
+      - run: bun run build:release
+      - run: bun run test:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: artifacts/*.tgz
+          if-no-files-found: error
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: artifacts
+      # Node/npm is only the registry uploader; builds/tests/runtime use Bun 1.4.x.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm publish artifacts/*.tgz --access public --tag latest --provenance
