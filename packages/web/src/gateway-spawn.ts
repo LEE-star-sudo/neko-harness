@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { NekoModelRef } from "@neko-harness/core";
-import { connectNekoGateway, gatewayCommand, readGatewayPortFile, stopGatewayProcess } from "@neko-harness/gateway";
+import {
+	connectNekoGateway,
+	gatewayCommand,
+	readGatewayPortFile,
+	removeGatewayPortFile,
+	stopGatewayProcess,
+} from "@neko-harness/gateway";
 
 /**
  * 确保一个 neko gateway 在运行：POSIX 先探活 Unix socket（pi 握手 + 服务绑定），
@@ -54,7 +60,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 		// Windows：端口文件发现 + ws 探活；过期文件/连接失败按无活跃网关处理。
 		const discovered = await readGatewayPortFile(nekoDir, serverId);
 		if (discovered !== undefined && (await probeWs(discovered, serverId))) {
-			return makeHandle(serverId, undefined, discovered, null);
+			return makeHandle(serverId, undefined, discovered, null, nekoDir);
 		}
 		const child = spawnGatewayProcess(options, null, serverId);
 		pipeChildLogs(child, options.onLog);
@@ -75,7 +81,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 				const wsUrl = await readGatewayPortFile(nekoDir, serverId);
 				if (wsUrl !== undefined) {
 					try {
-						if (await probeWs(wsUrl, serverId)) return makeHandle(serverId, undefined, wsUrl, child);
+						if (await probeWs(wsUrl, serverId)) return makeHandle(serverId, undefined, wsUrl, child, nekoDir);
 					} catch (error) {
 						lastError = error;
 					}
@@ -96,7 +102,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 	const port = options.port ?? 8321;
 
 	if (await probeGateway(socketPath, serverId)) {
-		return makeHandle(serverId, socketPath, `ws://${host}:${port}`, null);
+		return makeHandle(serverId, socketPath, `ws://${host}:${port}`, null, nekoDir);
 	}
 
 	const child = spawnGatewayProcess(options, socketPath, serverId);
@@ -118,7 +124,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 			}
 			try {
 				if (await probeGateway(socketPath, serverId))
-					return makeHandle(serverId, socketPath, `ws://${host}:${port}`, child);
+					return makeHandle(serverId, socketPath, `ws://${host}:${port}`, child, nekoDir);
 			} catch (error) {
 				lastError = error;
 			}
@@ -194,6 +200,7 @@ function makeHandle(
 	socketPath: string | undefined,
 	wsUrl: string,
 	spawned: ChildProcess | null,
+	nekoDir: string,
 ): GatewayHandle {
 	return {
 		serverId,
@@ -201,7 +208,11 @@ function makeHandle(
 		wsUrl,
 		spawned,
 		async close() {
-			if (spawned !== null) await stopGatewayProcess(spawned);
+			if (spawned !== null) {
+				await stopGatewayProcess(spawned);
+				// Windows 的 kill 是 TerminateProcess，网关 close（含端口文件删除）不会执行，这里补删。
+				if (process.platform === "win32") await removeGatewayPortFile(nekoDir, serverId).catch(() => {});
+			}
 		},
 	};
 }

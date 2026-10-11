@@ -8,6 +8,7 @@ import {
 	gatewayCommand,
 	type NekoGatewayClient,
 	readGatewayPortFile,
+	removeGatewayPortFile,
 	stopGatewayProcess,
 } from "@neko-harness/gateway";
 
@@ -162,6 +163,8 @@ async function connectSpawned(
 					async close() {
 						await client.close().catch(() => {});
 						await stopGatewayProcess(child);
+						// Windows 的 kill 是 TerminateProcess，网关 close（含端口文件删除）不会执行，这里补删。
+						await removeGatewayPortFile(plan.nekoDir, serverId).catch(() => {});
 					},
 				};
 			} catch (error) {

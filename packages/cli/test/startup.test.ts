@@ -52,9 +52,12 @@ describe("Bun gateway startup", () => {
 		} finally {
 			await owner.close();
 		}
-		// Unix socket 文件随网关退出删除；Windows（ws-only）本就没有 socket 路径。
-		if (IS_WINDOWS) expect(owner.socketPath).toBeUndefined();
-		else expect(existsSync(owner.socketPath!)).toBe(false);
+		// Unix socket 文件随网关退出删除；Windows（ws-only）本就没有 socket 路径，
+		// 且强杀后由拉起方补删端口文件。
+		if (IS_WINDOWS) {
+			expect(owner.socketPath).toBeUndefined();
+			expect(existsSync(join(dir, `${owner.serverId}.port`))).toBe(false);
+		} else expect(existsSync(owner.socketPath!)).toBe(false);
 	}, 10_000);
 
 	it("Web uses Bun, forwards options, supports WS reconnect and releases its child", async () => {
@@ -93,9 +96,12 @@ describe("Bun gateway startup", () => {
 		} finally {
 			await owner.close();
 		}
-		// Unix socket 文件随网关退出删除；Windows（ws-only）本就没有 socket 路径。
-		if (IS_WINDOWS) expect(owner.socketPath).toBeUndefined();
-		else expect(existsSync(owner.socketPath!)).toBe(false);
+		// Unix socket 文件随网关退出删除；Windows（ws-only）本就没有 socket 路径，
+		// 且强杀后由拉起方补删端口文件。
+		if (IS_WINDOWS) {
+			expect(owner.socketPath).toBeUndefined();
+			expect(existsSync(join(dir, `${owner.serverId}.port`))).toBe(false);
+		} else expect(existsSync(owner.socketPath!)).toBe(false);
 		// POSIX 子进程响应 SIGTERM 优雅退出（code 0）；Windows 以 TerminateProcess 结束，
 		// 无优雅退出码，只能确认进程已退出（exitCode 或 signalCode 其一非空）。
 		if (IS_WINDOWS) expect(owner.spawned?.exitCode !== null || owner.spawned?.signalCode !== null).toBe(true);

@@ -6,10 +6,16 @@ import { compactInstructions } from "@neko-harness/core/image-transfer";
 import { imagePaths, readImageFile } from "../src/image-input.ts";
 
 it("recognizes quoted drag paths without interpreting ordinary prose or shell commands", () => {
-	expect(imagePaths('"/tmp/my image.png" /tmp/a\\ b.webp')).toEqual(["/tmp/my image.png", "/tmp/a b.webp"]);
+	// 转义语义是 POSIX 的（Windows 下 \ 是路径分隔符），显式指定平台。
+	expect(imagePaths('"/tmp/my image.png" /tmp/a\\ b.webp', "linux")).toEqual(["/tmp/my image.png", "/tmp/a b.webp"]);
 	expect(imagePaths("please look at image.png")).toBeNull();
 	expect(imagePaths('"unfinished.png')).toBeNull();
 	expect(imagePaths("/tmp/readme.md")).toBeNull();
+	// Windows：\ 是路径分隔符，不作转义符。
+	expect(imagePaths(String.raw`D:\code\img.png`, "win32")).toEqual([String.raw`D:\code\img.png`]);
+	expect(imagePaths(String.raw`"D:\my dir\img.png"`, "win32")).toEqual([String.raw`D:\my dir\img.png`]);
+	// POSIX：转义行为不变。
+	expect(imagePaths(String.raw`/tmp/a\ b.webp`, "linux")).toEqual(["/tmp/a b.webp"]);
 	expect(compactInstructions("/compact preserve decisions")).toBe("preserve decisions");
 	expect(compactInstructions("/compactly")).toBeNull();
 	expect(compactInstructions("hello /compact")).toBeNull();

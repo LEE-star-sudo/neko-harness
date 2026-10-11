@@ -380,7 +380,7 @@ class NekoTuiApp {
 	private async addImagePaths(paths: string[]): Promise<string> {
 		return paths
 			.map((path) =>
-				this.addImage(readImageFile(path, this.#options.cwd ?? process.cwd()), path.split("/").at(-1) ?? "Image"),
+				this.addImage(readImageFile(path, this.#options.cwd ?? process.cwd()), path.split(/[\\/]/).at(-1) ?? "Image"),
 			)
 			.join(" ");
 	}

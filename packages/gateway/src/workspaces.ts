@@ -6,8 +6,14 @@ import type { NekoBrowseOptions, NekoDirectoryPage } from "./contract.ts";
 
 /** Browse one host directory. Cursors are bound to the query, never filesystem paths. */
 export async function browseWorkspaces(options: NekoBrowseOptions): Promise<NekoDirectoryPage> {
-	if (!isAbsolute(options.path)) throw new Error("请选择完整的绝对目录路径");
-	const path = accessibleWorkspace(options.path);
+	// 兜底归一化 "/D:\code" 这类"前导斜杠 + 盘符"形态（旧客户端面包屑/手输）；POSIX 路径不可能命中。
+	const requested = options.path.replace(/^\/+([A-Za-z]:[\\/])/, "$1");
+	// Windows 没有跨盘根目录：根请求返回可用盘符列表（虚拟层），POSIX 的 "/" 行为不变。
+	if (process.platform === "win32" && (requested === "/" || requested === "\\")) {
+		return { path: "/", parent: null, entries: await listDrives(), next: null };
+	}
+	if (!isAbsolute(requested)) throw new Error("请选择完整的绝对目录路径");
+	const path = accessibleWorkspace(requested);
 	const query = options.query?.toLowerCase() ?? "";
 	const key = JSON.stringify([path, query, options.showHidden === true]);
 	let offset = 0;
@@ -44,4 +50,19 @@ export async function browseWorkspaces(options: NekoBrowseOptions): Promise<Neko
 		entries: directories,
 		next: next < entries.length ? JSON.stringify({ key, offset: next }) : null,
 	};
+}
+
+/** win32 虚拟根层：探测 A:\–Z:\，可用盘符以 `C:` / `C:\` 形态返回。 */
+async function listDrives(): Promise<NekoDirectoryPage["entries"]> {
+	const drives: NekoDirectoryPage["entries"][number][] = [];
+	for (const letter of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+		const root = `${letter}:\\`;
+		try {
+			await access(root);
+			drives.push({ name: `${letter}:`, path: root });
+		} catch {
+			// 盘不存在或不可访问。
+		}
+	}
+	return drives;
 }

@@ -38,7 +38,7 @@ export function fileCompletion(
 				const items = [];
 				for (const item of result.items) {
 					const path = item.value.slice(1).replace(/^"|"$/g, "").replace(/\/$/, "");
-					if (path.split("/").includes(".git")) continue;
+					if (path.split(/[\\/]/).includes(".git")) continue;
 					try {
 						await workspaceTarget(root, path);
 						items.push(item);

@@ -7,7 +7,7 @@ import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 
 const exec = promisify(execFile);
-export function imagePaths(text: string): string[] | null {
+export function imagePaths(text: string, platform: string = process.platform): string[] | null {
 	const paths: string[] = [];
 	let word = "",
 		quote = "",
@@ -16,7 +16,8 @@ export function imagePaths(text: string): string[] | null {
 		if (escaped) {
 			word += c;
 			escaped = false;
-		} else if (c === "\\" && quote !== "'") {
+		} else if (c === "\\" && quote !== "'" && platform !== "win32") {
+			// Windows 下 \ 是路径分隔符，不作转义符（否则 D:\code\img.png 被吞成 D:codeimg.png）。
 			escaped = true;
 		} else if (quote) {
 			if (c === quote) quote = "";

@@ -16,7 +16,7 @@ export {
 	type NekoGatewayOptions,
 	startGateway,
 } from "./gateway.ts";
-export { gatewayPortFilePath, readGatewayPortFile } from "./port-file.ts";
+export { gatewayPortFilePath, readGatewayPortFile, removeGatewayPortFile } from "./port-file.ts";
 export { gatewayCommand, stopGatewayProcess } from "./process.ts";
 export {
 	createWsByteTransportFactory,

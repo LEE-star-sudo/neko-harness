@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import type { NekoDirectoryPage } from "../lib/contract";
+import { pathCrumbs } from "../lib/path-crumbs";
 import { folderName, Icon, Modal } from "./nav-primitives";
 
 export function WorkspacePicker({ initialPath, onClose }: { initialPath: string; onClose: () => void }) {
@@ -76,23 +77,18 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 			setAdding(false);
 		}
 	};
-	const parts = (page?.path ?? path).split("/").filter(Boolean);
+	const { root, rootLabel, crumbs } = pathCrumbs(page?.path ?? path);
 	return (
 		<Modal title="添加工作区" onClose={onClose} locked={adding}>
 			<div className="nav-picker-controls">
 				<p className="nav-muted">选择 Harness 所在电脑上的文件夹</p>
 				<nav className="nav-breadcrumbs" aria-label="目录路径">
-					<button type="button" disabled={adding} onClick={() => navigate("/")}>
-						/
+					<button type="button" disabled={adding} onClick={() => navigate(root)}>
+						{rootLabel}
 					</button>
-					{parts.map((part, i) => (
-						<button
-							type="button"
-							key={parts.slice(0, i + 1).join("/")}
-							disabled={adding}
-							onClick={() => navigate(`/${parts.slice(0, i + 1).join("/")}`)}
-						>
-							{part} /
+					{crumbs.map((crumb) => (
+						<button type="button" key={crumb.path} disabled={adding} onClick={() => navigate(crumb.path)}>
+							{crumb.label} /
 						</button>
 					))}
 				</nav>

@@ -7,6 +7,49 @@ import { connectNekoGateway } from "../src/client.ts";
 import { browseWorkspaces } from "../src/workspaces.ts";
 import { cleanup, IS_WINDOWS, makeGateway, testAddress, waitFor } from "./helpers.ts";
 
+it("normalizes leading-slash drive paths before browsing", async () => {
+	const dir = await realpath(await mkdtemp(join(tmpdir(), "neko-browse-norm-")));
+	try {
+		await mkdir(join(dir, "sub"));
+		if (IS_WINDOWS) {
+			// "D:\..." → "/D:\..." / "//D:/..." 均归一化为同一目录。
+			const mangled = `/${dir.replace(/^([A-Za-z]:)/, "$1")}`;
+			for (const candidate of [mangled, `/${dir}`, `//${dir.replaceAll("\\", "/")}`]) {
+				const page = await browseWorkspaces({ path: candidate });
+				expect(page.path).toBe(dir);
+				expect(page.entries.some((entry) => entry.name === "sub")).toBe(true);
+			}
+		} else {
+			// POSIX 路径不可能命中盘符形态：原样浏览。
+			const page = await browseWorkspaces({ path: dir });
+			expect(page.path).toBe(dir);
+			await expect(browseWorkspaces({ path: "/etc" })).resolves.toBeDefined();
+		}
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("lists drive letters at the virtual root on Windows, real root elsewhere", async () => {
+	const page = await browseWorkspaces({ path: "/" });
+	expect(page.parent).toBeNull();
+	if (IS_WINDOWS) {
+		// 虚拟盘符层：条目形如 C: / C:\，且包含当前盘。
+		expect(page.entries.length).toBeGreaterThan(0);
+		expect(page.entries.every((entry) => /^[A-Z]:$/.test(entry.name) && /^[A-Z]:\\$/.test(entry.path))).toBe(true);
+		const currentDrive = `${process.cwd()[0]}:`;
+		expect(page.entries.some((entry) => entry.name === currentDrive)).toBe(true);
+		// 盘符条目可继续下钻。
+		const driveRoot = page.entries[0]!.path;
+		const inner = await browseWorkspaces({ path: driveRoot });
+		expect(inner.path).toBe(driveRoot);
+	} else {
+		// POSIX 的 "/" 仍是真实根目录。
+		expect(page.path).toBe("/");
+		expect(page.entries.some((entry) => entry.name === "tmp" || entry.name === "private")).toBe(true);
+	}
+});
+
 // 依赖 POSIX 主机语义：symlink 无需特权、chmod(0) 产生访问错误、存在 / 根目录。
 it.skipIf(IS_WINDOWS)(
 	"browses host folders with query-bound pagination and explicit inaccessible entries",
