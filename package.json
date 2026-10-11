@@ -45,7 +45,8 @@
 	],
 	"publishConfig": {
 		"access": "public",
-		"tag": "latest"
+		"tag": "latest",
+		"registry": "https://registry.npmjs.org"
 	},
 	"dependencies": {
 		"@earendil-works/chord": "1.1.0",
