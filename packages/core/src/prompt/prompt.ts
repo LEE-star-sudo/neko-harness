@@ -1,4 +1,4 @@
-import { defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
+import { type ConversationId, defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
 import type { PromptResources } from "./resources.ts";
 import { escapeXml, formatSkillsForPrompt } from "./skills.ts";
 
@@ -13,8 +13,10 @@ const TOOL_GUIDELINES: Record<string, readonly string[]> = {
 	read: ["Use read to examine files instead of cat or sed."],
 	write: ["Use write only for new files or complete rewrites."],
 	edit: [
-		"Use edit for precise changes (oldText must match exactly)",
-		"Keep edit's oldText as small as possible while still being unique in the file.",
+		"Use edit for precise changes (edits[].oldText must match exactly)",
+		"When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls",
+		"Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+		"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
 	],
 	bash: ["Use bash for file operations like ls, rg, find"],
 	read_image: ["Use read_image to view image files; the read tool only returns text."],
@@ -46,17 +48,14 @@ const renderProjectContext = (files: PromptResources["contextFiles"]): string | 
 				),
 			].join("\n\n");
 
-/**
- * neko's system prompt as one extension: five ordered sections built once per request
- * (WeakMap on the PromptInput), with AGENTS.md and skills loaded per workspace.
- * The resource loader is shared with the runtime so `/skill:` expansion and section
- * rendering use the same discovery rules (separate loads may observe later file edits).
- */
-export const createNekoPrompt = (loadResources: (workspace: string) => Promise<PromptResources>) => {
+/** Five ordered sections share one build per request and the conversation's placement-selected resource snapshot. */
+export const createNekoPrompt = (
+	loadResources: (id: ConversationId, workspace: string) => Promise<PromptResources>,
+) => {
 	const built = new WeakMap<PromptInput, Promise<Record<string, string | undefined>>>();
 	const build = async (input: PromptInput): Promise<Record<string, string | undefined>> => {
 		const cwd = input.agent.cwd;
-		const resources = cwd ? await loadResources(cwd) : { contextFiles: [], skills: [] };
+		const resources = cwd ? await loadResources(input.conversationId, cwd) : { contextFiles: [], skills: [] };
 		const sections: Record<string, string | undefined> = {
 			preamble: PREAMBLE,
 			rules: buildRules(input.agent.tools.map((tool) => tool.name)),

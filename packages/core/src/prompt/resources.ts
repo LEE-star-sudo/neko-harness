@@ -8,6 +8,8 @@ export type PromptResources = {
 	/** AGENTS.md files in injection order: user level first, then workspace level. */
 	readonly contextFiles: readonly { path: string; content: string }[];
 	readonly skills: readonly Skill[];
+	/** Same-read text of the explicitly requested winning skill; not part of a system snapshot. */
+	readonly invocation?: { readonly filePath: string; readonly content: string };
 };
 
 export const userAgentsFile = (home: string): string => join(home, ".agents", "AGENTS.md");
@@ -19,6 +21,7 @@ const readResources = async (
 	workspace: string,
 	home: string,
 	report: ReportPromptDiagnostic,
+	invocationName?: string,
 ): Promise<PromptResources> => {
 	const contextFiles: { path: string; content: string }[] = [];
 	for (const path of [userAgentsFile(home), workspaceAgentsFile(workspace)]) {
@@ -35,23 +38,35 @@ const readResources = async (
 			if (!isMissing(error)) report({ path, message: "Cannot read project instructions; skipped." });
 		}
 	}
+	const candidates = invocationName === undefined ? undefined : new Map<string, string>();
+	const capture = candidates
+		? (skill: Skill, content: string) => {
+				if (skill.name === invocationName) candidates.set(skill.filePath, content);
+			}
+		: undefined;
 	const [user, project] = await Promise.all([
-		scanSkillsDir(userSkillsDir(home), report),
-		scanSkillsDir(workspaceSkillsDir(workspace), report),
+		scanSkillsDir(userSkillsDir(home), report, capture),
+		scanSkillsDir(workspaceSkillsDir(workspace), report, capture),
 	]);
-	return { contextFiles, skills: mergeSkills([user, project]) };
+	const skills = mergeSkills([user, project]);
+	const winner = invocationName === undefined ? undefined : skills.find((skill) => skill.name === invocationName);
+	if (winner && candidates) {
+		const content = candidates.get(winner.filePath);
+		if (content !== undefined) return { contextFiles, skills, invocation: { filePath: winner.filePath, content } };
+	}
+	return { contextFiles, skills };
 };
 
-/** Re-read on each load; the prompt extension shares one load across a request's sections. */
+/** Re-read each load, retaining body text only for an explicitly requested skill from that same scan. */
 export const createResourceLoader = (
 	home: string = homedir(),
 	report: ReportPromptDiagnostic = warnPromptDiagnostic,
 ) => {
-	// Remember diagnostics only, never file contents or stat fingerprints.
+	// Between loads, remember diagnostics only, never file contents or stat fingerprints.
 	const previous = new Map<string, Set<string>>();
-	return async (workspace: string): Promise<PromptResources> => {
+	return async (workspace: string, invocationName?: string): Promise<PromptResources> => {
 		const diagnostics: PromptDiagnostic[] = [];
-		const resources = await readResources(workspace, home, (d) => diagnostics.push(d));
+		const resources = await readResources(workspace, home, (d) => diagnostics.push(d), invocationName);
 		const known = previous.get(workspace);
 		const current = new Set<string>();
 		for (const diagnostic of diagnostics) {

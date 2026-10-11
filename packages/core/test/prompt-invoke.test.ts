@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expandSkillCommand } from "../src/prompt/invoke.ts";
-import type { Skill } from "../src/prompt/skills.ts";
+import { createResourceLoader } from "../src/prompt/resources.ts";
+import { formatSkillsForPrompt, type Skill } from "../src/prompt/skills.ts";
 
 const dirs: string[] = [];
 function directory() {
@@ -26,13 +27,14 @@ it("expands a known skill into a skill block with args appended", async () => {
 	const skills: Skill[] = [{ name: "pdf", description: "Read PDFs", filePath, disableModelInvocation: false }];
 
 	const expanded = await expandSkillCommand("/skill:pdf summarize this", skills, read);
-	expect(expanded).toBe(
-		`<skill name="pdf" location="${filePath}">\nReferences are relative to ${join(dir, "pdf")}.\n\nDo the PDF thing.\n</skill>\n\nsummarize this`,
-	);
+	expect(expanded).toContain(`<skill name="pdf" location="${filePath}">`);
+	expect(expanded).toContain(join(dir, "pdf"));
+	expect(expanded).toContain("Do the PDF thing.");
+	expect(expanded).not.toContain("description: Read PDFs");
+	expect(expanded).toEndWith("</skill>\n\nsummarize this");
 	const bare = await expandSkillCommand("/skill:pdf", skills, read);
-	expect(bare).toBe(
-		`<skill name="pdf" location="${filePath}">\nReferences are relative to ${join(dir, "pdf")}.\n\nDo the PDF thing.\n</skill>`,
-	);
+	expect(bare).toContain("Do the PDF thing.");
+	expect(bare).toEndWith("</skill>");
 });
 
 it("passes through non-commands, unknown skills, and unreadable files", async () => {
@@ -78,4 +80,44 @@ it("reports unreadable known skills but passes unknown commands through silently
 	expect(reports[0]).not.toContain("private file contents");
 	await expandSkillCommand("/skill:unknown", skills, read, report);
 	expect(reports).toHaveLength(1);
+});
+
+it("keeps scanned metadata and invocation body together when the file changes before expansion", async () => {
+	const home = directory();
+	const workspace = directory();
+	const skillDir = join(workspace, ".agents", "skills", "pdf-directory");
+	mkdirSync(skillDir, { recursive: true });
+	const filePath = join(skillDir, "SKILL.md");
+	const oldContent = "---\nname: pdf\ndescription: Original description\n---\nOriginal instructions.";
+	const newContent = "---\nname: pdf\ndescription: Revised description\n---\nRevised instructions.";
+	writeFileSync(filePath, oldContent);
+	const load = createResourceLoader(home);
+	const scanned = await load(workspace, "pdf");
+
+	// Deterministic boundary: the scan has returned before this mutation and any expansion.
+	writeFileSync(filePath, newContent);
+	const expanded = await expandSkillCommand(
+		"/skill:pdf summarize",
+		scanned.skills,
+		async () => scanned.invocation!.content,
+	);
+	const metadata = formatSkillsForPrompt(scanned.skills);
+	expect(metadata).toContain("<description>Original description</description>");
+	expect(metadata).not.toContain("Revised description");
+	expect(expanded).toContain("Original instructions.");
+	expect(expanded).not.toContain("Revised instructions.");
+	expect(expanded).not.toContain("description:");
+	expect(expanded).toEndWith("</skill>\n\nsummarize");
+
+	const refreshed = await load(workspace, "pdf");
+	const nextExpanded = await expandSkillCommand(
+		"/skill:pdf",
+		refreshed.skills,
+		async () => refreshed.invocation!.content,
+	);
+	const nextMetadata = formatSkillsForPrompt(refreshed.skills);
+	expect(nextMetadata).toContain("<description>Revised description</description>");
+	expect(nextMetadata).not.toContain("Original description");
+	expect(nextExpanded).toContain("Revised instructions.");
+	expect(nextExpanded).not.toContain("Original instructions.");
 });

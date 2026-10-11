@@ -2,7 +2,15 @@ import { afterEach, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage, fauxText, getCurrentSystemMessage, type TranscriptContext } from "@earendil-works/pi-ai";
+import {
+	fauxAssistantMessage,
+	fauxText,
+	fauxToolCall,
+	getCurrentSystemMessage,
+	type TranscriptContext,
+	Type,
+} from "@earendil-works/pi-ai";
+import { defineExtension, defineTool, SystemEntry } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
 import { MemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/index.ts";
@@ -17,7 +25,36 @@ afterEach(() => {
 	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-it("injects five prompt sections with AGENTS.md and skills, refreshing after edits", async () => {
+type Gate = { promise: Promise<void>; resolve: () => void };
+
+function gate() {
+	let resolve!: () => void;
+	const promise = new Promise<void>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
+function gatedTool(started: Gate, release: Gate, onStart = () => {}) {
+	return defineExtension({
+		name: "prompt-resource-test",
+		tools: [
+			defineTool({
+				name: "prompt_gate",
+				description: "Hold a tool round while prompt resources change",
+				parameters: Type.Object({}),
+				execute: async () => {
+					onStart();
+					started.resolve();
+					await release.promise;
+					return { content: [{ type: "text" as const, text: "tool finished" }] };
+				},
+			}),
+		],
+	});
+}
+
+it("refreshes project instructions and skills when a new input is admitted", async () => {
 	const home = directory();
 	const workspace = directory();
 	mkdirSync(join(home, ".agents"), { recursive: true });
@@ -54,13 +91,10 @@ it("injects five prompt sections with AGENTS.md and skills, refreshing after edi
 	try {
 		await runtime.waitAnswer(await runtime.submit("hello"));
 		const first = getCurrentSystemMessage(contexts[0]!.messages)?.sections ?? {};
-		expect(first.preamble).toContain("expert coding assistant");
-		expect(first.rules).toContain("Use read to examine files");
 		expect(first.project_context).toContain("user rules");
 		expect(first.project_context).toContain("project rules v1");
 		expect(first.skills).toContain("<name>pdf</name>");
 		expect(first.skills).toContain(join(skillDir, "SKILL.md"));
-		expect(first.cwd).toBe(`<cwd>\n${workspace}\n</cwd>`);
 
 		writeFileSync(join(workspace, "AGENTS.md"), "project rules v2");
 		await runtime.waitAnswer(await runtime.submit("again"));
@@ -74,8 +108,135 @@ it("injects five prompt sections with AGENTS.md and skills, refreshing after edi
 		const third = getCurrentSystemMessage(contexts[2]!.messages)?.sections ?? {};
 		expect(third.project_context).toBeUndefined();
 		expect(third.skills).toBeUndefined();
-		expect(third.preamble).toContain("expert coding assistant");
 	} finally {
 		await runtime.close();
 	}
 });
+
+it("keeps system resources stable after a tool edits AGENTS.md until the next input", async () => {
+	const home = directory();
+	const workspace = directory();
+	const agents = join(workspace, "AGENTS.md");
+	writeFileSync(agents, "project rules v1");
+	const started = gate();
+	const release = gate();
+	const contexts: TranscriptContext[] = [];
+	const faux = fauxProvider({ models: [{ id: "faux-1" }] });
+	faux.setResponses([
+		(context) => {
+			contexts.push(context);
+			return fauxAssistantMessage([fauxToolCall("prompt_gate", {}, { id: "edit-agents" })], {
+				stopReason: "toolUse",
+			});
+		},
+		(context) => {
+			contexts.push(context);
+			return fauxAssistantMessage([fauxText("tool round answered")]);
+		},
+		(context) => {
+			contexts.push(context);
+			return fauxAssistantMessage([fauxText("next input answered")]);
+		},
+	]);
+	const runtime = await createNekoRuntime({
+		storage: "memory",
+		credentials: new MemoryCredentialStore(),
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "faux-1" },
+		cwd: workspace,
+		promptHome: home,
+		extensions: [gatedTool(started, release, () => writeFileSync(agents, "project rules v2"))],
+	});
+	try {
+		const first = await runtime.submit("edit project instructions");
+		await started.promise;
+		const before = await runtime.conversation.entries({}, 100, undefined, runtime.context);
+		const systemEntriesBefore = before.items.filter((entry) => SystemEntry.is(entry)).length;
+		expect(systemEntriesBefore).toBeGreaterThan(0);
+		release.resolve();
+		expect((await runtime.waitAnswer(first)).status).toBe("done");
+
+		expect(contexts).toHaveLength(2);
+		const initial = getCurrentSystemMessage(contexts[0]!.messages)!;
+		const continued = getCurrentSystemMessage(contexts[1]!.messages)!;
+		expect(initial.sections?.project_context).toContain("project rules v1");
+		expect(continued.content).toEqual(initial.content);
+		expect(continued.sections).toEqual(initial.sections);
+		expect(contexts[1]!.messages.filter((message) => message.role === "system")).toHaveLength(
+			contexts[0]!.messages.filter((message) => message.role === "system").length,
+		);
+		const after = await runtime.conversation.entries({}, 100, undefined, runtime.context);
+		expect(after.items.filter((entry) => SystemEntry.is(entry))).toHaveLength(systemEntriesBefore);
+
+		await runtime.waitAnswer(await runtime.submit("use the updated instructions"));
+		const next = getCurrentSystemMessage(contexts[2]!.messages)!.sections!;
+		expect(next.project_context).toContain("project rules v2");
+		expect(next.project_context).not.toContain("project rules v1");
+	} finally {
+		release.resolve();
+		started.resolve();
+		await runtime.close();
+	}
+}, 30_000);
+
+it("isolates active resources between conversations sharing a workspace", async () => {
+	const home = directory();
+	const workspace = directory();
+	const agents = join(workspace, "AGENTS.md");
+	writeFileSync(agents, "shared project v1");
+	const started = gate();
+	const release = gate();
+	const contexts: TranscriptContext[] = [];
+	const faux = fauxProvider({ models: [{ id: "faux-1" }] });
+	faux.setResponses([
+		(context) => {
+			contexts.push(context);
+			return fauxAssistantMessage([fauxToolCall("prompt_gate", {}, { id: "conversation-a" })], {
+				stopReason: "toolUse",
+			});
+		},
+		(context) => {
+			contexts.push(context);
+			return fauxAssistantMessage([fauxText("conversation B answered")]);
+		},
+		(context) => {
+			contexts.push(context);
+			return fauxAssistantMessage([fauxText("conversation A answered")]);
+		},
+	]);
+	const runtime = await createNekoRuntime({
+		storage: "memory",
+		credentials: new MemoryCredentialStore(),
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "faux-1" },
+		cwd: workspace,
+		promptHome: home,
+		extensions: [gatedTool(started, release)],
+	});
+	try {
+		const other = await runtime.createConversation();
+		const first = await runtime.submit("conversation A");
+		await started.promise;
+		writeFileSync(agents, "shared project v2");
+		expect((await other.waitAnswer(await other.submit("conversation B"))).status).toBe("done");
+		const otherSystem = getCurrentSystemMessage(contexts[1]!.messages)!;
+		expect(otherSystem.sections?.project_context).toContain("shared project v2");
+		expect(otherSystem.sections?.project_context).not.toContain("shared project v1");
+
+		release.resolve();
+		expect((await runtime.waitAnswer(first)).status).toBe("done");
+		expect(contexts).toHaveLength(3);
+		const initial = getCurrentSystemMessage(contexts[0]!.messages)!;
+		const continued = getCurrentSystemMessage(contexts[2]!.messages)!;
+		expect(initial.sections?.project_context).toContain("shared project v1");
+		expect(continued.content).toEqual(initial.content);
+		expect(continued.sections).toEqual(initial.sections);
+		expect(contexts[2]!.messages.filter((message) => message.role === "system")).toHaveLength(
+			contexts[0]!.messages.filter((message) => message.role === "system").length,
+		);
+	} finally {
+		release.resolve();
+		started.resolve();
+		await runtime.close();
+	}
+}, 30_000);

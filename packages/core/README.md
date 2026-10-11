@@ -39,11 +39,15 @@ runtime 暴露（根会话便捷方法 + 会话管理）：
 
 项目上下文注入两级 AGENTS.md：`~/.agents/AGENTS.md`（用户级，在前）与 `<workspace>/AGENTS.md`（项目级，在后），各渲染为一个 `<project_instructions path="…">` 块；不向父目录遍历，不识别其他文件名，不扫描 `.neko` 目录。
 
-Skills 扫描 `~/.agents/skills/<name>/SKILL.md` 与 `<workspace>/.agents/skills/<name>/SKILL.md`，解析 YAML frontmatter（`name` 缺省回落目录名、`description` 必填、`disable-model-invocation` 的技能不进提示词），同名技能项目级覆盖用户级。提示词只注入 name/description/location 元数据，正文由模型用 `read` 工具按需加载。
+Skills 扫描 `~/.agents/skills/<name>/SKILL.md` 与 `<workspace>/.agents/skills/<name>/SKILL.md`，解析 YAML frontmatter（`name` 缺省回落目录名、`description` 必填、`disable-model-invocation` 的技能不进提示词），同名技能项目级覆盖用户级。各层目录独立按 UTF-16 码元顺序排序，再按用户级在前、项目级在后合并；同名覆盖保留已有位置，不要求合并结果全局排序。提示词只注入 name/description/location 元数据，正文由模型用 `read` 工具按需加载。
 
-`/skill:<name> [args]` 显式调用技能：纯文本输入以 `/skill:` 开头时在提交准入层展开为 `<skill name location>` 块（正文去 frontmatter，args 追加），未知技能名原样透传，所有前端与 `disable-model-invocation` 技能同样生效。`runtime.listSkills(id?)` 返回当前会话工作区的技能列表（gateway 会话级 `chat.skills()`），供前端补全。
+`/skill:<name> [args]` 显式调用技能：纯文本输入以 `/skill:` 开头时在提交准入层展开为 `<skill name location>` 块（正文去 frontmatter，args 追加），未知技能名原样透传，所有前端与 `disable-model-invocation` 技能同样生效。被显式调用的技能正文与元数据从同一次文件读取取得，仅暂存匹配技能的文件文本，展开后不进入长期系统快照。`runtime.listSkills(id?)`（gateway 会话级 `chat.skills()`）始终直读最新文件供补全，查询不改变会话快照。
 
-AGENTS.md 与 skills 每次加载按工作区重读，不依赖 mtime/ctime/size 指纹；同一次提示词各节共享读取结果。文件修改、删除和权限恢复在下一次加载生效。缺失文件正常省略，读取或解析失败输出仅含路径与原因的诊断并跳过，不阻断请求；同一工作区持续存在的相同诊断不会重复输出。超过 64 KiB 的 AGENTS.md 提示体积风险但保留全文；历史压缩不能缩短系统指令。
+AGENTS.md 与 skills 在新输入提交时准备快照，按会话与 requestId 隔离；系统提示词只在该输入实际进入 transcript 后激活对应版本。排队的 followUp 不提前更新当前 run，被拒绝或未放入上下文即撤回的输入不生效；steer 也按其实际 placement 激活。同批放入多个输入时，以最后一个输入的资源快照决定系统元数据，各条已展开用户消息仍保留各自正文。重复 requestId 不重新加载或展开。
+
+没有新输入进入上下文时，工具轮、重试等请求复用活动资源，磁盘修改不产生无谓的系统节更新；工具规则仍随实际工具声明重新构建。同一次提示词各节共享一次构建。快照只存在进程内存，重启、fork 或首次没有快照时读取当前文件，不承诺恢复之前的资源版本；归档会话清理快照。不做 mtime/ctime/size 指纹或文件监听。稳定文本保留前缀复用机会，但不保证服务端缓存命中率。
+
+缺失文件正常省略，读取或解析失败输出仅含路径与原因的诊断并跳过，不阻断请求；同一工作区持续存在的相同诊断不会重复输出。超过 64 KiB 的 AGENTS.md 提示体积风险但保留全文；历史压缩不能缩短系统指令。
 
 ## 配置层
 

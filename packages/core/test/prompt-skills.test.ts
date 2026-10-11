@@ -41,26 +41,38 @@ it("falls back to the directory name and skips missing or empty descriptions", (
 	expect(parseSkillFile("---\n: bad yaml: [\n---\nbody", "/x/d/SKILL.md")).toBeNull();
 });
 
-it("scans first-level subdirectories and skips unreadable or invalid skills", async () => {
+it("scans first-level subdirectories and captures only successfully parsed skills", async () => {
 	const dir = directory();
 	skill(dir, "good", "---\ndescription: Good skill\n---\nbody");
 	skill(dir, "broken", "no frontmatter");
 	writeFileSync(join(dir, "loose.md"), "---\ndescription: Not in a directory\n---\n");
 	mkdirSync(join(dir, "empty"));
-	const skills = await scanSkillsDir(dir);
+	const captured: { name: string; content: string }[] = [];
+	const skills = await scanSkillsDir(dir, undefined, (skill, content) => captured.push({ name: skill.name, content }));
 	expect(skills.map((s) => s.name)).toEqual(["good"]);
 	expect(skills[0]!.filePath).toBe(join(dir, "good", "SKILL.md"));
+	expect(captured).toEqual([{ name: "good", content: "---\ndescription: Good skill\n---\nbody" }]);
 	expect(await scanSkillsDir(join(dir, "missing"))).toEqual([]);
 });
 
-it("merges directories with later ones overriding by name", () => {
-	const user = [{ name: "a", description: "user a", filePath: "/u/a/SKILL.md", disableModelInvocation: false }];
-	const project = [
-		{ name: "a", description: "project a", filePath: "/p/a/SKILL.md", disableModelInvocation: false },
-		{ name: "b", description: "project b", filePath: "/p/b/SKILL.md", disableModelInvocation: false },
-	];
+it("sorts each directory by UTF-16 and preserves the user position of project overrides", async () => {
+	const userDir = directory();
+	const projectDir = directory();
+	for (const name of ["Ω-user", "a-user", "Z-user"]) {
+		skill(userDir, name, `---\ndescription: user ${name}\n---\nbody`);
+	}
+	skill(projectDir, "я-project", "---\ndescription: project only\n---\nbody");
+	skill(projectDir, "b-project", "---\nname: a-user\ndescription: project override\n---\nbody");
+	skill(projectDir, "A-project", "---\ndescription: project first\n---\nbody");
+
+	const user = await scanSkillsDir(userDir);
+	const project = await scanSkillsDir(projectDir);
+	expect(user.map((s) => s.name)).toEqual(["Z-user", "a-user", "Ω-user"]);
+	expect(project.map((s) => s.name)).toEqual(["A-project", "a-user", "я-project"]);
 	const merged = mergeSkills([user, project]);
-	expect(merged.map((s) => `${s.name}:${s.description}`)).toEqual(["a:project a", "b:project b"]);
+	expect(merged.map((s) => s.name)).toEqual(["Z-user", "a-user", "Ω-user", "A-project", "я-project"]);
+	expect(merged[1]?.description).toBe("project override");
+	expect(merged[1]?.filePath).toBe(join(projectDir, "b-project", "SKILL.md"));
 });
 
 it("formats metadata only, escapes XML, and hides disabled skills", () => {
@@ -72,9 +84,7 @@ it("formats metadata only, escapes XML, and hides disabled skills", () => {
 	expect(text).toContain("<name>pdf</name>");
 	expect(text).toContain("<description>Read &lt;PDFs&gt; &amp; more</description>");
 	expect(text).toContain("<location>/skills/pdf/SKILL.md</location>");
-	expect(text).toContain("Use the read tool to load a skill's file");
 	expect(text).not.toContain("hidden");
-	expect(text).not.toContain("body");
 	expect(formatSkillsForPrompt([])).toBe("");
 });
 

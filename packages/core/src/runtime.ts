@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AttachedReplicatedState, Context } from "@earendil-works/chord";
@@ -47,6 +46,7 @@ import { imagePrompt, prepareInput } from "./images.ts";
 import { expandSkillCommand } from "./prompt/invoke.ts";
 import { createNekoPrompt } from "./prompt/prompt.ts";
 import { createResourceLoader } from "./prompt/resources.ts";
+import { createResourceSnapshots } from "./prompt/snapshots.ts";
 import { ImageTools } from "./read-image.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import { createWebSearchTools } from "./web-search.ts";
@@ -321,6 +321,11 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		return clampThinkingLevel(info, level);
 	};
 
+	const storage =
+		options.storage === "memory"
+			? new MemoryStorage()
+			: await openNodeSqliteStorage(options.storagePath ?? DEFAULT_STORAGE_PATH);
+
 	const registry = createRegistry();
 	registry.install(CodingTools);
 	registry.install(ImageTools);
@@ -332,13 +337,11 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		}),
 	);
 	const loadResources = createResourceLoader(options.promptHome);
-	registry.install(createNekoPrompt(loadResources));
+	const resourceSnapshots = createResourceSnapshots(loadResources, (id, requestId) =>
+		storage.submissionByRequest(id, requestId, context),
+	);
+	registry.install(createNekoPrompt(resourceSnapshots.current));
 	for (const extension of options.extensions ?? []) registry.install(extension);
-
-	const storage =
-		options.storage === "memory"
-			? new MemoryStorage()
-			: await openNodeSqliteStorage(options.storagePath ?? DEFAULT_STORAGE_PATH);
 
 	const harness = await Harness.open(
 		storage,
@@ -438,13 +441,21 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	): Promise<Submission> =>
 		admit(target.id, async () => {
 			const agent = await target.agent(context);
-			executionWorkspace(agent.cwd);
+			const workspace = executionWorkspace(agent.cwd);
 			const duplicate =
 				submitOptions?.requestId !== undefined &&
 				(await storage.submissionByRequest(target.id, submitOptions.requestId, context));
+			let invocationName: string | undefined;
 			if (!duplicate && typeof content === "string" && content.startsWith("/skill:")) {
-				const { skills } = await loadResources(savedWorkspace(agent.cwd));
-				content = await expandSkillCommand(content, skills, (path) => readFile(path, "utf8"));
+				const end = content.indexOf(" ");
+				invocationName = content.slice(7, end === -1 ? undefined : end);
+			}
+			const prepared = duplicate ? undefined : await loadResources(workspace, invocationName);
+			if (prepared && invocationName !== undefined && typeof content === "string") {
+				content = await expandSkillCommand(content, prepared.skills, async (path) => {
+					if (prepared.invocation?.filePath !== path) throw new Error("Missing prepared skill content");
+					return prepared.invocation.content;
+				});
 			}
 			if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
 				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
@@ -490,6 +501,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 					}, context);
 			}
 			await metadata.prepare(target.id, requestId, imagePrompt(content));
+			if (prepared) resourceSnapshots.stage(target.id, requestId, workspace, prepared);
 			let result: Submission;
 			try {
 				result = await target.submit(
@@ -502,6 +514,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 					context,
 				);
 			} catch (error) {
+				resourceSnapshots.discard(target.id, requestId);
 				await metadata.discard(target.id, requestId);
 				await target.commit(async (tx) => {
 					const doc = await tx.doc(ImageMetadataDoc, target.id);
@@ -723,6 +736,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			await harness.commit(async (tx) => {
 				(await tx.doc(ArchivedDoc, id)).archived = true;
 			}, context);
+			resourceSnapshots.forget(id);
 		},
 		async configureConversation(id, change) {
 			return admit(id, async () => {

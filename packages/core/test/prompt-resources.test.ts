@@ -67,7 +67,7 @@ it("reloads each workspace on AGENTS.md edits and new skills", async () => {
 	const load = createResourceLoader(home);
 
 	expect((await load(workspace)).contextFiles[0]!.content).toBe("v1");
-	// Same loader, second workspace: independent cache entries.
+	// Loading another workspace must not affect later reads of this one.
 	expect((await load(directory())).contextFiles).toEqual([]);
 
 	writeAgents(workspace, "v2");
@@ -108,8 +108,38 @@ it("diagnoses large instructions without truncating them", async () => {
 	const workspace = directory();
 	const content = "x".repeat(65537);
 	writeAgents(workspace, content);
-	const messages: string[] = [];
-	const resources = await createResourceLoader(home, (d) => messages.push(d.message))(workspace);
+	const diagnostics: { path: string; message: string }[] = [];
+	const resources = await createResourceLoader(home, (d) => diagnostics.push(d))(workspace);
 	expect(resources.contextFiles[0]?.content).toBe(content);
-	expect(messages[0]).toContain("compaction does not reduce");
+	expect(diagnostics).toHaveLength(1);
+	expect(diagnostics[0]?.path).toBe(join(workspace, "AGENTS.md"));
+	expect(diagnostics[0]?.message).not.toBe("");
+	expect(diagnostics[0]?.message).not.toContain(content);
+});
+
+it("captures the project winner for explicit invocation even when hidden from model discovery", async () => {
+	const home = directory();
+	const workspace = directory();
+	writeSkill(home, "shared", "user shared");
+	writeSkill(workspace, "shared", "project shared");
+	writeSkill(workspace, "other", "not requested");
+	const filePath = join(workspace, ".agents", "skills", "shared", "SKILL.md");
+	const content = "---\ndescription: project shared\ndisable-model-invocation: true\n---\nproject body";
+	writeFileSync(filePath, content);
+
+	const load = createResourceLoader(home);
+	const resources = await load(workspace, "shared");
+	expect(resources.skills.find((skill) => skill.name === "shared")).toEqual({
+		name: "shared",
+		description: "project shared",
+		filePath,
+		disableModelInvocation: true,
+	});
+	expect(resources.invocation).toEqual({ filePath, content });
+	expect((await load(workspace, "other")).invocation).toEqual({
+		filePath: join(workspace, ".agents", "skills", "other", "SKILL.md"),
+		content: "---\ndescription: not requested\n---\nbody",
+	});
+	expect(await load(workspace)).not.toHaveProperty("invocation");
+	expect(await load(workspace, "unknown")).not.toHaveProperty("invocation");
 });

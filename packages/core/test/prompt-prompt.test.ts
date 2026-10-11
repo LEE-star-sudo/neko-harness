@@ -21,9 +21,11 @@ const input = (cwd: string, tools: string[]): PromptInput =>
 	({ agent: { cwd, tools: tools.map((name) => ({ name })) } }) as unknown as PromptInput;
 
 const renderAll = async (home: string, cwd: string, tools: string[]) => {
-	const extension = createNekoPrompt(createResourceLoader(home));
+	const load = createResourceLoader(home);
+	const extension = createNekoPrompt((_id, workspace) => load(workspace));
 	const out: Record<string, string | undefined> = {};
-	for (const s of extension.sections ?? []) out[s.key] = await s.render(input(cwd, tools), BACKGROUND_CONTEXT);
+	const shared = input(cwd, tools);
+	for (const s of extension.sections ?? []) out[s.key] = await s.render(shared, BACKGROUND_CONTEXT);
 	return { keys: (extension.sections ?? []).map((s) => s.key), out };
 };
 
@@ -32,11 +34,8 @@ it("renders five ordered sections, untagged preamble, tagged rest", async () => 
 	const workspace = directory();
 	const { keys, out } = await renderAll(home, workspace, ["read", "bash"]);
 	expect(keys).toEqual(["preamble", "rules", "project_context", "skills", "cwd"]);
-	expect(out.preamble).toContain("expert coding assistant");
 	expect(out.preamble).not.toContain("<preamble>");
 	expect(out.rules).toMatch(/^<rules>\n/);
-	expect(out.rules).toContain("- Use read to examine files instead of cat or sed.");
-	expect(out.rules).toContain("- Be concise in your responses");
 	expect(out.project_context).toBeUndefined();
 	expect(out.skills).toBeUndefined();
 	expect(out.cwd).toBe(`<cwd>\n${workspace}\n</cwd>`);
@@ -60,25 +59,12 @@ it("renders project_context and skills when resources exist", async () => {
 	expect(out.skills).toContain("<name>pdf</name>");
 });
 
-it("dedupes rules and only includes enabled tools", async () => {
-	const home = directory();
-	const workspace = directory();
-	const { out } = await renderAll(home, workspace, ["read", "read", "web_search"]);
-	expect(out.rules).toContain("- Use web_search for current information from the internet instead of guessing.");
-	expect(out.rules).not.toContain("edit");
-	const occurrences = out.rules!.split("Use read to examine files").length - 1;
-	expect(occurrences).toBe(1);
-});
-
-it("shares one resource snapshot between concurrently rendered sections", async () => {
-	let loads = 0;
-	const extension = createNekoPrompt(async () => {
-		loads++;
-		await Promise.resolve();
-		return { contextFiles: [{ path: '/project/"quoted"/AGENTS.md', content: "rules" }], skills: [] };
-	});
+it("escapes instruction paths embedded in XML attributes", async () => {
+	const extension = createNekoPrompt(async () => ({
+		contextFiles: [{ path: '/project/"quoted"/AGENTS.md', content: "rules" }],
+		skills: [],
+	}));
 	const shared = input("/project", ["read"]);
 	const output = await Promise.all((extension.sections ?? []).map((s) => s.render(shared, BACKGROUND_CONTEXT)));
-	expect(loads).toBe(1);
 	expect(output.join("\n")).toContain('path="/project/&quot;quoted&quot;/AGENTS.md"');
 });

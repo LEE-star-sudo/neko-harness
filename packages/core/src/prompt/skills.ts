@@ -54,10 +54,11 @@ export const parseSkillFile = (
 	}
 };
 
-/** Scan one skills directory: first-level subdirectories holding a SKILL.md. */
+/** Scan first-level skill directories; capture receives the same text used to parse valid metadata. */
 export const scanSkillsDir = async (
 	dir: string,
 	report: ReportPromptDiagnostic = ignorePromptDiagnostic,
+	capture?: (skill: Skill, content: string) => void,
 ): Promise<Skill[]> => {
 	let entries: Dirent[];
 	try {
@@ -67,7 +68,7 @@ export const scanSkillsDir = async (
 		return [];
 	}
 	const skills: Skill[] = [];
-	for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+	for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
 		if (!entry.isDirectory()) continue;
 		const filePath = join(dir, entry.name, "SKILL.md");
 		let content: string;
@@ -78,7 +79,10 @@ export const scanSkillsDir = async (
 			continue;
 		}
 		const skill = parseSkillFile(content, filePath, report);
-		if (skill) skills.push(skill);
+		if (skill) {
+			skills.push(skill);
+			capture?.(skill, content);
+		}
 	}
 	return skills;
 };
