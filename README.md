@@ -15,6 +15,15 @@ neko --version
 
 如果找不到 `neko` 命令，请将 Bun 的全局可执行目录（通常是 `~/.bun/bin`）加入 `PATH`。
 
+`@` 文件与目录补全需要额外安装 `fd`：
+
+```bash
+# macOS（Homebrew）
+brew install fd
+# Ubuntu / Debian
+sudo apt-get install fd-find
+```
+
 ## 开始使用
 
 进入你要处理的项目目录，选择一种界面：

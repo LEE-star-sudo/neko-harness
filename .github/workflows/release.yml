@@ -18,6 +18,9 @@ jobs:
       - name: Verify stable release tag
         run: |
           bun -e 'const p = await Bun.file("package.json").json(); if (!/^\d+\.\d+\.\d+$/.test(p.version) || process.env.GITHUB_REF_NAME !== `v${p.version}`) process.exit(1)'
+      - name: Install file search tool (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y fd-find
       - run: bun install --frozen-lockfile
       - run: bun run build:release
       - run: bun run check
