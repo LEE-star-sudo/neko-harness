@@ -7,7 +7,7 @@
 1. 安装 Bun 1.4.x 与 `fd`（Linux 可使用 `fdfind`），然后 `bun install --frozen-lockfile`
 2. `bun run build:release && bun run check && bun run test && bun run test:package`
 3. 确认 `artifacts/neko-harness-0.1.0.tgz` 的内容，提交并推送代码，等待 CI 通过。
-4. `npm login --registry=https://registry.npmjs.org`，然后 `npm publish artifacts/neko-harness-0.1.0.tgz --access public --tag latest --registry=https://registry.npmjs.org`；在浏览器完成 npm 要求的认证。
+4. `npm login --registry=https://registry.npmjs.org`，然后 `npm publish ./artifacts/neko-harness-0.1.0.tgz --access public --tag latest --registry=https://registry.npmjs.org`；在浏览器完成 npm 要求的认证。
 5. 发布成功后创建并推送 `v0.1.0` tag。首次不发布 GitHub Release，避免再次触发 npm 发布。
 6. 在 npm 包设置 → Trusted publishing 添加 GitHub Actions：owner `kirineko`，repository `neko-harness`，workflow `release.yml`，environment `npm`。允许 publish。
 

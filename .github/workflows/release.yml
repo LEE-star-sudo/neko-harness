@@ -48,4 +48,4 @@ jobs:
         with:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
-      - run: npm publish artifacts/*.tgz --access public --tag latest --provenance
+      - run: npm publish ./artifacts/*.tgz --access public --tag latest --provenance
