@@ -1,4 +1,3 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRootRoute, createRoute, createRouter, Outlet, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -20,17 +19,13 @@ declare module "@tanstack/react-router" {
 	}
 }
 
-const queryClient = new QueryClient();
-
 startNekoApp();
 
 const container = document.getElementById("root");
 if (container !== null) {
 	createRoot(container).render(
 		<StrictMode>
-			<QueryClientProvider client={queryClient}>
-				<RouterProvider router={router} />
-			</QueryClientProvider>
+			<RouterProvider router={router} />
 		</StrictMode>,
 	);
 }

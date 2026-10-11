@@ -8,6 +8,7 @@ import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { ComposerSuggestions } from "./composer-suggestions";
 import { useFileMentions } from "./file-mentions";
+import { Icon } from "./primitives";
 
 type Attachment = { id: string; file: File; error?: string; processing?: boolean };
 type Draft = { text: string; files: Attachment[]; requestId: string };
@@ -314,25 +315,28 @@ function SessionComposer(props: Props & { sessionId: string }) {
 				add(Array.from(e.dataTransfer.files));
 			}}
 		>
-			<div className="mx-auto max-w-3xl">
-				{drag && <p className="text-sm text-sakura-700">松开以添加图片，不会自动发送</p>}
-				{missingKey && (
-					<p className="text-sm text-sakura-700">
-						尚未配置 DeepSeek Key。
-						<Link to="/settings" className="focus-neko underline">
-							前往设置
-						</Link>
-					</p>
-				)}
-				{noVision && <p className="text-sm text-sakura-700">当前模型不支持图片，请切换模型或移除附件。</p>}
-				{!model?.input.includes("image") && view?.items.some((i) => i.type === "user" && i.images?.length) && (
-					<p className="text-xs text-ink-500">当前模型无法查看历史原图，仍可使用已有文字分析。</p>
-				)}
-				{error && (
-					<p role="alert" className="my-1 break-words text-sm text-sakura-700">
-						{error}
-					</p>
-				)}
+			<div className="chat-column">
+				{/* 通知/错误行：固定位于附件区之上，集中间距 */}
+				<div className="mb-2 flex flex-col gap-1 empty:mb-0">
+					{drag && <p className="text-sm text-sakura-700">松开以添加图片，不会自动发送</p>}
+					{missingKey && (
+						<p className="text-sm text-sakura-700">
+							尚未配置 DeepSeek Key。
+							<Link to="/settings" className="focus-neko underline">
+								前往设置
+							</Link>
+						</p>
+					)}
+					{noVision && <p className="text-sm text-sakura-700">当前模型不支持图片，请切换模型或移除附件。</p>}
+					{!model?.input.includes("image") && view?.items.some((i) => i.type === "user" && i.images?.length) && (
+						<p className="text-xs text-ink-500">当前模型无法查看历史原图，仍可使用已有文字分析。</p>
+					)}
+					{error && (
+						<p role="alert" className="break-words text-sm text-sakura-700">
+							{error}
+						</p>
+					)}
+				</div>
 				{!!draft.files.length && (
 					<ul className="mb-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto">
 						{draft.files.map((a) => (
@@ -386,9 +390,9 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						title="添加图片（最多 4 张）"
 						disabled={props.disabled}
 						onClick={() => picker.current?.click()}
-						className="focus-neko h-10 rounded-full border border-sakura-200 px-3 text-xl"
+						className="focus-neko inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-sakura-200 text-ink-600 hover:bg-sakura-50"
 					>
-						＋
+						<Icon name="plus" />
 					</button>
 					<textarea
 						ref={textarea}
@@ -396,6 +400,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						value={draft.text}
 						rows={1}
 						placeholder="输入消息，@ 引用文件，/ 命令"
+						aria-label="消息输入"
 						aria-autocomplete="list"
 						aria-controls={mentions.controls ?? (menu ? commandId : undefined)}
 						aria-activedescendant={
@@ -417,7 +422,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 							mentions.refresh();
 							setMenu(isCommandQuery(e.currentTarget.value));
 						}}
-						className="focus-neko max-h-40 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-[15px] text-ink-900"
+						className="focus-neko max-h-40 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-base text-ink-900"
 						onChange={(e) => {
 							edit({ text: e.target.value });
 							setCommandSelected(0);
@@ -463,14 +468,14 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						type="button"
 						aria-label="输入操作菜单"
 						aria-expanded={menu}
-						className="focus-neko h-10 px-2"
+						className="focus-neko inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-sakura-50"
 						onClick={() => {
 							mentions.close();
 							setMenu(!menu);
 							textarea.current?.focus();
 						}}
 					>
-						⋯
+						<Icon name="more" />
 					</button>
 					<button
 						type="button"

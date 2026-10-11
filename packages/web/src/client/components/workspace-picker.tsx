@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import type { NekoDirectoryPage } from "../lib/contract";
 import { pathCrumbs } from "../lib/path-crumbs";
-import { folderName, Icon, Modal } from "./nav-primitives";
+import { folderName, Icon, Modal } from "./primitives";
 
 export function WorkspacePicker({ initialPath, onClose }: { initialPath: string; onClose: () => void }) {
 	const [path, setPath] = useState(initialPath);
@@ -80,9 +80,9 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 	const { root, rootLabel, crumbs } = pathCrumbs(page?.path ?? path);
 	return (
 		<Modal title="添加工作区" onClose={onClose} locked={adding}>
-			<div className="nav-picker-controls">
-				<p className="nav-muted">选择 Harness 所在电脑上的文件夹</p>
-				<nav className="nav-breadcrumbs" aria-label="目录路径">
+			<div className="picker-controls">
+				<p className="text-ink-500">选择 Harness 所在电脑上的文件夹</p>
+				<nav className="breadcrumbs" aria-label="目录路径">
 					<button type="button" disabled={adding} onClick={() => navigate(root)}>
 						{rootLabel}
 					</button>
@@ -93,7 +93,7 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 					))}
 				</nav>
 				<form
-					className="nav-path-form"
+					className="path-form"
 					onSubmit={(e) => {
 						e.preventDefault();
 						navigate(input);
@@ -106,11 +106,11 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 						disabled={adding}
 						onChange={(e) => setInput(e.target.value)}
 					/>
-					<button className="nav-button" type="submit" disabled={adding}>
+					<button className="btn-outline" type="submit" disabled={adding}>
 						前往
 					</button>
 				</form>
-				<div className="nav-filter-row">
+				<div className="filter-row">
 					<input
 						aria-label="筛选文件夹"
 						placeholder="筛选文件夹…"
@@ -125,7 +125,7 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 				</div>
 			</div>
 			<fieldset
-				className="nav-folder-list"
+				className="folder-list"
 				aria-label="文件夹列表"
 				aria-busy={loading}
 				onKeyDown={(event) => {
@@ -137,15 +137,20 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 				}}
 			>
 				{error && (
-					<div role="alert" className="nav-error">
+					<div role="alert" className="error-text">
 						{error}
-						<button type="button" className="nav-button" disabled={adding} onClick={() => setRetry((r) => r + 1)}>
+						<button type="button" className="btn-outline" disabled={adding} onClick={() => setRetry((r) => r + 1)}>
 							重试
 						</button>
 					</div>
 				)}
 				{page?.parent && (
-					<button type="button" className="nav-row" disabled={adding || loading} onClick={() => navigate(page.parent!)}>
+					<button
+						type="button"
+						className="chrome-row"
+						disabled={adding || loading}
+						onClick={() => navigate(page.parent!)}
+					>
 						<Icon name="up" />
 						上级目录
 					</button>
@@ -153,37 +158,37 @@ export function WorkspacePicker({ initialPath, onClose }: { initialPath: string;
 				{page?.entries.map((entry) => (
 					<button
 						type="button"
-						className="nav-row"
+						className="chrome-row"
 						key={entry.path}
 						disabled={adding || loading || !!entry.error}
 						title={entry.error ?? entry.path}
 						onClick={() => navigate(entry.path)}
 					>
 						<Icon name="folder" />
-						<span className="nav-truncate">{entry.name}</span>
-						{entry.error && <span className="nav-muted">不可访问</span>}
+						<span className="truncate min-w-0">{entry.name}</span>
+						{entry.error && <span className="text-ink-500">不可访问</span>}
 					</button>
 				))}
-				{loading && <output className="nav-empty">正在读取目录…</output>}
-				{!loading && page?.entries.length === 0 && <p className="nav-empty">没有匹配的子文件夹，可选择当前目录</p>}
+				{loading && <output className="empty-text">正在读取目录…</output>}
+				{!loading && page?.entries.length === 0 && <p className="empty-text">没有匹配的子文件夹，可选择当前目录</p>}
 				{page?.next && (
-					<button type="button" className="nav-button" disabled={loading || adding} onClick={() => void more()}>
+					<button type="button" className="btn-outline" disabled={loading || adding} onClick={() => void more()}>
 						加载更多
 					</button>
 				)}
 			</fieldset>
-			<div className="nav-picker-footer">
+			<div className="picker-footer">
 				<div>
 					<strong>{folderName(page?.path ?? path)}</strong>
-					<p className="nav-path">{page?.path ?? path}</p>
+					<p className="path-text">{page?.path ?? path}</p>
 				</div>
-				<div className="nav-actions">
-					<button type="button" className="nav-button" disabled={adding} onClick={onClose}>
+				<div className="actions">
+					<button type="button" className="btn-outline" disabled={adding} onClick={onClose}>
 						取消
 					</button>
 					<button
 						type="button"
-						className="nav-button nav-primary"
+						className="btn-primary px-3 py-1.5"
 						disabled={!page || loading || adding || !!error}
 						onClick={() => void add()}
 					>

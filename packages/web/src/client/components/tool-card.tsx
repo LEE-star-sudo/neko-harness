@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Icon } from "./primitives";
 
 export type ToolCardProps = {
 	name: string;
@@ -12,11 +13,22 @@ export type ToolCardProps = {
 	note?: string | null;
 };
 
+/* 状态 = 图标 + 色彩双重编码：失败态不止靠边框色差，灰度下仍可辨识 */
 const STATUS = {
-	pending: { label: "待执行", className: "border-ink-200 bg-ink-100 text-ink-600" },
-	running: { label: "运行中", className: "border-tianyi-300 bg-tianyi-100 text-tianyi-900" },
-	doneOk: { label: "完成", className: "border-sakura-300 bg-sakura-100 text-sakura-900" },
-	doneError: { label: "失败", className: "border-sakura-400 bg-sakura-100 text-sakura-900" },
+	pending: { label: "待执行", icon: "clock", spin: false, className: "border-ink-200 bg-ink-100 text-ink-600" },
+	running: {
+		label: "运行中",
+		icon: "spinner",
+		spin: true,
+		className: "border-tianyi-300 bg-tianyi-100 text-tianyi-900",
+	},
+	doneOk: { label: "完成", icon: "check", spin: false, className: "border-ink-200 bg-ink-50 text-ink-600" },
+	doneError: {
+		label: "失败",
+		icon: "close",
+		spin: false,
+		className: "border-2 border-sakura-500 bg-sakura-100 text-sakura-900 font-semibold",
+	},
 } as const;
 
 /** 工具调用卡片：名称、参数摘要、状态徽章；展开看参数详情与输出/结果预览。 */
@@ -38,15 +50,15 @@ export function ToolCard(props: ToolCardProps) {
 				}}
 				className="focus-neko flex w-full items-center gap-2 px-3 py-2 text-left"
 			>
-				<span aria-hidden className="text-tianyi-500">
-					⚡
+				<span className="text-tianyi-500">
+					<Icon name="bolt" size={14} />
 				</span>
-				<span className="font-mono text-[13px] font-semibold text-tianyi-800">{props.name}</span>
+				<span className="font-mono text-sm font-semibold text-tianyi-800">{props.name}</span>
 				<span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-600">{props.summary}</span>
 				<span
 					className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${status.className}`}
 				>
-					{props.phase === "running" && <span className="size-1.5 animate-pulse-soft rounded-full bg-tianyi-500" />}
+					<Icon name={status.icon} size={12} className={status.spin ? "animate-spin" : undefined} />
 					{status.label}
 					{duration}
 				</span>

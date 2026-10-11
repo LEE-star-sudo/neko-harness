@@ -2,7 +2,7 @@ import type { ChatImage } from "@neko-harness/core";
 import { useEffect, useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
-import { Modal } from "./nav-primitives";
+import { Modal } from "./primitives";
 
 function HistoryImage({ image }: { image: ChatImage }) {
 	const { currentSessionId, phase } = useNekoState();

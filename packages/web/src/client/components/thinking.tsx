@@ -16,7 +16,7 @@ export function ThinkingBlock({ text }: { text: string }) {
 				<span aria-hidden>{open ? "▾" : "▸"}</span>
 				思考过程…
 			</button>
-			{open && <div className="px-3 pb-2 text-[13px] whitespace-pre-wrap text-ink-600 italic">{text}</div>}
+			{open && <div className="px-3 pb-2 text-sm whitespace-pre-wrap text-ink-600 italic">{text}</div>}
 		</div>
 	);
 }

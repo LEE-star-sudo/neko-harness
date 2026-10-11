@@ -25,12 +25,15 @@ export function StatusBar(props: {
 	const context = view?.contextUsage;
 	const latest = view?.compaction?.latest;
 	const active = view?.compaction?.active ?? [];
-	const [, refresh] = useState(0);
+	// 瞬态相位（已压缩/失败等）只在短时间内展示：expired 为渲染期读取的派生状态，
+	// 定时器仅负责到期时翻转这个布尔值。
 	const transient = latest && !["summarizing", "waiting-to-apply"].includes(latest.phase);
 	const expiresAt = transient ? latest.at + (latest.phase === "failed" ? 10000 : 5000) : null;
+	const [expired, setExpired] = useState(expiresAt !== null && expiresAt <= Date.now());
 	useEffect(() => {
+		setExpired(expiresAt !== null && expiresAt <= Date.now());
 		if (expiresAt === null || expiresAt <= Date.now()) return;
-		const timer = setTimeout(() => refresh((n) => n + 1), expiresAt - Date.now());
+		const timer = setTimeout(() => setExpired(true), expiresAt - Date.now());
 		return () => clearTimeout(timer);
 	}, [expiresAt]);
 	const compaction = active.length
@@ -39,7 +42,7 @@ export function StatusBar(props: {
 			: active.some((c) => c.blocking)
 				? "等待上下文压缩"
 				: "正在压缩上下文"
-		: latest && (expiresAt === null || Date.now() < expiresAt)
+		: latest && !expired
 			? {
 					applied: "上下文已压缩",
 					nothing: "当前无需压缩",
@@ -52,7 +55,7 @@ export function StatusBar(props: {
 			: null;
 	const failed = !active.length && latest?.phase === "failed";
 	return (
-		<div className="mx-auto flex w-full max-w-3xl shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-xs text-ink-500">
+		<div className="chat-column flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2 text-xs text-ink-500">
 			<div className="min-w-0 max-w-48 [&>button]:max-w-full">
 				<ModelPicker current={props.agentModel} fallbackLabel={props.model} />
 			</div>

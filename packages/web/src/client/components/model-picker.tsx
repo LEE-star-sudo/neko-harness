@@ -3,7 +3,7 @@ import type { NekoModelRef } from "@neko-harness/core";
 import { useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
-import { Modal } from "./nav-primitives";
+import { Modal } from "./primitives";
 
 export function ModelPicker(props: { current: NekoModelRef | null; fallbackLabel: string }) {
 	const { models, currentSessionId, view, phase, operating } = useNekoState();
@@ -66,7 +66,7 @@ function ModelForm(props: {
 	}
 	return (
 		<Modal title="模型与思考强度" onClose={props.onClose}>
-			<div className="model-settings space-y-5 p-5">
+			<div className="space-y-5 p-5">
 				<fieldset className="space-y-2" aria-label="模型">
 					{models.map((model) => (
 						<button
@@ -112,14 +112,14 @@ function ModelForm(props: {
 					</p>
 				)}
 				<div className="flex justify-end gap-2">
-					<button type="button" onClick={props.onClose} className="focus-neko rounded-full px-4 py-2 text-sm">
+					<button type="button" onClick={props.onClose} className="btn-outline rounded-full px-4 py-2 text-sm">
 						取消
 					</button>
 					<button
 						type="button"
 						disabled={busy}
 						onClick={() => void apply()}
-						className="focus-neko rounded-full bg-sakura-100 px-5 py-2 text-sm text-sakura-800"
+						className="btn-primary rounded-full px-5 py-2 text-sm"
 					>
 						{busy ? "应用中…" : "应用"}
 					</button>

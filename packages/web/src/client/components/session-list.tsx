@@ -5,7 +5,7 @@ import { appActions, reportError } from "../lib/bootstrap";
 import { workspaceSessions } from "../lib/gateway";
 import { useSessionTime } from "../lib/session-time";
 import { useNekoState } from "../lib/store";
-import { folderName, Icon, Modal, Popover, useMobile } from "./nav-primitives";
+import { folderName, Icon, Modal, Popover, useMobile } from "./primitives";
 import { WorkspacePicker } from "./workspace-picker";
 
 export function SessionList({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -30,38 +30,38 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 	if (!open) return null;
 	const content = (
 		<>
-			<div className="nav-sidebar-top">
-				<div className="nav-workspace-heading">
+			<div className="sidebar-top">
+				<div className="workspace-heading">
 					<button
 						type="button"
-						className="nav-workspace-trigger"
+						className="workspace-trigger"
 						aria-label="切换工作区"
 						aria-expanded={menu !== null && !menu.id}
 						disabled={disabled}
 						onClick={(e) => setMenu({ anchor: e.currentTarget })}
 					>
-						<span className="nav-workspace-mark">
+						<span className="workspace-mark">
 							<Icon name="folder" />
 						</span>
-						<span className="nav-truncate">{folderName(state.workspaceRoot) || "工作区"}</span>
+						<span className="truncate min-w-0">{folderName(state.workspaceRoot) || "工作区"}</span>
 						<Icon name="chevron" />
 					</button>
 					{!mobile && (
-						<button type="button" className="nav-icon" aria-label="收起侧栏" title="收起侧栏" onClick={onClose}>
+						<button type="button" className="icon-btn" aria-label="收起侧栏" title="收起侧栏" onClick={onClose}>
 							<Icon name="panel" />
 						</button>
 					)}
 				</div>
 				<button
 					type="button"
-					className="nav-row nav-new"
+					className="chrome-row font-medium"
 					disabled={disabled}
 					onClick={() => action(appActions.createSession())}
 				>
 					<Icon name="plus" />
 					新建会话
 				</button>
-				<div className="nav-search">
+				<div className="search-box">
 					<Icon name="search" />
 					<input
 						aria-label="搜索当前工作区会话"
@@ -71,34 +71,31 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 					/>
 				</div>
 			</div>
-			<div className="nav-section-label">
+			<div className="section-label">
 				会话 <span>{sessions.length}</span>
 			</div>
-			<div className="nav-session-scroll">
-				<ul className="nav-session-list">
+			<div className="session-scroll">
+				<ul className="session-list">
 					{sessions.map((session) => (
-						<li
-							key={session.id}
-							className={`nav-session-row ${session.id === state.currentSessionId ? "is-active" : ""}`}
-						>
+						<li key={session.id} className={`session-row ${session.id === state.currentSessionId ? "is-active" : ""}`}>
 							<button
 								type="button"
-								className="nav-row nav-session-select"
+								className="chrome-row session-select"
 								disabled={disabled}
 								aria-current={session.id === state.currentSessionId ? "page" : undefined}
-								aria-label={`${sessionName(session, "新会话")} · ${new Date(messageTime(session)).toLocaleString("zh-CN")}`}
+								aria-describedby={`session-tip-${session.id}`}
 								onClick={() => action(appActions.selectSession(session.id))}
 							>
 								<Icon name="chat" />
-								<span className="nav-session-copy">
-									<span className="nav-truncate">{sessionName(session, "新会话")}</span>
-									<span className="nav-session-meta">
+								<span className="session-copy">
+									<span className="truncate min-w-0">{sessionName(session, "新会话")}</span>
+									<span className="session-meta">
 										<time dateTime={new Date(messageTime(session)).toISOString()}>
 											{relativeTime(messageTime(session), now, "zh")}
 										</time>
 										{session.status === "running" ? " · 运行中" : session.status === "error" ? " · 出错" : ""}
 									</span>
-									<span className="nav-session-tooltip" role="tooltip">
+									<span className="session-tooltip" role="tooltip" id={`session-tip-${session.id}`}>
 										{sessionName(session, "新会话")}
 										<br />
 										{new Date(messageTime(session)).toLocaleString("zh-CN")}
@@ -107,7 +104,7 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 							</button>
 							<button
 								type="button"
-								className="nav-icon nav-row-more"
+								className="icon-btn row-more"
 								disabled={disabled}
 								aria-label={`${sessionName(session, "新会话")}的操作`}
 								title="会话操作"
@@ -119,16 +116,16 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 					))}
 				</ul>
 				{sessions.length === 0 && (
-					<div className="nav-empty">
+					<div className="empty-text">
 						{state.phase !== "ready" ? "等待网关连接…" : query ? "没有匹配的会话" : "此工作区暂无会话"}
 					</div>
 				)}
 			</div>
-			<div className="nav-sidebar-bottom">
-				<span className="nav-path" title={state.workspaceRoot}>
+			<div className="sidebar-bottom">
+				<span className="path-text" title={state.workspaceRoot}>
 					{state.workspaceRoot}
 				</span>
-				<Link to="/settings" className="nav-row">
+				<Link to="/settings" className="chrome-row">
 					<Icon name="settings" />
 					设置
 				</Link>
@@ -142,7 +139,7 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 					{content}
 				</Modal>
 			) : (
-				<aside className="nav-theme nav-sidebar" aria-label="工作区与会话">
+				<aside className="chrome sidebar" aria-label="工作区与会话">
 					{content}
 				</aside>
 			)}
@@ -151,14 +148,14 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 					{menu.id ? (
 						<>
 							{menuSession && (
-								<div className="nav-session-details">
+								<div className="session-details">
 									<strong>{sessionName(menuSession, "新会话")}</strong>
 									<small>{new Date(messageTime(menuSession)).toLocaleString("zh-CN")}</small>
 								</div>
 							)}
 							<button
 								type="button"
-								className="nav-row"
+								className="chrome-row"
 								onClick={() => {
 									setArchive(menu.id!);
 									setArchiveError("");
@@ -171,12 +168,12 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 						</>
 					) : (
 						<>
-							<div className="nav-section-label">工作区</div>
-							<div className="nav-workspace-options">
+							<div className="section-label">工作区</div>
+							<div className="workspace-options">
 								{state.workspaces.map((w) => (
 									<button
 										type="button"
-										className={`nav-workspace-option ${w.path === state.workspaceRoot ? "is-active" : ""}`}
+										className={`workspace-option ${w.path === state.workspaceRoot ? "is-active" : ""}`}
 										key={w.path}
 										title={w.path}
 										onClick={() => {
@@ -200,7 +197,7 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 							</div>
 							<button
 								type="button"
-								className="nav-row nav-add-workspace"
+								className="chrome-row add-workspace"
 								onClick={() => {
 									setMenu(null);
 									setPicker(true);
@@ -216,7 +213,7 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 			{picker && <WorkspacePicker initialPath={state.workspaceRoot} onClose={() => setPicker(false)} />}
 			{archive && (
 				<Modal title="归档会话" locked={state.operating} onClose={() => setArchive(null)}>
-					<div className="nav-confirm">
+					<div className="confirm-body">
 						<p>
 							归档“
 							{sessionName(
@@ -226,17 +223,17 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 							”？会话将从列表中隐藏，工作区和文件仍会保留。
 						</p>
 						{archiveError && (
-							<p role="alert" className="nav-error">
+							<p role="alert" className="error-text">
 								{archiveError}
 							</p>
 						)}
-						<div className="nav-actions">
-							<button type="button" className="nav-button" disabled={state.operating} onClick={() => setArchive(null)}>
+						<div className="actions">
+							<button type="button" className="btn-outline" disabled={state.operating} onClick={() => setArchive(null)}>
 								取消
 							</button>
 							<button
 								type="button"
-								className="nav-button nav-primary"
+								className="btn-primary"
 								disabled={state.operating}
 								onClick={() => {
 									void appActions
