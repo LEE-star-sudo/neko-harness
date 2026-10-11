@@ -8,6 +8,7 @@ permissions:
 jobs:
   verify:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -17,7 +18,7 @@ jobs:
         with:
           bun-version: '1.4.x'
       - run: bun install --frozen-lockfile
+      - run: bun run build:release
       - run: bun run check
       - run: bun run test
-      - run: bun run build:release
       - run: bun run test:package

@@ -19,9 +19,9 @@ jobs:
         run: |
           bun -e 'const p = await Bun.file("package.json").json(); if (!/^\d+\.\d+\.\d+$/.test(p.version) || process.env.GITHUB_REF_NAME !== `v${p.version}`) process.exit(1)'
       - run: bun install --frozen-lockfile
+      - run: bun run build:release
       - run: bun run check
       - run: bun run test
-      - run: bun run build:release
       - run: bun run test:package
       - uses: actions/upload-artifact@v4
         with:
