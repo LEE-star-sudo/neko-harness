@@ -10,8 +10,8 @@ export type NekoTheme = "light" | "dark" | "auto";
 export type NekoGatewayConfig = {
 	readonly host?: string;
 	readonly port?: number;
-	/** Unix socket path for the TUI frontend. */
-	readonly socketPath?: string;
+	/** Unix socket path for the TUI frontend; null disables the Unix transport. */
+	readonly socketPath?: string | null;
 };
 
 /** Resolved neko-harness configuration: every field optional, merged from defaults < file < CLI. */
@@ -118,8 +118,9 @@ function mergeGateway(
 	return {
 		...(base.host !== undefined || overrides.host !== undefined ? { host: overrides.host ?? base.host } : {}),
 		...(base.port !== undefined || overrides.port !== undefined ? { port: overrides.port ?? base.port } : {}),
+		// null 是显式禁用 Unix 传输的取值，不能被 ?? 吞掉。
 		...(base.socketPath !== undefined || overrides.socketPath !== undefined
-			? { socketPath: overrides.socketPath ?? base.socketPath }
+			? { socketPath: overrides.socketPath !== undefined ? overrides.socketPath : base.socketPath }
 			: {}),
 	};
 }
@@ -177,8 +178,8 @@ function validate(config: Record<string, unknown>, source: string): void {
 		if (port !== undefined && (!Number.isInteger(port) || (port as number) < 0 || (port as number) > 65535)) {
 			throw new Error(`neko config: ${source}: "gateway.port" must be an integer between 0 and 65535.`);
 		}
-		if (socketPath !== undefined && typeof socketPath !== "string") {
-			throw new Error(`neko config: ${source}: "gateway.socketPath" must be a string.`);
+		if (socketPath !== undefined && socketPath !== null && typeof socketPath !== "string") {
+			throw new Error(`neko config: ${source}: "gateway.socketPath" must be a string or null.`);
 		}
 	}
 	const theme = config.theme;

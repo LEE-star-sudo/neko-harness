@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
-import { waitFor as wait } from "./helpers.ts";
+import { testAddress, testSocketPath, waitFor as wait } from "./helpers.ts";
 
 const waitFor = (predicate: () => boolean) => wait(predicate, "credential synchronization");
 
@@ -17,16 +17,12 @@ it("shares private credential state and Pi configuration across Unix and WebSock
 	const options = {
 		storage: "memory" as const,
 		credentialsPath: join(dir, "credentials.json"),
-		socketPath: join(dir, "gateway.sock"),
+		socketPath: testSocketPath(dir),
 		port: 0,
 		serverId: crypto.randomUUID(),
 	};
 	let gateway = await startGateway(options);
-	let unix = await connectNekoGateway({
-		transport: "unix",
-		socketPath: gateway.socketPath!,
-		serverId: gateway.serverId,
-	});
+	let unix = await connectNekoGateway(testAddress(gateway));
 	let web = await connectNekoGateway({ transport: "ws", url: gateway.wsUrl!, serverId: gateway.serverId });
 	try {
 		await waitFor(() => !!web.credentials.state.value);
@@ -70,7 +66,7 @@ it("shares private credential state and Pi configuration across Unix and WebSock
 		await web.close();
 		await gateway.close();
 		gateway = await startGateway(options);
-		unix = await connectNekoGateway({ transport: "unix", socketPath: gateway.socketPath!, serverId: gateway.serverId });
+		unix = await connectNekoGateway(testAddress(gateway));
 		web = await connectNekoGateway({ transport: "ws", url: gateway.wsUrl!, serverId: gateway.serverId });
 		await waitFor(() => web.credentials.state.value?.statuses.deepseek.source === "saved");
 		process.env.DEEPSEEK_API_KEY = "test-env";

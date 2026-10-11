@@ -14,7 +14,8 @@ export type GatewayInfo = {
 	gatewayWs: string;
 	workspaceRoot: string;
 	serverId: string;
-	socketPath: string;
+	/** Unix socket 路径；Windows（无 Unix 传输）不存在。 */
+	socketPath?: string;
 };
 
 export async function fetchGatewayInfo(): Promise<GatewayInfo> {

@@ -3,15 +3,11 @@ import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { connectNekoGateway } from "../src/index.ts";
-import { cleanup, makeGateway, waitFor } from "./helpers.ts";
+import { cleanup, makeGateway, testAddress, waitFor } from "./helpers.ts";
 
 it("shares workspace metadata over Unix/WS and touches only distinct activations and inputs", async () => {
 	const target = await makeGateway();
-	const unix = await connectNekoGateway({
-		transport: "unix",
-		socketPath: target.socketPath,
-		serverId: target.serverId,
-	});
+	const unix = await connectNekoGateway(testAddress(target));
 	const ws = await connectNekoGateway({ transport: "ws", url: target.wsUrl, serverId: target.serverId });
 	try {
 		const b = join(await realpath(target.dir), "project-b");

@@ -16,6 +16,7 @@ import {
 	type NekoModelRef,
 	type NekoRuntime,
 } from "@neko-harness/core";
+import { removeGatewayPortFile, writeGatewayPortFile } from "./port-file.ts";
 import { createNekoServerServices, toConversationId } from "./server-services.ts";
 import { openNekoSessionHandle } from "./session-host.ts";
 import { createWsListener, type WsListener } from "./ws-listener.ts";
@@ -75,13 +76,21 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 	const model = options.model ?? fileConfig.defaultModel ?? DEFAULT_MODEL;
 	const storagePath = options.storagePath ?? fileConfig.storagePath ?? DEFAULT_STORAGE_PATH;
 	const host = options.host ?? fileConfig.gateway?.host ?? DEFAULT_HOST;
-	const port = options.port !== undefined ? options.port : (fileConfig.gateway?.port ?? DEFAULT_PORT);
+	const port =
+		options.port !== undefined
+			? options.port
+			: (fileConfig.gateway?.port ?? (process.platform === "win32" ? 0 : DEFAULT_PORT));
 	const nekoDir = dirname(storagePath);
 	const serverId = options.serverId ?? (await loadOrCreateServerId(nekoDir));
 	const socketPath =
 		options.socketPath !== undefined
 			? options.socketPath
-			: (fileConfig.gateway?.socketPath ?? join(nekoDir, `${serverId}.sock`));
+			: fileConfig.gateway?.socketPath !== undefined
+				? fileConfig.gateway.socketPath
+				: // Windows 没有可用的 Unix socket 传输（pi-server/pi-client 均不支持 win32），默认仅 WS。
+					process.platform === "win32"
+					? null
+					: join(nekoDir, `${serverId}.sock`);
 
 	const runtime = await createNekoRuntime({
 		context,
@@ -103,6 +112,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			port,
 			socketPath,
 			serverId,
+			nekoDir,
 			model,
 			onError: options.onError,
 		});
@@ -118,12 +128,13 @@ type BindOptions = {
 	readonly port: number | null;
 	readonly socketPath: string | null;
 	readonly serverId: string;
+	readonly nekoDir: string;
 	readonly model: NekoModelRef;
 	readonly onError: ((error: Error) => void) | undefined;
 };
 
 async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<NekoGateway> {
-	const { context, host, port, socketPath, serverId, model } = options;
+	const { context, host, port, socketPath, serverId, nekoDir, model } = options;
 	const modelLabel = `${model.provider}/${model.modelId}`;
 
 	const serverServices = await createNekoServerServices({ runtime, context });
@@ -160,6 +171,12 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		throw toStartupError(error, { socketPath, port, host, serverId });
 	}
 
+	// Windows 地址发现（design D3）：ws-only 网关以随机端口启动，把实际地址写入端口文件供前端发现。
+	const portFile = process.platform === "win32" && wsListener !== undefined ? { nekoDir, serverId } : undefined;
+	if (portFile !== undefined && wsListener !== undefined) {
+		await writeGatewayPortFile(portFile.nekoDir, portFile.serverId, `ws://${host}:${wsListener.port}`);
+	}
+
 	let closed = false;
 	return {
 		serverId,
@@ -170,6 +187,7 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		async close() {
 			if (closed) return;
 			closed = true;
+			if (portFile !== undefined) await removeGatewayPortFile(portFile.nekoDir, portFile.serverId).catch(() => {});
 			await server.close();
 			await serverServices.dispose();
 			await runtime.close();
@@ -185,10 +203,14 @@ function toStartupError(
 	const message = error instanceof Error ? error.message : String(error);
 	// 默认 socket 命名为 <serverId>.sock：占用方能从文件名推出现有实例的 serverId。
 	const existingServerId = info.socketPath === null ? undefined : serverIdFromSocketPath(info.socketPath);
-	const connectHint =
-		existingServerId !== undefined
-			? `如需连接已有实例：Unix socket ${info.socketPath}（serverId: ${existingServerId}），或停掉占用方后重试。`
-			: `如需连接已有实例：Unix socket ${info.socketPath ?? "（未启用）"}，或停掉占用方后重试。`;
+	const existingAddress =
+		info.socketPath !== null
+			? `Unix socket ${info.socketPath}${existingServerId !== undefined ? `（serverId: ${existingServerId}）` : ""}`
+			: // Windows 无 Unix 传输：已有实例通过端口文件发布 ws 地址。
+				process.platform === "win32"
+				? `端口文件 <数据目录>/${info.serverId}.port 中的 ws 地址`
+				: "Unix socket（未启用）";
+	const connectHint = `如需连接已有实例：${existingAddress}，或停掉占用方后重试。`;
 	if (message.includes("already running")) {
 		return new Error(
 			`neko gateway 启动失败：${message}\n该地址已被一个活跃网关占用，不能启动第二个实例。\n${connectHint}`,

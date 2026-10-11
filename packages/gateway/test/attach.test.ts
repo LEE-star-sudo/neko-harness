@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
-import { cleanup, makeGateway, type TestGateway, waitFor } from "./helpers.ts";
+import { cleanup, makeGateway, type TestGateway, testAddress, waitFor } from "./helpers.ts";
 
 let target: TestGateway;
 
@@ -33,11 +33,7 @@ function sawUserText(values: readonly ChatView[], text: string): boolean {
 
 describe("multi-frontend attach", () => {
 	it("streams one submitted input to both attached frontends", async () => {
-		const unix = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const unix = await connectNekoGateway(testAddress(target));
 		const ws = await connectNekoGateway({ transport: "ws", url: target.wsUrl, serverId: target.serverId });
 		try {
 			const created = await unix.management.create({}, BACKGROUND_CONTEXT);
@@ -74,11 +70,7 @@ describe("multi-frontend attach", () => {
 	}, 30_000);
 
 	it("attach is idempotent per connection", async () => {
-		const client: NekoGatewayClient = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const client: NekoGatewayClient = await connectNekoGateway(testAddress(target));
 		try {
 			const created = await client.management.create({}, BACKGROUND_CONTEXT);
 			await client.attach(created.id);

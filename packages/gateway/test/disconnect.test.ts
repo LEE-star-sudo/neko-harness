@@ -7,7 +7,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
-import { cleanup, makeGateway, type TestGateway, waitFor } from "./helpers.ts";
+import { cleanup, IS_WINDOWS, makeGateway, type TestGateway, testAddress, waitFor } from "./helpers.ts";
 
 let target: TestGateway;
 
@@ -36,11 +36,7 @@ function sawFollowUp(values: readonly ChatView[], followUp: string, answer: stri
 
 describe("disconnect semantics", () => {
 	it("keeps the session and the other attachment alive when one frontend disconnects", async () => {
-		const stable = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const stable = await connectNekoGateway(testAddress(target));
 		const dying = await connectNekoGateway({ transport: "ws", url: target.wsUrl, serverId: target.serverId });
 		try {
 			const created = await stable.management.create({}, BACKGROUND_CONTEXT);
@@ -61,11 +57,7 @@ describe("disconnect semantics", () => {
 			await waitFor(() => sawFollowUp(seenByStable, "again", "pong"), "剩余前端可继续提交");
 
 			// 网关整体无恙：新客户端可连接并看到目录。
-			const newcomer = await connectNekoGateway({
-				transport: "unix",
-				socketPath: target.socketPath,
-				serverId: target.serverId,
-			});
+			const newcomer = await connectNekoGateway(testAddress(target));
 			try {
 				expect(newcomer.directory.state.value?.sessions.map((s) => s.id)).toContain(created.id);
 			} finally {
@@ -77,11 +69,7 @@ describe("disconnect semantics", () => {
 	}, 30_000);
 
 	it("reconnect starts from the latest snapshot without replaying history", async () => {
-		const first = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const first = await connectNekoGateway(testAddress(target));
 		let sessionId: string;
 		try {
 			const created = await first.management.create({}, BACKGROUND_CONTEXT);
@@ -97,11 +85,7 @@ describe("disconnect semantics", () => {
 		}
 
 		// 重连 = 重新 attach + 取最新快照：快照直接包含已有回答，不做历史重放。
-		const second = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const second = await connectNekoGateway(testAddress(target));
 		try {
 			const chat = await second.attach(sessionId);
 			const snapshot = chat.view.value;
@@ -114,36 +98,42 @@ describe("disconnect semantics", () => {
 });
 
 describe("stale socket takeover", () => {
-	it("adopts a stale socket file left by a dead process", async () => {
-		const socketPath = target.socketPath;
-		await target.gateway.close();
+	// 裸 Unix socket 语义为 pi-server POSIX 专用，Windows 无 Unix 传输。
+	it.skipIf(IS_WINDOWS)(
+		"adopts a stale socket file left by a dead process",
+		async () => {
+			const socketPath = target.socketPath;
+			if (socketPath === undefined) throw new Error("POSIX 测试需要 unix socket 路径");
+			await target.gateway.close();
 
-		// 模拟进程死亡遗留：真实 socket 文件存在但无人监听（bind 后 close、不删除文件）。
-		await new Promise<void>((resolve, reject) => {
-			const server = createServer();
-			server.once("error", reject);
-			server.listen(socketPath, () => {
-				server.close((error) => (error ? reject(error) : resolve()));
+			// 模拟进程死亡遗留：真实 socket 文件存在但无人监听（bind 后 close、不删除文件）。
+			await new Promise<void>((resolve, reject) => {
+				const server = createServer();
+				server.once("error", reject);
+				server.listen(socketPath, () => {
+					server.close((error) => (error ? reject(error) : resolve()));
+				});
 			});
-		});
 
-		const revived = await startGateway({
-			storage: "memory",
-			socketPath,
-			port: 0,
-			serverId: target.serverId,
-			model: { provider: "faux", modelId: "faux-1" },
-			providers: [target.faux.provider],
-		});
-		try {
-			const client = await connectNekoGateway({ transport: "unix", socketPath, serverId: target.serverId });
+			const revived = await startGateway({
+				storage: "memory",
+				socketPath,
+				port: 0,
+				serverId: target.serverId,
+				model: { provider: "faux", modelId: "faux-1" },
+				providers: [target.faux.provider],
+			});
 			try {
-				expect(client.directory.state.value?.sessions.map((s) => s.id)).toEqual(["1"]);
+				const client = await connectNekoGateway(testAddress({ socketPath, serverId: target.serverId }));
+				try {
+					expect(client.directory.state.value?.sessions.map((s) => s.id)).toEqual(["1"]);
+				} finally {
+					await client.close();
+				}
 			} finally {
-				await client.close();
+				await revived.close();
 			}
-		} finally {
-			await revived.close();
-		}
-	}, 30_000);
+		},
+		30_000,
+	);
 });

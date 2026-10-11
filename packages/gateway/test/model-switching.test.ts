@@ -17,13 +17,13 @@ import {
 import { ServerError } from "@earendil-works/pi-client";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../src/index.ts";
-import { waitFor } from "./helpers.ts";
+import { testAddress, testSocketPath, waitFor } from "./helpers.ts";
 
 let dir: string;
 let gateway: NekoGateway;
 let faux: FauxProviderHandle;
 let requestedModels: string[];
-let socketPath: string;
+let socketPath: string | undefined;
 let serverId: string;
 
 /** faux 双模型网关：每个请求记录实际生效的 modelId。 */
@@ -37,7 +37,7 @@ beforeEach(async () => {
 	faux = fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2", reasoning: true }] });
 	faux.setResponses([recordRequest, recordRequest, recordRequest, recordRequest]);
 	serverId = randomUUID();
-	socketPath = join(dir, "gateway.sock");
+	socketPath = testSocketPath(dir) ?? undefined;
 	gateway = await startGateway({
 		storage: "memory",
 		socketPath,
@@ -62,7 +62,7 @@ function sawAgent(values: readonly ChatView[], modelId: string, thinkingLevel?: 
 
 describe("per-conversation model switching over the gateway", () => {
 	it("serves the global model list from the server-level models service", async () => {
-		const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
+		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
 			const models = await client.listModels();
 			// Models registry 是全集（内置 deepseek + 注入的 faux），faux 双模型必须在列。
@@ -79,7 +79,7 @@ describe("per-conversation model switching over the gateway", () => {
 	}, 30_000);
 
 	it("configure switches the attached session's model for its next request and updates the projection", async () => {
-		const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
+		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
 			const chat = await client.attach("1");
 			const seen: ChatView[] = [];
@@ -111,7 +111,7 @@ describe("per-conversation model switching over the gateway", () => {
 	}, 30_000);
 
 	it("leaves other sessions of the same gateway on their model (isolation)", async () => {
-		const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
+		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
 			const first = await client.attach("1");
 			await first.configure({ model: { provider: "faux", modelId: "faux-2" } }, BACKGROUND_CONTEXT);
@@ -135,7 +135,7 @@ describe("per-conversation model switching over the gateway", () => {
 	}, 30_000);
 
 	it("rejects configuring an unknown session with a clear remote error", async () => {
-		const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
+		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
 			// 未知会话：attach 即被路由层拒绝，客户端收到带 code 的 ServerError。
 			const failure = await client.attach("999").then(
@@ -150,7 +150,7 @@ describe("per-conversation model switching over the gateway", () => {
 	}, 30_000);
 
 	it("configure on a released session fails with a clear error", async () => {
-		const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
+		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
 			const created = await client.management.create({}, BACKGROUND_CONTEXT);
 			const chat = await client.attach(created.id);

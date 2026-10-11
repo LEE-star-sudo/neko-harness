@@ -12,7 +12,7 @@ const USAGE = `用法: main.ts [选项]
   --port <n>           静态 HTTP 端口（默认 8322）
   --host <ip>          静态 HTTP 地址（默认 127.0.0.1）
   --gateway-port <n>   网关 WebSocket 端口（默认 8321）
-  --socket-path <path> 网关 Unix socket 路径（默认 <数据目录>/<serverId>.sock）
+  --socket-path <path> 网关 Unix socket 路径（默认 <数据目录>/<serverId>.sock；仅 POSIX）
   --server-id <id>     网关逻辑身份（默认读取/生成 <数据目录>/gateway-server-id）
   --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
   --cwd <dir>          会话工具的工作目录（默认当前目录）

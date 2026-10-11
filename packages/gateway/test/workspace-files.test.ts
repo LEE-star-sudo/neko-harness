@@ -7,6 +7,7 @@ import { downloadImage } from "@neko-harness/core/image-transfer";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
+import { IS_WINDOWS, testAddress, testSocketPath } from "./helpers.ts";
 
 it("queries a registered workspace and imports images with attachment ownership", async () => {
 	const temp = await mkdtemp(join(tmpdir(), "neko-file-gateway-"));
@@ -16,14 +17,10 @@ it("queries a registered workspace and imports images with attachment ownership"
 		storage: "memory",
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "vision" },
-		socketPath: join(root, "gateway.sock"),
+		socketPath: testSocketPath(root),
 		port: 0,
 	});
-	const a = await connectNekoGateway({
-		transport: "unix",
-		socketPath: gateway.socketPath!,
-		serverId: gateway.serverId,
-	});
+	const a = await connectNekoGateway(testAddress(gateway));
 	const b = await connectNekoGateway({ transport: "ws", url: gateway.wsUrl!, serverId: gateway.serverId });
 	try {
 		await writeFile(join(root, "my file.ts"), "body not in candidates");
@@ -63,8 +60,11 @@ it("queries a registered workspace and imports images with attachment ownership"
 		await expect(other.draftImage({ id: image.id, offset: 0 }, context)).rejects.toThrow();
 		await chat.releaseImage(image.id, context);
 		await expect(chat.draftImage({ id: image.id, offset: 0 }, context)).rejects.toThrow();
-		await symlink("/tmp", join(root, "outside"));
-		await expect(chat.importImage("outside/no.png", context)).rejects.toThrow();
+		// 经 symlink 逃逸工作区的拒绝为 POSIX 语义：Windows 创建 symlink 需要额外特权。
+		if (!IS_WINDOWS) {
+			await symlink("/tmp", join(root, "outside"));
+			await expect(chat.importImage("outside/no.png", context)).rejects.toThrow();
+		}
 		await expect(chat.importImage("../no.png", context)).rejects.toThrow();
 	} finally {
 		await a.close();

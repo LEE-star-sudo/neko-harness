@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	DEFAULT_NEKO_CONFIG,
 	findNekoConfigFile,
@@ -46,11 +47,12 @@ describe("neko.config.json (2.4)", () => {
 					process.execPath,
 					"--eval",
 					`
-				import { findNekoConfigFile, loadNekoConfig } from ${JSON.stringify(new URL("../src/config.ts", import.meta.url).pathname)};
+				import { findNekoConfigFile, loadNekoConfig } from ${JSON.stringify(fileURLToPath(new URL("../src/config.ts", import.meta.url)))};
 				console.log(JSON.stringify({ file: findNekoConfigFile(${JSON.stringify(join(root, "nowhere"))}), config: loadNekoConfig(${JSON.stringify(join(root, "nowhere"))}) }));
 			`,
 				],
-				{ env: { ...process.env, HOME: root } },
+				// Windows 上 os.homedir 读 USERPROFILE 而非 HOME，两个都指到临时目录。
+				{ env: { ...process.env, HOME: root, USERPROFILE: root } },
 			);
 			expect(child.exitCode).toBe(0);
 			return JSON.parse(child.stdout.toString());
@@ -99,6 +101,15 @@ describe("neko.config.json (2.4)", () => {
 		expect(() => parseNekoConfig('{"theme": "rainbow"}', "test.json", {})).toThrow(/theme/);
 		expect(() => parseNekoConfig('{"defaultModel": {"provider": "x"}}', "test.json", {})).toThrow(/defaultModel/);
 		expect(() => parseNekoConfig('{"gateway": {"port": "no"}}', "test.json", {})).toThrow(/gateway\.port/);
+		expect(() => parseNekoConfig('{"gateway": {"socketPath": 1}}', "test.json", {})).toThrow(/gateway\.socketPath/);
+	});
+
+	it("accepts gateway.socketPath null as disabling the Unix transport", () => {
+		const file = parseNekoConfig('{"gateway": {"socketPath": null}}', "test.json", {});
+		expect(file.gateway?.socketPath).toBeNull();
+		// null 是显式取值：合并时不被 base 覆盖。
+		const merged = mergeNekoConfig({ gateway: { socketPath: "/base.sock" } }, file);
+		expect(merged.gateway?.socketPath).toBeNull();
 	});
 
 	it("merges with CLI > config file > default priority", () => {

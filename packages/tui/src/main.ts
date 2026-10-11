@@ -8,7 +8,7 @@ Options:
   --cwd <dir>          Workspace (default: launch directory; not an access sandbox)
   --model <ref>        provider/modelId for a spawned gateway
   --storage <path>     SQLite storage (default: ~/.neko/neko.sqlite)
-  --socket-path <path> Gateway Unix socket
+  --socket-path <path> Gateway Unix socket（POSIX；Windows 经端口文件发现 ws 地址）
   --theme <mode>       light / dark / auto (overrides NEKO_THEME)
   -h, --help           Show help
 

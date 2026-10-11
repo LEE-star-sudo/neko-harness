@@ -3,11 +3,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { isServerId } from "@earendil-works/pi-protocol";
 import { DEFAULT_STORAGE_PATH, loadNekoConfig, type NekoModelRef } from "@neko-harness/core";
-import { connectNekoGateway, gatewayCommand, type NekoGatewayClient, stopGatewayProcess } from "@neko-harness/gateway";
+import {
+	connectNekoGateway,
+	gatewayCommand,
+	type NekoGatewayClient,
+	readGatewayPortFile,
+	stopGatewayProcess,
+} from "@neko-harness/gateway";
 
 /**
- * TUI 的 gateway 接入层（design D3）：连接 Unix socket 上的网关；
- * socket 不存在或已死时自动 spawn gateway 子进程并等待其就绪。
+ * TUI 的 gateway 接入层（design D3）：POSIX 连接 Unix socket 上的网关；Windows 无 Unix
+ * 传输，经端口文件（<数据目录>/<serverId>.port）发现 ws 地址。
+ * 地址不存在或已死时自动 spawn gateway 子进程并等待其就绪。
  * TUI 从此不再打开 SQLite——存储与单实例语义都在 gateway 进程内。
  */
 
@@ -27,7 +34,8 @@ export type NekoTuiGatewayOptions = {
 
 export type NekoTuiGateway = {
 	readonly client: NekoGatewayClient;
-	readonly socketPath: string;
+	/** Unix socket 路径；Windows（无 Unix 传输）为 undefined。 */
+	readonly socketPath: string | undefined;
 	readonly serverId: string;
 	/** TUI 是否自行拉起了 gateway 子进程（是则退出时负责关停）。 */
 	readonly spawned: boolean;
@@ -45,6 +53,23 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 	const storagePath = options.storagePath ?? config.storagePath ?? DEFAULT_STORAGE_PATH;
 	const nekoDir = dirname(storagePath);
 	const fileServerId = readServerId(join(nekoDir, SERVER_ID_FILENAME));
+
+	if (process.platform === "win32") {
+		// Windows 无 Unix socket：读端口文件发现 ws 地址；文件过期（连接失败）按无活跃网关处理。
+		if (fileServerId !== undefined) {
+			const wsUrl = await readGatewayPortFile(nekoDir, fileServerId);
+			if (wsUrl !== undefined) {
+				try {
+					const client = await connectNekoGateway({ transport: "ws", url: wsUrl, serverId: fileServerId });
+					return { client, socketPath: undefined, serverId: fileServerId, spawned: false, close: () => client.close() };
+				} catch {
+					// stale 端口文件：落入 spawn 流程。
+				}
+			}
+		}
+		return spawnAndConnect({ ...options, storagePath, socketPath: undefined, nekoDir, fileServerId });
+	}
+
 	const socketPath =
 		options.socketPath ??
 		config.gateway?.socketPath ??
@@ -102,6 +127,53 @@ async function connectSpawned(
 	outputTail: OutputTail,
 	spawnError: () => Error | undefined,
 ): Promise<NekoTuiGateway> {
+	const timeoutMs = plan.spawnTimeoutMs ?? 20_000;
+
+	if (process.platform === "win32") {
+		// Windows：等 serverId 文件 → 读端口文件 → ws 连接。
+		const serverId =
+			plan.fileServerId ??
+			(await waitForValue(
+				() => readServerId(join(plan.nekoDir, SERVER_ID_FILENAME)),
+				"gateway serverId file",
+				timeoutMs,
+				child,
+				outputTail,
+				spawnError,
+			));
+		const wsUrl = await waitForValue(
+			() => readGatewayPortFile(plan.nekoDir, serverId),
+			"gateway ready (port file)",
+			timeoutMs,
+			child,
+			outputTail,
+			spawnError,
+		);
+		let lastError: unknown;
+		for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
+			if (child.exitCode !== null || spawnError() !== undefined) break;
+			try {
+				const client = await connectNekoGateway({ transport: "ws", url: wsUrl, serverId });
+				return {
+					client,
+					socketPath: undefined,
+					serverId,
+					spawned: true,
+					async close() {
+						await client.close().catch(() => {});
+						await stopGatewayProcess(child);
+					},
+				};
+			} catch (error) {
+				lastError = error;
+				await sleep(CONNECT_RETRY_MS);
+			}
+		}
+		throw new Error(
+			`Gateway connection failed: ${lastError instanceof Error ? lastError.message : String(lastError)}\n${outputTail()}`,
+		);
+	}
+
 	let socketPath = plan.socketPath;
 
 	// 未显式指定 socket 时，serverId 由 gateway 生成：等文件出现后再算出 socket 路径。
@@ -109,7 +181,7 @@ async function connectSpawned(
 		const generated = await waitForValue(
 			() => readServerId(join(plan.nekoDir, SERVER_ID_FILENAME)),
 			"gateway serverId file",
-			plan.spawnTimeoutMs ?? 20_000,
+			timeoutMs,
 			child,
 			outputTail,
 			spawnError,
@@ -120,7 +192,7 @@ async function connectSpawned(
 	await waitForValue(
 		() => (existsSync(socketPath) ? true : undefined),
 		`gateway ready (socket: ${socketPath})`,
-		plan.spawnTimeoutMs ?? 20_000,
+		timeoutMs,
 		child,
 		outputTail,
 		spawnError,
@@ -159,9 +231,20 @@ async function connectSpawned(
 
 /** CLI options shared by source and compiled gateway entrypoints. */
 function gatewayArgs(plan: SpawnPlan): string[] {
+	if (process.platform === "win32") {
+		// Windows：仅 WS（--no-socket），不传 --port 走 win32 默认的随机端口，地址经端口文件发现。
+		return [
+			"--no-socket",
+			"--storage",
+			plan.storagePath,
+			...(plan.credentialsPath ? ["--credentials", plan.credentialsPath] : []),
+			...(plan.configDir ? ["--cwd", plan.configDir, "--config", plan.configDir] : []),
+			...(plan.model !== undefined ? ["--model", `${plan.model.provider}/${plan.model.modelId}`] : []),
+		];
+	}
 	return [
 		"--port",
-		"0", // TUI 不需要 WS；随机端口避免与已有实例的无谓冲突（socket 冲突由单实例语义处理）。
+		"0", // CLI 语义：0 = 禁用 WS（TUI 走 Unix socket，不需要 WS 端口）。
 		"--storage",
 		plan.storagePath,
 		...(plan.credentialsPath ? ["--credentials", plan.credentialsPath] : []),
@@ -204,7 +287,7 @@ function captureOutput(child: ChildProcess): OutputTail {
 
 /** 轮询 value 直到非 undefined；子进程 spawn 失败/提前退出/超时则以输出尾部报错。 */
 async function waitForValue<T>(
-	poll: () => T | undefined,
+	poll: () => T | undefined | Promise<T | undefined>,
 	what: string,
 	timeoutMs: number,
 	child: ChildProcess,
@@ -216,7 +299,7 @@ async function waitForValue<T>(
 		const error = spawnError();
 		if (error !== undefined)
 			throw new Error(`Gateway process failed to start: ${error.message}${formatTail(outputTail())}`);
-		const value = poll();
+		const value = await poll();
 		if (value !== undefined) return value;
 		if (child.exitCode !== null) {
 			throw new Error(`Gateway process exited early (exit ${child.exitCode})${formatTail(outputTail())}`);

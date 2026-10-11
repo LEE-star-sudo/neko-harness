@@ -11,6 +11,7 @@ import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
 import { fauxProvider } from "../../../test/faux.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
+import { testAddress, testSocketPath } from "./helpers.ts";
 
 let dir: string;
 let home: string;
@@ -42,7 +43,7 @@ describe("skills over the gateway", () => {
 		faux.setResponses([fauxAssistantMessage([fauxText("pong")])]);
 		const gateway = await startGateway({
 			storage: "memory",
-			socketPath: join(dir, "gateway.sock"),
+			socketPath: testSocketPath(dir),
 			port: 0,
 			serverId: randomUUID(),
 			model: { provider: "faux", modelId: "faux-1" },
@@ -51,11 +52,7 @@ describe("skills over the gateway", () => {
 			promptHome: home,
 		});
 		try {
-			const client = await connectNekoGateway({
-				transport: "unix",
-				socketPath: gateway.socketPath!,
-				serverId: gateway.serverId,
-			});
+			const client = await connectNekoGateway(testAddress(gateway));
 			try {
 				const created = await client.management.create({}, BACKGROUND_CONTEXT);
 				const chat = await client.attach(created.id);

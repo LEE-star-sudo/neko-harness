@@ -11,7 +11,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ChatItem, ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
-import { cleanup, makeGateway, type TestGateway, waitFor } from "./helpers.ts";
+import { cleanup, makeGateway, type TestGateway, testAddress, waitFor } from "./helpers.ts";
 
 let target: TestGateway;
 
@@ -48,11 +48,7 @@ describe("submit whenBusy", () => {
 			fauxAssistantMessage([fauxText("after tools")]),
 			fauxAssistantMessage([fauxText("follow-up")]),
 		]);
-		const client = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const client = await connectNekoGateway(testAddress(target));
 		try {
 			const chat = await client.attach("1");
 			const seen = collect(chat.view);
@@ -104,11 +100,7 @@ describe("submit whenBusy", () => {
 describe("fork", () => {
 	it("forks a session with its history and both evolve independently", async () => {
 		target.faux.setResponses([fauxAssistantMessage([fauxText("pong")]), fauxAssistantMessage([fauxText("pong-2")])]);
-		const client = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const client = await connectNekoGateway(testAddress(target));
 		try {
 			const chat = await client.attach("1");
 			const seen = collect(chat.view);
@@ -149,11 +141,7 @@ describe("fork", () => {
 	}, 60_000);
 
 	it("fork of an empty session falls back to create", async () => {
-		const client: NekoGatewayClient = await connectNekoGateway({
-			transport: "unix",
-			socketPath: target.socketPath,
-			serverId: target.serverId,
-		});
+		const client: NekoGatewayClient = await connectNekoGateway(testAddress(target));
 		try {
 			const empty = await client.management.create({}, BACKGROUND_CONTEXT);
 			const forked = await client.management.fork(empty.id, BACKGROUND_CONTEXT);

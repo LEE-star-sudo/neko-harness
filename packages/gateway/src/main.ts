@@ -2,115 +2,15 @@
 // neko 网关独立入口（供后续 `neko serve` 接入）：
 //   bun --conditions=neko-source packages/gateway/src/main.ts [选项]
 // 选项优先级：CLI flag > neko.config.json（向上查找，兜底 ~/.neko/） > 内置默认。
-import type { NekoModelRef } from "@neko-harness/core";
+import { GATEWAY_USAGE, parseGatewayArgs } from "./cli-args.ts";
 import { startGateway } from "./gateway.ts";
 
-const USAGE = `用法: main.ts [选项]
-
-选项:
-  --host <ip>          WebSocket 监听地址（默认 127.0.0.1，仅本机；0/null 禁用 WS）
-  --port <n>           WebSocket 监听端口（默认 8321；0 = 随机分配）
-  --socket-path <path> Unix socket 路径（默认 <数据目录>/<serverId>.sock）
-  --server-id <id>     逻辑服务器身份（默认读取/生成 <数据目录>/gateway-server-id）
-  --cwd <dir>          会话工具的工作目录（默认当前目录）
-  --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
-  --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
-  --credentials <path> 用户凭据文件（默认 ~/.neko/credentials.json）
-  --config <dir>       neko.config.json 查找起始目录（默认当前目录）
-  -h, --help           显示此帮助
-
-可通过前端设置或 DEEPSEEK_API_KEY 配置凭据。`;
-
-type CliOptions = {
-	host?: string;
-	port?: number | null;
-	socketPath?: string;
-	serverId?: string;
-	cwd?: string;
-	model?: NekoModelRef;
-	storagePath?: string;
-	credentialsPath?: string;
-	configDir?: string;
-};
-
-function parseArgs(argv: readonly string[]): CliOptions {
-	let port: number | null | undefined;
-	const options: CliOptions = {};
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		const next = argv[i + 1];
-		switch (arg) {
-			case "--host":
-				if (next === undefined) throw new Error("--host 需要参数");
-				options.host = next;
-				i++;
-				break;
-			case "--port": {
-				if (next === undefined) throw new Error("--port 需要参数");
-				if (next === "0" || next === "null") {
-					port = null;
-				} else {
-					const parsed = Number(next);
-					if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
-						throw new Error(`--port 需要 0-65535 的整数: ${next}`);
-					}
-					port = parsed;
-				}
-				i++;
-				break;
-			}
-			case "--socket-path":
-				if (next === undefined) throw new Error("--socket-path 需要参数");
-				options.socketPath = next;
-				i++;
-				break;
-			case "--server-id":
-				if (next === undefined) throw new Error("--server-id 需要参数");
-				options.serverId = next;
-				i++;
-				break;
-			case "--cwd":
-				if (next === undefined) throw new Error("--cwd 需要参数");
-				options.cwd = next;
-				i++;
-				break;
-			case "--model": {
-				if (next === undefined) throw new Error("--model 需要参数");
-				const slash = next.indexOf("/");
-				if (slash <= 0 || slash === next.length - 1) throw new Error(`--model 格式为 provider/modelId: ${next}`);
-				options.model = { provider: next.slice(0, slash), modelId: next.slice(slash + 1) };
-				i++;
-				break;
-			}
-			case "--credentials":
-				if (next === undefined) throw new Error("--credentials 需要参数");
-				options.credentialsPath = next;
-				i++;
-				break;
-			case "--storage":
-				if (next === undefined) throw new Error("--storage 需要参数");
-				options.storagePath = next;
-				i++;
-				break;
-			case "--config":
-				if (next === undefined) throw new Error("--config 需要参数");
-				options.configDir = next;
-				i++;
-				break;
-			case "-h":
-			case "--help":
-				console.log(USAGE);
-				process.exit(0);
-				break;
-			default:
-				throw new Error(`未知选项: ${arg}`);
-		}
-	}
-	if (port !== undefined) options.port = port;
-	return options;
+const argv = process.argv.slice(2);
+if (argv.includes("-h") || argv.includes("--help")) {
+	console.log(GATEWAY_USAGE);
+	process.exit(0);
 }
-
-const options = parseArgs(process.argv.slice(2));
+const options = parseGatewayArgs(argv);
 const gateway = await startGateway({
 	...options,
 	onError: (error) => console.error("gateway error:", error.message),

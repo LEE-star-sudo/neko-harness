@@ -3,9 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startGateway } from "../src/index.ts";
-import { cleanup, makeGateway, type TestGateway } from "./helpers.ts";
+import { cleanup, IS_WINDOWS, makeGateway, type TestGateway } from "./helpers.ts";
 
 let target: TestGateway;
 
@@ -17,7 +18,8 @@ afterEach(async () => {
 	await cleanup(target);
 });
 
-describe("single-instance constraint", () => {
+// 整个文件测 Unix socket 单实例语义（pi-server POSIX 专用），Windows 无 Unix 传输，整包跳过。
+describe.skipIf(IS_WINDOWS)("single-instance constraint", () => {
 	it("refuses to start when the unix socket is owned by a live gateway", async () => {
 		let message = "";
 		try {
@@ -34,14 +36,13 @@ describe("single-instance constraint", () => {
 		}
 		expect(message).toMatch(/already running/);
 		// 提示如何连接已有实例。
-		expect(message).toContain(target.socketPath);
+		expect(message).toContain(target.socketPath!);
 	}, 30_000);
 
 	it("derives the live serverId in the hint when the socket is named <serverId>.sock", async () => {
 		// socket 命名为 <serverId>.sock 时（默认命名规则），提示中给出可推导的 serverId。
-		// macOS sun_path 上限约 104 字符，/var/folders 下的长临时目录会触发 connect EINVAL，
-		// 故本用例用短路径 /tmp（真实路径 /private/tmp 仍远低于上限）。
-		const shortDir = await mkdtemp("/tmp/neko-si-");
+		// 临时目录统一走 os.tmpdir()（Windows 无 /tmp；POSIX 下路径长度低于 macOS sun_path 上限）。
+		const shortDir = await mkdtemp(join(tmpdir(), "neko-si-"));
 		const liveServerId = randomUUID();
 		const livePath = join(shortDir, `${liveServerId}.sock`);
 		const live = await startGateway({

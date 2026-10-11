@@ -6,7 +6,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { ServerError } from "@earendil-works/pi-client";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
-import { cleanup, makeGateway, type TestGateway, waitFor } from "./helpers.ts";
+import { cleanup, makeGateway, type TestGateway, testAddress, waitFor } from "./helpers.ts";
 
 let target: TestGateway;
 
@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 async function connectUnix(): Promise<NekoGatewayClient> {
-	return connectNekoGateway({ transport: "unix", socketPath: target.socketPath, serverId: target.serverId });
+	return connectNekoGateway(testAddress(target));
 }
 
 async function connectWs(): Promise<NekoGatewayClient> {
