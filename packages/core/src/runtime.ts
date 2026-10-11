@@ -351,7 +351,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			conversationCreated: async (tx, record) => {
 				(await tx.doc(SessionMetadataDoc, record.id)).createdAt = Date.now();
 			},
-			env: ({ cwd }) => new NodeExecutionEnv({ cwd: executionWorkspace(cwd) }),
+			env: ({ cwd }) =>
+				new NodeExecutionEnv({
+					cwd: executionWorkspace(cwd),
+					// Windows 原生程序（如 py）的管道输出按系统 ANSI 代码页（GBK）编码，而上游解码
+					// 写死 UTF-8 会乱码；先让 Python 走 UTF-8 模式规避，其余程序待上游支持代码页解码。
+					...(process.platform === "win32" ? { shellEnv: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } } : {}),
+				}),
 		},
 		context,
 	);
