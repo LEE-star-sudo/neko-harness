@@ -22,7 +22,13 @@ export function Icon({
 		| "bolt"
 		| "check"
 		| "clock"
-		| "spinner";
+		| "spinner"
+		| "sparkles"
+		| "store"
+		| "key"
+		| "download"
+		| "trash"
+		| "eye";
 	size?: number;
 	className?: string;
 }) {
@@ -43,6 +49,13 @@ export function Icon({
 		check: "M5 12.5l4.5 4.5L19 7.5",
 		clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2",
 		spinner: "M21 12a9 9 0 1 1-9-9",
+		store: "M4 9.5 5.6 4.5h12.8L20 9.5M4 9.5V20h16V9.5M4 9.5h16M9.5 20v-5.5h5V20",
+		key: "M12.7 11.3 21 3m-4.2 1.8 3 3M8 19a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+		download: "M12 4v10m0 0-4-4m4 4 4-4M5 20h14",
+		trash: "M4.5 7h15M9.5 7V4.5h5V7m-7.5 0 .8 13h8.4l.8-13",
+		eye: "M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5 2.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z",
+		sparkles:
+			"M12 4l1.8 4.7L18.5 10.5l-4.7 1.8L12 17l-1.8-4.7L5.5 10.5l4.7-1.8zM18.5 3l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8zM5 16l.7 1.8 1.8.7-1.8.7L5 21l-.7-1.8-1.8-.7 1.8-.7z",
 	};
 	return (
 		<svg

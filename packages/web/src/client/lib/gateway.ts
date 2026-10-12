@@ -12,10 +12,14 @@ import {
 	NekoCredentials,
 	type NekoDirectoryPage,
 	type NekoDirectoryState,
+	type NekoMarketInstallResult,
+	type NekoMarketPreview,
+	type NekoMarketSkill,
 	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
+	NekoSkillMarket,
 	NekoWorkspaceFiles,
 	type NekoWorkspaceState,
 	NekoWorkspaces,
@@ -59,6 +63,7 @@ export class GatewayConnection {
 	#workspaceFiles: NekoWorkspaceFiles | undefined;
 	#models: NekoModels | undefined;
 	#credentials: NekoCredentials | undefined;
+	#skillMarket: NekoSkillMarket | undefined;
 	#chat: NekoChat | undefined;
 	#sessions: readonly NekoSessionSummary[] = [];
 	#workspace: string;
@@ -307,6 +312,30 @@ export class GatewayConnection {
 	async listModels(): Promise<readonly NekoModelInfo[]> {
 		return this.#models?.list(CONTEXT) ?? [];
 	}
+	/** 技能市场：读操作直发；工作区缺省用当前工作区（项目级状态判定的依据）。 */
+	marketList(query?: string): Promise<readonly NekoMarketSkill[]> {
+		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
+		return this.#skillMarket.list({ ...(query ? { query } : {}), workspaceRoot: this.#workspace }, CONTEXT);
+	}
+	marketDetail(name: string): Promise<NekoMarketSkill> {
+		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
+		return this.#skillMarket.detail({ name, workspaceRoot: this.#workspace }, CONTEXT);
+	}
+	marketPreview(name: string): Promise<NekoMarketPreview> {
+		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
+		return this.#skillMarket.preview({ name }, CONTEXT);
+	}
+	marketInstall(name: string, scope: "user" | "project", overwrite?: boolean): Promise<NekoMarketInstallResult> {
+		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
+		return this.#skillMarket.install(
+			{ name, scope, workspaceRoot: this.#workspace, ...(overwrite ? { overwrite } : {}) },
+			CONTEXT,
+		);
+	}
+	marketUninstall(name: string, scope: "user" | "project"): Promise<void> {
+		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
+		return this.#skillMarket.uninstall({ name, scope, workspaceRoot: this.#workspace }, CONTEXT);
+	}
 	async #connect(): Promise<void> {
 		const epoch = ++this.#epoch;
 		const client = await Client.connect({
@@ -330,6 +359,7 @@ export class GatewayConnection {
 				NekoWorkspaces,
 				NekoCredentials,
 				NekoWorkspaceFiles,
+				NekoSkillMarket,
 			],
 			transport: createClientServiceTransport(client, () => ({ serverId: this.#options.serverId })),
 		});
@@ -341,6 +371,7 @@ export class GatewayConnection {
 		this.#workspaceFiles = binding.use(NekoWorkspaceFiles);
 		this.#models = binding.use(NekoModels);
 		this.#credentials = binding.use(NekoCredentials);
+		this.#skillMarket = binding.use(NekoSkillMarket);
 		this.#unsub.push(
 			this.#credentials.state.subscribe((value) => {
 				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value);

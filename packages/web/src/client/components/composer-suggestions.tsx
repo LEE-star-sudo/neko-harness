@@ -1,7 +1,7 @@
 import { autoUpdate, FloatingPortal, flip, offset, shift, size, useFloating } from "@floating-ui/react";
 import { type RefObject, useEffect } from "react";
 
-export type Suggestion = { key: string; label: string; description: string };
+export type Suggestion = { key: string; label: string; description: string; badge?: string };
 
 export function ComposerSuggestions({
 	anchor,
@@ -74,7 +74,14 @@ export function ComposerSuggestions({
 							onClick={() => onAccept(index)}
 							className={`block w-full rounded-lg px-3 py-2 text-left ${index === selected ? "bg-sakura-100" : ""}`}
 						>
-							<span className="block truncate text-sm text-ink-900">{item.label}</span>
+							<span className="flex min-w-0 items-center gap-1.5">
+								<span className="truncate text-sm text-ink-900">{item.label}</span>
+								{item.badge && (
+									<span className="shrink-0 rounded-md bg-ink-100 px-1.5 py-0.5 text-xs text-ink-600">
+										{item.badge}
+									</span>
+								)}
+							</span>
 							<span className="block truncate text-xs text-ink-500">{item.description}</span>
 						</button>
 					))}

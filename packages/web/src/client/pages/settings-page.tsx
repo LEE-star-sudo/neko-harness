@@ -1,7 +1,7 @@
 import type { CredentialStatus } from "@neko-harness/core";
 import { CREDENTIAL_PROVIDERS, type CredentialProviderSpec } from "@neko-harness/core/credential-providers";
-import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
+import { SettingsShell } from "../components/settings-shell";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
 
@@ -114,22 +114,22 @@ export function SettingsPage() {
 	const { credentials, phase } = useNekoState();
 	const ready = phase === "ready" && credentials !== null;
 	return (
-		<div className="flex min-h-dvh flex-col bg-base">
-			<header className="flex items-center justify-between border-b border-sakura-200/70 bg-surface px-5 py-3">
-				<Link to="/" className="focus-neko rounded-lg text-sakura-700">
-					← 返回聊天
-				</Link>
-				<span className="text-xs text-ink-500">{phase === "ready" ? "已连接" : "连接中…"}</span>
-			</header>
-			<main className="mx-auto w-full max-w-lg px-5 py-8 sm:py-12">
-				<h1 className="mb-1 text-xl font-bold text-ink-900">设置</h1>
-				<p className="mb-5 text-sm text-ink-500">管理 API Key，保存值优先于环境变量，所有工作区共用。</p>
-				<div className="flex flex-col gap-4">
+		<SettingsShell active="credentials">
+			{/* 版式节奏对齐市场页：同款容器与标题行（标题居左、状态居右），卡片列限宽保持表单可读性。 */}
+			<div className="mx-auto w-full max-w-5xl px-5 pt-5 pb-2">
+				<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+					<h1 className="text-xl font-bold text-ink-900">密钥</h1>
+					<span className="ml-auto text-xs text-ink-500">{phase === "ready" ? "已连接" : "连接中…"}</span>
+				</div>
+				<p className="mt-1 text-sm text-ink-500">管理 API Key，保存值优先于环境变量，所有工作区共用。</p>
+			</div>
+			<main className="mx-auto w-full max-w-5xl px-5 pb-6">
+				<div className="flex max-w-2xl flex-col gap-4">
 					{CREDENTIAL_PROVIDERS.map((spec) => (
 						<ProviderCredentialCard key={spec.id} spec={spec} status={credentials?.statuses[spec.id]} ready={ready} />
 					))}
 				</div>
 			</main>
-		</div>
+		</SettingsShell>
 	);
 }

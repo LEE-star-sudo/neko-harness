@@ -1,0 +1,47 @@
+import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { Icon } from "./primitives";
+
+export type SettingsSection = "credentials" | "market";
+
+const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "store"; to: string }[] = [
+	{ key: "credentials", label: "密钥", icon: "key", to: "/settings" },
+	{ key: "market", label: "技能市场", icon: "store", to: "/skills" },
+];
+
+/**
+ * 设置区统一外壳：左侧栏菜单（密钥 / 技能市场，未来可加项）+ 右侧内容。
+ * 移动端侧栏转为顶部横排，菜单项保持可点。
+ */
+export function SettingsShell({ active, children }: { active: SettingsSection; children: ReactNode }) {
+	return (
+		<div className="flex min-h-dvh flex-col bg-base sm:flex-row">
+			<nav
+				aria-label="设置菜单"
+				className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-sakura-100 px-4 py-2.5 sm:w-48 sm:flex-col sm:items-stretch sm:gap-1 sm:border-r sm:border-b-0 sm:px-3 sm:py-5"
+			>
+				<Link
+					to="/"
+					className="focus-neko mr-2 inline-flex shrink-0 items-center rounded-lg px-2 py-1.5 text-sm text-sakura-700 sm:mr-0 sm:mb-3"
+				>
+					← 返回聊天
+				</Link>
+				<span className="hidden px-2 pb-1 text-xs font-medium text-ink-400 sm:block">设置</span>
+				{MENU.map((item) => (
+					<Link
+						key={item.key}
+						to={item.to}
+						aria-current={active === item.key ? "page" : undefined}
+						className={`focus-neko inline-flex shrink-0 items-center gap-2 rounded-xl px-3 py-2 text-sm ${
+							active === item.key ? "bg-sakura-100 font-semibold text-sakura-800" : "text-ink-600 hover:bg-ink-100"
+						}`}
+					>
+						<Icon name={item.icon} size={15} />
+						{item.label}
+					</Link>
+				))}
+			</nav>
+			<div className="min-w-0 flex-1">{children}</div>
+		</div>
+	);
+}

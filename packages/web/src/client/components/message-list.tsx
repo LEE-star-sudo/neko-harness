@@ -1,7 +1,9 @@
 import type { ChatItem, ChatView, StreamingView } from "@neko-harness/core";
+import { parseSkillInvocation } from "@neko-harness/core/skill-invocation";
 import { useEffect, useRef, useState } from "react";
 import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
+import { SkillInvocationCard } from "./skill-card";
 import { ThinkingBlock } from "./thinking";
 import { ToolCard } from "./tool-card";
 
@@ -35,6 +37,20 @@ function WelcomeCat() {
 }
 
 function UserRow({ text, images }: { text: string; images?: import("@neko-harness/core").ChatImage[] }) {
+	// /skill: 展开块渲染为折叠卡片；参数仍以用户气泡显示，未命中时原样渲染。
+	const invocation = parseSkillInvocation(text);
+	if (invocation !== null) {
+		return (
+			<div className="chat-row anim-user flex justify-end">
+				<div className="chat-bubble flex min-w-0 flex-col items-stretch gap-1.5">
+					<SkillInvocationCard invocation={invocation} />
+					{invocation.args !== "" && (
+						<div className="bubble-user px-4 py-2.5 whitespace-pre-wrap">{invocation.args}</div>
+					)}
+				</div>
+			</div>
+		);
+	}
 	return (
 		<div className="chat-row anim-user flex justify-end">
 			<div className="bubble-user chat-bubble px-4 py-2.5 whitespace-pre-wrap">

@@ -93,6 +93,21 @@ export const appActions = {
 	listSkills(sessionId: string, signal: AbortSignal): Promise<readonly NekoSkillInfo[]> {
 		return requireConnection().listSkills(sessionId, signal);
 	},
+	marketList(query?: string) {
+		return requireConnection().marketList(query);
+	},
+	marketDetail(name: string) {
+		return requireConnection().marketDetail(name);
+	},
+	marketPreview(name: string) {
+		return requireConnection().marketPreview(name);
+	},
+	marketInstall(name: string, scope: "user" | "project", overwrite?: boolean) {
+		return requireConnection().marketInstall(name, scope, overwrite);
+	},
+	marketUninstall(name: string, scope: "user" | "project") {
+		return requireConnection().marketUninstall(name, scope);
+	},
 	image(entryId: number, contentIndex: number, sessionId?: string) {
 		return requireConnection().image(entryId, contentIndex, sessionId);
 	},

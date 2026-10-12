@@ -142,3 +142,45 @@ export interface NekoWorkspaceFiles {
 	): Promise<import("@neko-harness/core/file-mentions").FileCandidates>;
 }
 export const NekoWorkspaceFiles = defineService<NekoWorkspaceFiles>("neko.workspace-files");
+
+/** 市场技能条目 + 本地三级安装状态（镜像 gateway contract.ts）。 */
+export type NekoMarketSkill = {
+	readonly name: string;
+	readonly description: string;
+	readonly category: string;
+	readonly source: string;
+	readonly license: string;
+	readonly version: string;
+	readonly sha256: string;
+	readonly sizeBytes: number;
+	readonly uploadedAt: string;
+	readonly installed: { readonly project: boolean; readonly user: boolean; readonly builtin: boolean };
+	readonly activeLevel: "project" | "user" | "builtin" | null;
+};
+
+export type NekoMarketPreview = {
+	readonly body: string;
+	readonly files: readonly string[];
+};
+
+export type NekoMarketInstallResult = {
+	readonly name: string;
+	readonly scope: "user" | "project";
+	readonly path: string;
+	readonly shadowedBy?: "user" | "project";
+};
+
+export interface NekoSkillMarket {
+	list(input: { query?: string; workspaceRoot?: string }, context: Context): Promise<readonly NekoMarketSkill[]>;
+	detail(input: { name: string; workspaceRoot?: string }, context: Context): Promise<NekoMarketSkill>;
+	preview(input: { name: string }, context: Context): Promise<NekoMarketPreview>;
+	install(
+		input: { name: string; scope: "user" | "project"; workspaceRoot?: string; overwrite?: boolean },
+		context: Context,
+	): Promise<NekoMarketInstallResult>;
+	uninstall(
+		input: { name: string; scope: "user" | "project"; workspaceRoot?: string },
+		context: Context,
+	): Promise<void>;
+}
+export const NekoSkillMarket = defineService<NekoSkillMarket>("neko.skill-market");

@@ -10,6 +10,7 @@ export function commandSuggestions(text: string, skills: readonly NekoSkillInfo[
 			key: `skill:${skill.name}`,
 			label: `/skill:${skill.name}`,
 			description: skill.description,
+			...(skill.level === "builtin" ? { badge: "内置" } : {}),
 		})),
 	].filter((item) => item.label.startsWith(query));
 }
