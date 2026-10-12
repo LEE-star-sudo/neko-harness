@@ -11,6 +11,7 @@ import { createUnixListener } from "@earendil-works/pi-server/unix";
 import {
 	createNekoRuntime,
 	DEFAULT_MODEL,
+	DEFAULT_SKILL_MARKET_URL,
 	DEFAULT_STORAGE_PATH,
 	loadNekoConfig,
 	type NekoModelRef,
@@ -38,6 +39,8 @@ export type NekoGatewayOptions = {
 	readonly extensions?: readonly Extension[];
 	/** 用户级提示词资源根（`<home>/.agents`）；测试覆盖用。 */
 	readonly promptHome?: string;
+	/** 技能市场 API 地址；缺省读取配置 skills.marketUrl，再回落官方市场。 */
+	readonly marketUrl?: string;
 	// —— 网关监听地址 ——
 	readonly host?: string;
 	/** WebSocket 端口；0 = 随机分配；null = 禁用 WS 传输。 */
@@ -80,6 +83,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		options.port !== undefined
 			? options.port
 			: (fileConfig.gateway?.port ?? (process.platform === "win32" ? 0 : DEFAULT_PORT));
+	const marketUrl = options.marketUrl ?? fileConfig.skills?.marketUrl ?? DEFAULT_SKILL_MARKET_URL;
 	const nekoDir = dirname(storagePath);
 	const serverId = options.serverId ?? (await loadOrCreateServerId(nekoDir));
 	const socketPath =
@@ -114,6 +118,8 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			serverId,
 			nekoDir,
 			model,
+			marketUrl,
+			promptHome: options.promptHome,
 			onError: options.onError,
 		});
 	} catch (error) {
@@ -130,6 +136,8 @@ type BindOptions = {
 	readonly serverId: string;
 	readonly nekoDir: string;
 	readonly model: NekoModelRef;
+	readonly marketUrl: string;
+	readonly promptHome: string | undefined;
 	readonly onError: ((error: Error) => void) | undefined;
 };
 
@@ -137,7 +145,12 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 	const { context, host, port, socketPath, serverId, nekoDir, model } = options;
 	const modelLabel = `${model.provider}/${model.modelId}`;
 
-	const serverServices = await createNekoServerServices({ runtime, context });
+	const serverServices = await createNekoServerServices({
+		runtime,
+		context,
+		marketUrl: options.marketUrl,
+		...(options.promptHome !== undefined ? { promptHome: options.promptHome } : {}),
+	});
 	let wsListener: WsListener | undefined;
 	const listeners: ServerListener[] = [];
 	if (socketPath !== null) {

@@ -15,15 +15,18 @@ import {
 	type NekoCredentialState,
 	NekoCredentials,
 	type NekoDirectoryState,
+	type NekoMarketSkill,
 	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
+	NekoSkillMarket,
 	NekoWorkspaceFiles,
 	type NekoWorkspaceState,
 	NekoWorkspaces,
 } from "./contract.ts";
 import { fileSearchInstallHelp } from "./file-search-help.ts";
+import { activeLevelOf, createSkillMarketClient, SkillMarketError } from "./skill-market.ts";
 import { browseWorkspaces } from "./workspaces.ts";
 
 /**
@@ -40,8 +43,49 @@ export type NekoServerServices = {
 export async function createNekoServerServices(options: {
 	readonly runtime: NekoRuntime;
 	readonly context: Context;
+	/** 市场 API 地址（core config skills.marketUrl 或默认）。 */
+	readonly marketUrl: string;
+	/** 用户级技能根（`<home>/.agents` 的 home）；测试覆盖用。 */
+	readonly promptHome?: string;
 }): Promise<NekoServerServices> {
 	const { runtime, context } = options;
+	const market = createSkillMarketClient({
+		marketUrl: options.marketUrl,
+		...(options.promptHome !== undefined ? { home: options.promptHome } : {}),
+	});
+	// chord 错误码是固定集合：市场错误码以 `[code]` 前缀编进 message，前端据此识别（如 skill_exists 弹覆盖确认）。
+	const toRemote = (error: unknown): never => {
+		if (error instanceof SkillMarketError) {
+			const code =
+				error.code === "skill_not_found" || error.code === "skill_not_installed"
+					? "service_not_found"
+					: "service_invalid_value";
+			throw new RemoteServiceError(code, `[${error.code}] ${error.message}`);
+		}
+		throw error;
+	};
+	const withInstallState = async (
+		skill: {
+			name: string;
+			description: string;
+			category: string;
+			source: string;
+			license: string;
+			version: string;
+			sha256: string;
+			sizeBytes: number;
+			uploadedAt: string;
+		},
+		workspaceRoot: string | undefined,
+	): Promise<NekoMarketSkill> => {
+		const locals = await runtime.listSkillsByLevel(workspaceRoot);
+		const installed = {
+			project: locals.some((s) => s.name === skill.name && s.level === "project"),
+			user: locals.some((s) => s.name === skill.name && s.level === "user"),
+			builtin: locals.some((s) => s.name === skill.name && s.level === "builtin"),
+		};
+		return { ...skill, installed, activeLevel: activeLevelOf(installed) };
+	};
 	const list = async (): Promise<NekoSessionSummary[]> =>
 		(await runtime.listConversations()).map((info) => ({
 			id: String(info.id),
@@ -105,6 +149,7 @@ export async function createNekoServerServices(options: {
 					{ service: NekoCredentials, mode: "singleton" },
 					{ service: NekoWorkspaces, mode: "singleton" },
 					{ service: NekoWorkspaceFiles, mode: "singleton" },
+					{ service: NekoSkillMarket, mode: "singleton" },
 				]);
 				provider.provide(NekoSessionDirectory, { state: directory });
 				const updateCredentials = (operation: () => Promise<void>) =>
@@ -158,6 +203,27 @@ export async function createNekoServerServices(options: {
 					},
 				});
 				provider.provide(NekoModels, { list: async () => runtime.listModels() });
+				provider.provide(NekoSkillMarket, {
+					list: (input) =>
+						market
+							.list(input.query)
+							.then((skills) => Promise.all(skills.map((skill) => withInstallState(skill, input.workspaceRoot))))
+							.catch(toRemote),
+					detail: (input) =>
+						market
+							.detail(input.name)
+							.then((skill) => withInstallState(skill, input.workspaceRoot))
+							.catch(toRemote),
+					preview: (input) => market.preview(input.name).catch(toRemote),
+					install: (input) =>
+						serialize(() =>
+							market
+								.install(input)
+								.then((result) => ({ ...result }))
+								.catch(toRemote),
+						),
+					uninstall: (input) => serialize(() => market.uninstall(input).catch(toRemote)),
+				});
 				provider.provide(NekoSessionManagement, {
 					create: (createOptions) =>
 						serialize(async () => {

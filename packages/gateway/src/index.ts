@@ -5,10 +5,14 @@ export {
 	type NekoCredentialState,
 	NekoCredentials,
 	type NekoDirectoryState,
+	type NekoMarketInstallResult,
+	type NekoMarketPreview,
+	type NekoMarketSkill,
 	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
+	NekoSkillMarket,
 	type NekoSubmitInput,
 } from "./contract.ts";
 export {

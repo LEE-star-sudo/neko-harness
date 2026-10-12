@@ -10,6 +10,7 @@ import {
 	NekoModels,
 	NekoSessionDirectory,
 	NekoSessionManagement,
+	NekoSkillMarket,
 	NekoWorkspaceFiles,
 	NekoWorkspaces,
 } from "./contract.ts";
@@ -30,6 +31,8 @@ export type NekoGatewayClient = {
 	readonly workspaces: NekoWorkspaces;
 	readonly workspaceFiles: NekoWorkspaceFiles;
 	readonly credentials: NekoCredentials;
+	/** 技能市场（列表/详情/预览/安装/卸载）。 */
+	readonly skillMarket: NekoSkillMarket;
 	/** Models registry 的全局模型列表（模型选择器数据源）。 */
 	listModels(): Promise<readonly NekoModelInfo[]>;
 	/** attach（幂等）到会话，返回水合完成的 chat 门面（view 订阅可用）。 */
@@ -54,6 +57,7 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 				NekoWorkspaces,
 				NekoWorkspaceFiles,
 				NekoCredentials,
+				NekoSkillMarket,
 			],
 			transport: serverTransport,
 		});
@@ -70,6 +74,7 @@ export async function connectNekoGateway(address: NekoGatewayAddress): Promise<N
 			workspaces: serverBinding.use(NekoWorkspaces),
 			workspaceFiles: serverBinding.use(NekoWorkspaceFiles),
 			credentials: serverBinding.use(NekoCredentials),
+			skillMarket: serverBinding.use(NekoSkillMarket),
 			listModels: () => models.list(BACKGROUND_CONTEXT),
 			async attach(sessionId) {
 				// 重复 attach 前先释放旧会话绑定（路由本身幂等，客户端只是重新水合订阅）。

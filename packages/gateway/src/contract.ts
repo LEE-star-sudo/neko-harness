@@ -156,3 +156,51 @@ export interface NekoWorkspaceFiles {
 	): Promise<import("@neko-harness/core/file-mentions").FileCandidates>;
 }
 export const NekoWorkspaceFiles = defineService<NekoWorkspaceFiles>("neko.workspace-files");
+
+/** 市场技能条目 + 本地三级安装状态（list/detail 返回同一形态）。 */
+export type NekoMarketSkill = {
+	readonly name: string;
+	readonly description: string;
+	readonly category: string;
+	readonly source: string;
+	readonly license: string;
+	readonly version: string;
+	readonly sha256: string;
+	readonly sizeBytes: number;
+	readonly uploadedAt: string;
+	readonly installed: { readonly project: boolean; readonly user: boolean; readonly builtin: boolean };
+	readonly activeLevel: "project" | "user" | "builtin" | null;
+};
+
+export type NekoMarketPreview = {
+	readonly body: string;
+	readonly files: readonly string[];
+};
+
+export type NekoMarketInstallResult = {
+	readonly name: string;
+	readonly scope: "user" | "project";
+	readonly path: string;
+	readonly shadowedBy?: "user" | "project";
+};
+
+/**
+ * 服务器级技能市场服务（design D1）：只读代理市场 API 并合并本地安装状态。
+ * workspaceRoot 缺省时项目级状态按 runtime 默认工作区判定。市场错误经 RemoteServiceError 传递：
+ * chord 错误码为固定集合，市场错误码（skill_exists / skill_not_installed / market_unavailable 等）
+ * 以 `[code] ` 前缀编入 message，前端解析前缀识别。
+ */
+export interface NekoSkillMarket {
+	list(input: { query?: string; workspaceRoot?: string }, context: Context): Promise<readonly NekoMarketSkill[]>;
+	detail(input: { name: string; workspaceRoot?: string }, context: Context): Promise<NekoMarketSkill>;
+	preview(input: { name: string }, context: Context): Promise<NekoMarketPreview>;
+	install(
+		input: { name: string; scope: "user" | "project"; workspaceRoot?: string; overwrite?: boolean },
+		context: Context,
+	): Promise<NekoMarketInstallResult>;
+	uninstall(
+		input: { name: string; scope: "user" | "project"; workspaceRoot?: string },
+		context: Context,
+	): Promise<void>;
+}
+export const NekoSkillMarket = defineService<NekoSkillMarket>("neko.skill-market");
