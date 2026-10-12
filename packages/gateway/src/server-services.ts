@@ -2,6 +2,7 @@ import type { Context } from "@earendil-works/chord";
 import {
 	createRemoteServiceEndpoint,
 	type JsonValue,
+	RemoteServiceError,
 	RemoteServiceProvider,
 	replicatedState,
 } from "@earendil-works/chord";
@@ -9,7 +10,7 @@ import type { ConversationId } from "@earendil-works/pi-durable";
 import type { RoutedServerServiceAttachment, RoutedServerServiceHost } from "@earendil-works/pi-server";
 import type { NekoRuntime } from "@neko-harness/core";
 import { CREDENTIAL_PROVIDERS } from "@neko-harness/core";
-import { searchWorkspaceFiles } from "@neko-harness/core/workspace-files";
+import { MissingFileSearchDependencyError, searchWorkspaceFiles } from "@neko-harness/core/workspace-files";
 import {
 	type NekoCredentialState,
 	NekoCredentials,
@@ -22,6 +23,7 @@ import {
 	type NekoWorkspaceState,
 	NekoWorkspaces,
 } from "./contract.ts";
+import { fileSearchInstallHelp } from "./file-search-help.ts";
 import { browseWorkspaces } from "./workspaces.ts";
 
 /**
@@ -145,6 +147,10 @@ export async function createNekoServerServices(options: {
 								input.query,
 								AbortSignal.any([controller.signal, ...(ctx.abortSignal ? [ctx.abortSignal] : [])]),
 							);
+						} catch (error) {
+							if (error instanceof MissingFileSearchDependencyError)
+								throw new RemoteServiceError("service_not_allowed", fileSearchInstallHelp());
+							throw error;
 						} finally {
 							fileQueries--;
 							if (fileQuery === controller) fileQuery = undefined;

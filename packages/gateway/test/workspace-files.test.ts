@@ -6,6 +6,7 @@ import { BACKGROUND_CONTEXT as context, withAbortSignal } from "@earendil-works/
 import { downloadImage } from "@neko-harness/core/image-transfer";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { fileSearchInstallHelp } from "../src/file-search-help.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { IS_WINDOWS, testAddress, testSocketPath } from "./helpers.ts";
 
@@ -33,6 +34,29 @@ it("queries a registered workspace and imports images with attachment ownership"
 				client.workspaceFiles.search({ workspaceRoot: "/unregistered", query: "" }, context),
 			).rejects.toThrow();
 		}
+		// Tests run with file isolation; always restore PATH before other operations.
+		const previousPath = process.env.PATH;
+		try {
+			process.env.PATH = "";
+			for (const client of [a, b]) {
+				await expect(client.workspaceFiles.search({ workspaceRoot: root, query: "" }, context)).rejects.toThrow(
+					fileSearchInstallHelp(),
+				);
+				const unrelated = await client.workspaceFiles
+					.search({ workspaceRoot: "/unregistered", query: "" }, context)
+					.catch((error: Error) => error);
+				expect(unrelated).toBeInstanceOf(Error);
+				expect((unrelated as Error).message).not.toContain("安装");
+			}
+		} finally {
+			if (previousPath === undefined) delete process.env.PATH;
+			else process.env.PATH = previousPath;
+		}
+		expect((await b.workspaceFiles.search({ workspaceRoot: root, query: "file" }, context)).entries).toContainEqual({
+			name: "my file.ts",
+			path: "my file.ts",
+			kind: "file",
+		});
 		const abort = new AbortController();
 		abort.abort();
 		await expect(

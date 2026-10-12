@@ -3,6 +3,13 @@ import { accessSync, constants } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { basename, delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { FileCandidates } from "./file-mentions.ts";
+
+export class MissingFileSearchDependencyError extends Error {
+	constructor() {
+		super("Install fd (or fdfind) to search workspace files.");
+		this.name = "MissingFileSearchDependencyError";
+	}
+}
 export function findFd(): string | null {
 	for (const name of process.platform === "win32" ? ["fd.exe", "fdfind.exe"] : ["fd", "fdfind"]) {
 		for (const directory of (process.env.PATH ?? "").split(delimiter)) {
@@ -41,7 +48,7 @@ export async function searchWorkspaceFiles(
 	signal: AbortSignal,
 	fd = findFd(),
 ): Promise<FileCandidates> {
-	if (!fd) throw new Error("Install fd (or fdfind) to search workspace files.");
+	if (!fd) throw new MissingFileSearchDependencyError();
 	query = relativeQuery(query);
 	const slash = query.lastIndexOf("/");
 	const prefix = slash < 0 ? "" : query.slice(0, slash + 1);
@@ -64,6 +71,8 @@ export async function searchWorkspaceFiles(
 		"--max-results",
 		"101",
 		"--print0",
+		"--path-separator",
+		"/",
 		"--color",
 		"never",
 	];
