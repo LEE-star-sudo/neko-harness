@@ -13,7 +13,8 @@ export function ComposerSuggestions({
 	onAccept,
 	message,
 }: {
-	anchor: RefObject<HTMLTextAreaElement | null>;
+	/** 定位参照（输入卡片容器），面板宽度与之对齐 */
+	anchor: RefObject<HTMLElement | null>;
 	id: string;
 	title: string;
 	items: Suggestion[];

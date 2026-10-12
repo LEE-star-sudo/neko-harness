@@ -3,7 +3,6 @@ import { Composer } from "../components/composer";
 import { MessageList } from "../components/message-list";
 import { folderName, useMobile } from "../components/primitives";
 import { SessionList } from "../components/session-list";
-import { StatusBar } from "../components/status-bar";
 import { TopBar } from "../components/top-bar";
 import { appActions, reportError } from "../lib/bootstrap";
 import { MOBILE_QUERY } from "../lib/layout";
@@ -57,13 +56,6 @@ export function ChatPage() {
 					) : (
 						<MessageList view={view} busy={busy} />
 					)}
-					<StatusBar
-						model={view?.model ?? "…"}
-						agentModel={view?.agent.model ?? null}
-						usage={view?.usage ?? null}
-						busy={busy}
-						status={status}
-					/>
 					<Composer disabled={phase !== "ready" || operating} busy={busy} status={status} />
 				</main>
 			</div>

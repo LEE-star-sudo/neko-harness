@@ -5,6 +5,7 @@ import { ComposerSuggestions } from "./composer-suggestions";
 
 export function useFileMentions(
 	textarea: RefObject<HTMLTextAreaElement | null>,
+	anchor: RefObject<HTMLElement | null>,
 	workspace: string,
 	enabled: boolean,
 	choose: (item: FileCandidate, token: Mention) => void,
@@ -88,7 +89,7 @@ export function useFileMentions(
 	const panel =
 		token && enabled ? (
 			<ComposerSuggestions
-				anchor={textarea}
+				anchor={anchor}
 				id={id}
 				title="工作区文件"
 				selected={selected}

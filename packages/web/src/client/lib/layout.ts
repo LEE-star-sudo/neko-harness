@@ -8,3 +8,13 @@
 export const MOBILE_BREAKPOINT = 768;
 export const MOBILE_QUERY = `(max-width: ${MOBILE_BREAKPOINT}px)`;
 export const MESSAGE_COLUMN_REM = 48;
+
+/**
+ * 宽屏分层宽度分档（与 styles.css 的 .chat-column 媒体查询对拍，
+ * 由 test/layout-tokens.test.ts 守护）：视口达到 minViewportRem 时
+ * 消息列抬升到 columnRem；气泡与工具卡均不突破消息列。
+ */
+export const COLUMN_TIERS: readonly { minViewportRem: number; columnRem: number }[] = [
+	{ minViewportRem: 80, columnRem: 56 },
+	{ minViewportRem: 105, columnRem: 64 },
+];

@@ -1,6 +1,6 @@
 import { expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
-import { MESSAGE_COLUMN_REM, MOBILE_BREAKPOINT } from "../src/client/lib/layout.ts";
+import { COLUMN_TIERS, MESSAGE_COLUMN_REM, MOBILE_BREAKPOINT } from "../src/client/lib/layout.ts";
 
 const css = readFileSync(new URL("../src/client/styles.css", import.meta.url), "utf8");
 
@@ -11,6 +11,15 @@ it("keeps the mobile breakpoint in sync between styles.css and layout.ts", () =>
 	expect(css).toContain(`@media (max-width: ${rem}rem)`);
 });
 
-it("keeps the message column width in sync between styles.css and layout.ts", () => {
-	expect(css).toMatch(new RegExp(`\\.chat-column\\s*\\{[^}]*max-width:\\s*${MESSAGE_COLUMN_REM}rem`));
+it("keeps the base message column width in sync between styles.css and layout.ts", () => {
+	expect(css).toMatch(new RegExp(`\\.chat-column\\s*\\{[^}]*--column-w:\\s*${MESSAGE_COLUMN_REM}rem`));
+});
+
+it("keeps wide-screen column tiers in sync between styles.css and layout.ts", () => {
+	for (const tier of COLUMN_TIERS) {
+		const block = new RegExp(
+			`@media \\(min-width: ${tier.minViewportRem}rem\\) \\{[^}]*--column-w: ${tier.columnRem}rem`,
+		);
+		expect(css).toMatch(block);
+	}
 });

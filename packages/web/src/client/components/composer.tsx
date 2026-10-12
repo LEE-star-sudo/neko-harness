@@ -8,6 +8,7 @@ import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { ComposerSuggestions } from "./composer-suggestions";
 import { useFileMentions } from "./file-mentions";
+import { ModelPicker } from "./model-picker";
 import { Icon } from "./primitives";
 
 type Attachment = { id: string; file: File; error?: string; processing?: boolean };
@@ -21,6 +22,16 @@ const subscribeDrafts = (listener: () => void) => {
 	};
 };
 type Props = { busy: boolean; status: string | null; disabled?: boolean };
+
+function formatTokens(tokens: number): string {
+	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+	if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+	return String(tokens);
+}
+
+function formatCost(cost: number): string {
+	return `$${cost.toFixed(cost >= 1 ? 2 : 4)}`;
+}
 export function Composer(props: Props) {
 	const { currentSessionId, workspaceRoot } = useNekoState();
 	return (
@@ -56,6 +67,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 	const commandId = useId();
 	const [drag, setDrag] = useState(false);
 	const textarea = useRef<HTMLTextAreaElement>(null);
+	const card = useRef<HTMLDivElement>(null);
 	const picker = useRef<HTMLInputElement>(null);
 	const current = useRef(draft);
 	current.current = draft;
@@ -137,7 +149,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			});
 		return () => controller.abort();
 	}, [props.sessionId, phase, operating, menu]);
-	const mentions = useFileMentions(textarea, workspaceRoot, phase === "ready" && !operating, (item, token) => {
+	const mentions = useFileMentions(textarea, card, workspaceRoot, phase === "ready" && !operating, (item, token) => {
 		const before = current.current;
 		if (item.kind === "file" && /\.(png|jpe?g|webp)$/i.test(item.path)) {
 			if (imageRequest.current) return;
@@ -200,6 +212,38 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			});
 		}
 	});
+	// 压缩相位（自原 status-bar 迁入）：瞬态相位（已压缩/失败等）只在短时间内展示，
+	// expired 为渲染期读取的派生状态，定时器仅负责到期时翻转这个布尔值。
+	const context = view?.contextUsage;
+	const latest = view?.compaction?.latest;
+	const transient = latest && !["summarizing", "waiting-to-apply"].includes(latest.phase);
+	const expiresAt = transient ? latest.at + (latest.phase === "failed" ? 10000 : 5000) : null;
+	const [expired, setExpired] = useState(expiresAt !== null && expiresAt <= Date.now());
+	useEffect(() => {
+		setExpired(expiresAt !== null && expiresAt <= Date.now());
+		if (expiresAt === null || expiresAt <= Date.now()) return;
+		const timer = setTimeout(() => setExpired(true), expiresAt - Date.now());
+		return () => clearTimeout(timer);
+	}, [expiresAt]);
+	const compaction = active.length
+		? active.some((c) => c.retry)
+			? "压缩重试中"
+			: active.some((c) => c.blocking)
+				? "等待上下文压缩"
+				: "正在压缩上下文"
+		: latest && !expired
+			? {
+					applied: "上下文已压缩",
+					nothing: "当前无需压缩",
+					skipped: "已跳过过期摘要",
+					cancelled: "压缩已取消",
+					failed: "压缩失败，可重试",
+					summarizing: "正在压缩上下文",
+					"waiting-to-apply": "等待应用压缩摘要",
+				}[latest.phase]
+			: null;
+	const compactionFailed = !active.length && latest?.phase === "failed";
+	const usage = view?.usage ?? null;
 	const compact = async (instructions: string) => {
 		if (locked.current || props.disabled) return;
 		locked.current = true;
@@ -296,10 +340,11 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		setMenu(false);
 		textarea.current?.focus();
 	};
+	const busyCard = props.busy || active.some((c) => c.reason === "manual" || c.blocking);
 	return (
 		<section
 			aria-label="消息输入"
-			className={`relative border-t border-sakura-200/70 bg-surface/80 px-4 py-3 ${drag ? "ring-2 ring-sakura-300" : ""}`}
+			className="relative shrink-0 px-3 pt-1 pb-3 sm:px-4 sm:pb-4"
 			onDragOver={(e) => {
 				if (e.dataTransfer.types.includes("Files")) {
 					e.preventDefault();
@@ -316,84 +361,53 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			}}
 		>
 			<div className="chat-column">
-				{/* 通知/错误行：固定位于附件区之上，集中间距 */}
-				<div className="mb-2 flex flex-col gap-1 empty:mb-0">
-					{drag && <p className="text-sm text-sakura-700">松开以添加图片，不会自动发送</p>}
-					{missingKey && (
-						<p className="text-sm text-sakura-700">
-							尚未配置 DeepSeek Key。
-							<Link to="/settings" className="focus-neko underline">
-								前往设置
-							</Link>
-						</p>
+				<div
+					ref={card}
+					className={`composer-card ${busyCard ? "is-busy" : ""} ${drag ? "ring-2 ring-sakura-300" : ""}`}
+				>
+					{/* 通知/错误行：固定位于卡片顶部，集中间距 */}
+					<div className="flex flex-col gap-1 px-4 pt-2.5 empty:pt-0">
+						{drag && <p className="text-sm text-sakura-700">松开以添加图片，不会自动发送</p>}
+						{missingKey && (
+							<p className="text-sm text-sakura-700">
+								尚未配置 DeepSeek Key。
+								<Link to="/settings" className="focus-neko underline">
+									前往设置
+								</Link>
+							</p>
+						)}
+						{noVision && <p className="text-sm text-sakura-700">当前模型不支持图片，请切换模型或移除附件。</p>}
+						{!model?.input.includes("image") && view?.items.some((i) => i.type === "user" && i.images?.length) && (
+							<p className="text-xs text-ink-500">当前模型无法查看历史原图，仍可使用已有文字分析。</p>
+						)}
+						{error && (
+							<p role="alert" className="break-words text-sm text-sakura-700">
+								{error}
+							</p>
+						)}
+					</div>
+					{!!draft.files.length && (
+						<ul className="flex max-h-40 flex-wrap gap-2 overflow-y-auto px-4 pt-2.5">
+							{draft.files.map((a) => (
+								<li key={a.id} className="relative w-28 rounded-xl border border-sakura-200 bg-base p-2">
+									<Thumbnail file={a.file} />
+									<span className="block truncate text-xs" title={a.file.name}>
+										{a.file.name}
+									</span>
+									{a.processing && <span className="text-xs text-ink-500">检查图片…</span>}
+									{a.error && <span className="text-xs text-sakura-700">{a.error}</span>}
+									<button
+										type="button"
+										aria-label={`移除 ${a.file.name}`}
+										className="focus-neko absolute right-0 top-0 rounded-full bg-base px-1"
+										onClick={() => edit({ files: current.current.files.filter((f) => f.id !== a.id) })}
+									>
+										×
+									</button>
+								</li>
+							))}
+						</ul>
 					)}
-					{noVision && <p className="text-sm text-sakura-700">当前模型不支持图片，请切换模型或移除附件。</p>}
-					{!model?.input.includes("image") && view?.items.some((i) => i.type === "user" && i.images?.length) && (
-						<p className="text-xs text-ink-500">当前模型无法查看历史原图，仍可使用已有文字分析。</p>
-					)}
-					{error && (
-						<p role="alert" className="break-words text-sm text-sakura-700">
-							{error}
-						</p>
-					)}
-				</div>
-				{!!draft.files.length && (
-					<ul className="mb-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto">
-						{draft.files.map((a) => (
-							<li key={a.id} className="relative w-28 rounded-xl border border-sakura-200 bg-base p-2">
-								<Thumbnail file={a.file} />
-								<span className="block truncate text-xs" title={a.file.name}>
-									{a.file.name}
-								</span>
-								{a.processing && <span className="text-xs text-ink-500">检查图片…</span>}
-								{a.error && <span className="text-xs text-sakura-700">{a.error}</span>}
-								<button
-									type="button"
-									aria-label={`移除 ${a.file.name}`}
-									className="focus-neko absolute right-0 top-0 rounded-full bg-base px-1"
-									onClick={() => edit({ files: current.current.files.filter((f) => f.id !== a.id) })}
-								>
-									×
-								</button>
-							</li>
-						))}
-					</ul>
-				)}
-				{mentions.panel}
-				{menu && !mentions.open && (
-					<ComposerSuggestions
-						anchor={textarea}
-						id={commandId}
-						title="输入命令"
-						items={menuItems}
-						selected={selectedCommand}
-						onSelect={setCommandSelected}
-						message={skillStatus || (menuItems.length ? undefined : "没有匹配的命令或技能")}
-						onAccept={acceptCommand}
-					/>
-				)}
-				<div className="flex items-end gap-2">
-					<input
-						ref={picker}
-						type="file"
-						accept="image/png,image/jpeg,image/webp"
-						multiple
-						hidden
-						onChange={(e) => {
-							add(Array.from(e.target.files ?? []));
-							e.target.value = "";
-						}}
-					/>
-					<button
-						type="button"
-						aria-label="添加图片"
-						title="添加图片（最多 4 张）"
-						disabled={props.disabled}
-						onClick={() => picker.current?.click()}
-						className="focus-neko inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-sakura-200 text-ink-600 hover:bg-sakura-50"
-					>
-						<Icon name="plus" />
-					</button>
 					<textarea
 						ref={textarea}
 						disabled={props.disabled}
@@ -422,7 +436,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 							mentions.refresh();
 							setMenu(isCommandQuery(e.currentTarget.value));
 						}}
-						className="focus-neko max-h-40 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border border-sakura-300 bg-base px-3.5 py-2 text-base text-ink-900"
+						className="max-h-40 min-h-10 min-w-0 w-full resize-none bg-transparent px-4 py-2 text-base text-ink-900 focus:outline-none"
 						onChange={(e) => {
 							edit({ text: e.target.value });
 							setCommandSelected(0);
@@ -464,44 +478,137 @@ function SessionComposer(props: Props & { sessionId: string }) {
 							}
 						}}
 					/>
-					<button
-						type="button"
-						aria-label="输入操作菜单"
-						aria-expanded={menu}
-						className="focus-neko inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-sakura-50"
-						onClick={() => {
-							mentions.close();
-							setMenu(!menu);
-							textarea.current?.focus();
-						}}
-					>
-						<Icon name="more" />
-					</button>
-					<button
-						type="button"
-						disabled={
-							pending ||
-							props.disabled ||
-							(!draft.text.trim() && !draft.files.length) ||
-							(compactInstructions(draft.text) === null &&
-								(props.busy || missingKey || noVision || draft.files.some((a) => !!a.error || a.processing)))
-						}
-						onClick={() => void submit()}
-						className="btn-primary focus-neko h-10 shrink-0 rounded-full px-3 text-sm disabled:opacity-50"
-					>
-						{pending ? "处理中" : "发送"}
-					</button>
-					{(props.busy || active.some((c) => c.reason === "manual" || c.blocking)) && (
+					{/* 工具行：附件/命令菜单/模型入口 + 瞬态状态 + 遥测 + 发送/停止 */}
+					<div className="composer-toolbar flex flex-wrap items-center gap-x-1 gap-y-1 border-t border-sakura-100 px-2 py-1.5">
+						<input
+							ref={picker}
+							type="file"
+							accept="image/png,image/jpeg,image/webp"
+							multiple
+							hidden
+							onChange={(e) => {
+								add(Array.from(e.target.files ?? []));
+								e.target.value = "";
+							}}
+						/>
 						<button
 							type="button"
-							onClick={() => appActions.abort()}
-							className="btn-stop focus-neko h-10 rounded-full px-2 text-sm"
-							title="中止当前会话运行及可中止任务"
+							aria-label="添加图片"
+							title="添加图片（最多 4 张）"
+							disabled={props.disabled}
+							onClick={() => picker.current?.click()}
+							className="focus-neko inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-600 hover:bg-sakura-50"
 						>
-							停止
+							<Icon name="plus" />
 						</button>
-					)}
+						<button
+							type="button"
+							aria-label="输入操作菜单"
+							aria-expanded={menu}
+							className="focus-neko inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-500 hover:bg-sakura-50"
+							onClick={() => {
+								mentions.close();
+								setMenu(!menu);
+								textarea.current?.focus();
+							}}
+						>
+							<Icon name="more" />
+						</button>
+						<div className="min-w-0 max-w-64 [&>button]:max-w-full">
+							<ModelPicker current={view?.agent.model ?? null} fallbackLabel={view?.model ?? "…"} />
+						</div>
+						{context && context.window > 0 && (
+							<span
+								className={`shrink-0 rounded-full bg-tianyi-50 px-2 py-1 font-mono text-xs ${context.percent !== null && context.percent > 90 ? "text-sakura-700 font-semibold" : "text-ink-600"}`}
+								title={
+									context.tokens === null
+										? "暂无有效用量；首次回答或压缩后的新回答完成后更新"
+										: `最近一次成功回答的上下文用量：${context.tokens} / ${context.window} tokens；非会话累计用量`
+								}
+							>
+								Ctx {context.percent === null ? "?" : `${context.percent.toFixed(1)}%`}/{formatTokens(context.window)}
+							</span>
+						)}
+						<output aria-live="polite" aria-atomic="true" className="contents">
+							{compaction && (
+								<span
+									className={`max-w-full whitespace-nowrap rounded-full border px-2 py-1 text-xs ${compactionFailed ? "border-sakura-300 bg-sakura-50 text-sakura-700" : "border-tianyi-200 bg-tianyi-50 text-ink-600"}`}
+									title={
+										latest?.phase === "nothing" && !active.length
+											? "保留近期上下文，暂无可压缩的旧内容；默认保留最近约 20,000 tokens"
+											: undefined
+									}
+								>
+									{compaction}
+								</span>
+							)}
+						</output>
+						<div className="ml-auto flex items-center gap-1">
+							{props.busy && props.status !== null && (
+								<span
+									className="inline-flex min-w-0 max-w-64 items-center gap-1.5 text-xs font-medium text-sakura-700"
+									title={props.status}
+								>
+									<span className="dots shrink-0" aria-hidden>
+										<span />
+										<span />
+										<span />
+									</span>
+									<span className="truncate">{props.status.replace(/\.\.\.$/, "")}</span>
+								</span>
+							)}
+							{usage !== null && (
+								<button
+									type="button"
+									className="telemetry focus-neko shrink-0 rounded-full px-1.5 py-1 font-mono text-xs text-ink-500"
+									aria-label={`用量：输入 ${usage.input}，输出 ${usage.output}，缓存读 ${usage.cacheRead}，成本 ${formatCost(usage.cost)}`}
+								>
+									↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
+									<span className="telemetry-detail" aria-hidden>
+										输入 {usage.input} · 输出 {usage.output} · 缓存读 {usage.cacheRead} · {formatCost(usage.cost)}
+									</span>
+								</button>
+							)}
+							<button
+								type="button"
+								disabled={
+									pending ||
+									props.disabled ||
+									(!draft.text.trim() && !draft.files.length) ||
+									(compactInstructions(draft.text) === null &&
+										(props.busy || missingKey || noVision || draft.files.some((a) => !!a.error || a.processing)))
+								}
+								onClick={() => void submit()}
+								className="btn-primary focus-neko h-10 shrink-0 rounded-full px-3 text-sm disabled:opacity-50"
+							>
+								{pending ? "处理中" : "发送"}
+							</button>
+							{busyCard && (
+								<button
+									type="button"
+									onClick={() => appActions.abort()}
+									className="btn-stop focus-neko h-10 rounded-full px-2 text-sm"
+									title="中止当前会话运行及可中止任务"
+								>
+									停止
+								</button>
+							)}
+						</div>
+					</div>
 				</div>
+				{mentions.panel}
+				{menu && !mentions.open && (
+					<ComposerSuggestions
+						anchor={card}
+						id={commandId}
+						title="输入命令"
+						items={menuItems}
+						selected={selectedCommand}
+						onSelect={setCommandSelected}
+						message={skillStatus || (menuItems.length ? undefined : "没有匹配的命令或技能")}
+						onAccept={acceptCommand}
+					/>
+				)}
 			</div>
 		</section>
 	);

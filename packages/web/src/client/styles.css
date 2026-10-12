@@ -134,14 +134,30 @@ body {
 
 /* ---- 聊天布局常量（与 lib/layout.ts 对拍，见 test/layout-tokens.test.ts） ---- */
 
-/* 消息列：居中、上限 48rem */
+/*
+ * 消息列：居中，基准 48rem，随视口分档抬升（80rem 视口 → 56rem，105rem → 64rem）。
+ * 气泡与工具卡/代码块均不突破消息列（工具卡与列同宽，左右缘与气泡对齐）。
+ */
 .chat-column {
+	--column-w: 48rem;
 	margin-inline: auto;
 	width: 100%;
-	max-width: 48rem;
+	max-width: var(--column-w);
 }
 
-/* 气泡/工具卡宽度：窄屏 85%，sm（40rem）起 75% */
+@media (min-width: 80rem) {
+	.chat-column {
+		--column-w: 56rem;
+	}
+}
+
+@media (min-width: 105rem) {
+	.chat-column {
+		--column-w: 64rem;
+	}
+}
+
+/* 气泡宽度：用户气泡窄屏 85%，sm（40rem）起 75%；助手气泡不封顶（列宽 100%） */
 .chat-bubble {
 	max-width: 85%;
 }
@@ -408,6 +424,90 @@ button {
 		opacity: 0;
 		transform: translateY(6px);
 	}
+}
+
+/* ---- 输入卡片：附件/输入框/工具行同一浮动容器；焦点环与边框上移到卡片 ---- */
+
+.composer-card {
+	position: relative;
+	background: var(--color-surface);
+	border: 1px solid var(--color-sakura-200);
+	border-radius: var(--radius-card);
+	box-shadow: var(--shadow-soft);
+	transition:
+		box-shadow 0.16s ease,
+		border-color 0.16s ease;
+}
+
+.composer-card:focus-within {
+	border-color: var(--color-sakura-300);
+	box-shadow: var(--shadow-lift);
+}
+
+/* busy 环境提示：卡片顶边 2px 粉蓝渐变流动条（只动 background-position） */
+.composer-card::before {
+	content: "";
+	position: absolute;
+	inset: -1px -1px auto;
+	height: 2px;
+	border-radius: 2px;
+	background-image: linear-gradient(
+		90deg,
+		var(--color-sakura-300),
+		var(--color-tianyi-300),
+		var(--color-sakura-300)
+	);
+	background-size: 200% 100%;
+	opacity: 0;
+	transition: opacity 0.25s ease;
+}
+
+.composer-card.is-busy::before {
+	opacity: 1;
+	animation: composer-flow 2.4s linear infinite;
+}
+
+@keyframes composer-flow {
+	from {
+		background-position: 0 0;
+	}
+	to {
+		background-position: -200% 0;
+	}
+}
+
+/* 稳态遥测：默认收起，悬停/聚焦展开详情（纯 CSS，触屏可点焦） */
+.telemetry {
+	position: relative;
+	cursor: default;
+}
+
+.telemetry-detail {
+	position: absolute;
+	bottom: calc(100% + 8px);
+	right: 0;
+	white-space: nowrap;
+	padding: 6px 10px;
+	border: 1px solid var(--color-sakura-200);
+	border-radius: var(--radius-control);
+	background: var(--color-surface);
+	color: var(--color-ink-700);
+	font-size: var(--text-xs);
+	box-shadow: var(--shadow-soft);
+	opacity: 0;
+	visibility: hidden;
+	transform: translateY(4px);
+	transition:
+		opacity 0.16s ease,
+		transform 0.16s ease,
+		visibility 0.16s ease allow-discrete;
+}
+
+.telemetry:hover .telemetry-detail,
+.telemetry:focus-within .telemetry-detail {
+	opacity: 1;
+	visibility: visible;
+	transform: none;
 }
 
 /* ---- Markdown 渲染（内容经 DOMPurify 消毒后注入） ---- */
@@ -692,6 +792,16 @@ button {
 	.btn-lift,
 	.discrete-in {
 		transition: none;
+	}
+
+	.composer-card,
+	.composer-card::before,
+	.telemetry-detail {
+		transition: none;
+	}
+
+	.composer-card.is-busy::before {
+		animation: none;
 	}
 
 	.btn-lift:hover,
@@ -1100,6 +1210,11 @@ button {
 			min-height: 44px;
 		}
 		.icon-btn {
+			min-width: 44px;
+		}
+		/* 输入卡片按钮触控目标 ≥44px（桌面维持 40px 紧凑密度） */
+		.composer-toolbar :is(button, a) {
+			min-height: 44px;
 			min-width: 44px;
 		}
 	}
