@@ -19,5 +19,8 @@ for (const [name, entry] of Object.entries({ neko: "cli", gateway: "gateway" }))
 	if (!result.success) throw new AggregateError(result.logs, `Failed to build ${name}`);
 }
 await cp("packages/web/dist/client", "dist/client", { recursive: true });
+// Builtin skills ship as runtime files next to the bundled binaries (dist/skills/),
+// resolved by core's BUILTIN_SKILLS_DIR probe from dist/neko.js / dist/gateway.js.
+await cp("packages/core/skills", "dist/skills", { recursive: true });
 await chmod("dist/neko.js", 0o755);
 console.log(`Built neko-harness ${manifest.version}`);

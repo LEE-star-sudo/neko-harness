@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -19,10 +20,22 @@ export const workspaceAgentsFile = (workspace: string): string => join(workspace
 export const workspaceSkillsDir = (workspace: string): string => join(workspace, ".agents", "skills");
 
 /**
- * Builtin skills shipped inside the core package. Resolved relative to this module so
- * source (`src/prompt/`) and build (`dist/prompt/`) layouts both land on `<core>/skills/`.
+ * Builtin skills shipped with the harness. Probe candidate layouts, first hit wins:
+ * `./skills/` — the bundled release, where this module is inlined into `dist/neko.js` /
+ * `dist/gateway.js` and build-release copies skills to `dist/skills/`; then `../../skills/` —
+ * source (`src/prompt/`) and per-package build (`dist/prompt/`) layouts, landing on
+ * `<core>/skills/`. The marker file guards against an empty or stray directory winning.
+ * Null when no layout provides builtin skills (callers then simply scan nothing).
  */
-export const BUILTIN_SKILLS_DIR = fileURLToPath(new URL("../../skills/", import.meta.url));
+const resolveBuiltinSkillsDir = (): string | null => {
+	for (const url of [new URL("./skills/", import.meta.url), new URL("../../skills/", import.meta.url)]) {
+		const path = fileURLToPath(url);
+		if (existsSync(join(path, "skill-creator", "SKILL.md"))) return path;
+	}
+	return null;
+};
+
+export const BUILTIN_SKILLS_DIR: string | null = resolveBuiltinSkillsDir();
 
 const readResources = async (
 	workspace: string,

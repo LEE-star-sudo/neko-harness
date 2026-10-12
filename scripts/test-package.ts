@@ -28,7 +28,14 @@ for (const file of files) {
 		throw new Error(`Unexpected published file: ${file}`);
 	}
 }
-for (const required of ["dist/neko.js", "dist/gateway.js", "dist/client/index.html", "LICENSE"]) {
+for (const required of [
+	"dist/neko.js",
+	"dist/gateway.js",
+	"dist/client/index.html",
+	"dist/skills/skill-creator/SKILL.md",
+	"dist/skills/skill-finder/SKILL.md",
+	"LICENSE",
+]) {
 	if (!files.includes(`package/${required}`)) throw new Error(`Missing ${required}`);
 }
 const packed = JSON.parse(await run(["tar", "-xOf", archive, "package/package.json"], root));
