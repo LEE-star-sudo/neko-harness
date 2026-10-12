@@ -139,3 +139,13 @@ describe("neko.config.json (2.4)", () => {
 		expect(mergeNekoConfig(DEFAULT_NEKO_CONFIG, {}).theme).toBe("auto");
 	});
 });
+
+it("parses, validates, and merges skills.marketUrl", () => {
+	const parsed = parseNekoConfig('{"skills": {"marketUrl": "https://market.example.com"}}', "test.json", {});
+	expect(parsed.skills?.marketUrl).toBe("https://market.example.com");
+	expect(() => parseNekoConfig('{"skills": {"marketUrl": 42}}', "test.json", {})).toThrow(/marketUrl/);
+	expect(() => parseNekoConfig('{"skills": "nope"}', "test.json", {})).toThrow(/skills/);
+	const merged = mergeNekoConfig({ skills: { marketUrl: "https://a.example.com" } }, { skills: {} });
+	expect(merged.skills?.marketUrl).toBe("https://a.example.com");
+	expect(mergeNekoConfig({}, {}).skills).toBeUndefined();
+});

@@ -15,6 +15,12 @@ export type Skill = {
 	readonly disableModelInvocation: boolean;
 };
 
+/** Discovery level of a skill; higher-priority levels override lower ones on name clashes. */
+export type SkillLevel = "project" | "user" | "builtin";
+
+/** A skill tagged with the level it was discovered at (tagged by the caller that scanned the directory). */
+export type LeveledSkill = Skill & { readonly level: SkillLevel };
+
 type SkillFrontmatter = {
 	name?: string;
 	description?: string;
@@ -88,8 +94,8 @@ export const scanSkillsDir = async (
 };
 
 /** Merge skills from several directories; a later directory's skill overrides an earlier same-named one. */
-export const mergeSkills = (groups: readonly Skill[][]): Skill[] => {
-	const byName = new Map<string, Skill>();
+export const mergeSkills = <T extends Skill>(groups: readonly (readonly T[])[]): T[] => {
+	const byName = new Map<string, T>();
 	for (const group of groups) for (const skill of group) byName.set(skill.name, skill);
 	return [...byName.values()];
 };

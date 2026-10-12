@@ -1,12 +1,14 @@
 export { CompactionDoc, type CompactionRecord } from "./compaction.ts";
 export {
 	DEFAULT_NEKO_CONFIG,
+	DEFAULT_SKILL_MARKET_URL,
 	findNekoConfigFile,
 	loadNekoConfig,
 	mergeNekoConfig,
 	NEKO_CONFIG_BASENAME,
 	type NekoConfig,
 	type NekoGatewayConfig,
+	type NekoSkillsConfig,
 	type NekoTheme,
 	parseNekoConfig,
 } from "./config.ts";
@@ -37,6 +39,7 @@ export {
 	type UsageTotals,
 	userText,
 } from "./projection.ts";
+export { stripFrontmatter } from "./prompt/frontmatter.ts";
 export {
 	createNekoRuntime,
 	DEFAULT_MODEL,
@@ -55,4 +58,5 @@ export {
 	type NekoSubmitOptions,
 } from "./runtime.ts";
 export { mergeUsage } from "./session-metadata.ts";
+export { parseSkillInvocation, type SkillInvocation } from "./skill-invocation.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

@@ -33,6 +33,11 @@
 			"neko-source": "./src/workspace-files.ts",
 			"types": "./dist/workspace-files.d.ts",
 			"import": "./dist/workspace-files.js"
+		},
+		"./skill-invocation": {
+			"neko-source": "./src/skill-invocation.ts",
+			"types": "./dist/skill-invocation.d.ts",
+			"import": "./dist/skill-invocation.js"
 		}
 	},
 	"scripts": {

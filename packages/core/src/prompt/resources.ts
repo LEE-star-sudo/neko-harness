@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isMissing, type PromptDiagnostic, type ReportPromptDiagnostic, warnPromptDiagnostic } from "./diagnostics.ts";
-import { mergeSkills, type Skill, scanSkillsDir } from "./skills.ts";
+import { type LeveledSkill, mergeSkills, type Skill, type SkillLevel, scanSkillsDir } from "./skills.ts";
 
 export type PromptResources = {
 	/** AGENTS.md files in injection order: user level first, then workspace level. */
 	readonly contextFiles: readonly { path: string; content: string }[];
-	readonly skills: readonly Skill[];
+	readonly skills: readonly LeveledSkill[];
 	/** Same-read text of the explicitly requested winning skill; not part of a system snapshot. */
 	readonly invocation?: { readonly filePath: string; readonly content: string };
 };
@@ -17,9 +18,16 @@ export const userSkillsDir = (home: string): string => join(home, ".agents", "sk
 export const workspaceAgentsFile = (workspace: string): string => join(workspace, "AGENTS.md");
 export const workspaceSkillsDir = (workspace: string): string => join(workspace, ".agents", "skills");
 
+/**
+ * Builtin skills shipped inside the core package. Resolved relative to this module so
+ * source (`src/prompt/`) and build (`dist/prompt/`) layouts both land on `<core>/skills/`.
+ */
+export const BUILTIN_SKILLS_DIR = fileURLToPath(new URL("../../skills/", import.meta.url));
+
 const readResources = async (
 	workspace: string,
 	home: string,
+	builtinDir: string | null,
 	report: ReportPromptDiagnostic,
 	invocationName?: string,
 ): Promise<PromptResources> => {
@@ -44,11 +52,14 @@ const readResources = async (
 				if (skill.name === invocationName) candidates.set(skill.filePath, content);
 			}
 		: undefined;
-	const [user, project] = await Promise.all([
-		scanSkillsDir(userSkillsDir(home), report, capture),
-		scanSkillsDir(workspaceSkillsDir(workspace), report, capture),
+	const scan = async (dir: string, level: SkillLevel): Promise<LeveledSkill[]> =>
+		(await scanSkillsDir(dir, report, capture)).map((skill) => ({ ...skill, level }));
+	const [builtin, user, project] = await Promise.all([
+		builtinDir === null ? Promise.resolve([]) : scan(builtinDir, "builtin"),
+		scan(userSkillsDir(home), "user"),
+		scan(workspaceSkillsDir(workspace), "project"),
 	]);
-	const skills = mergeSkills([user, project]);
+	const skills = mergeSkills([builtin, user, project]);
 	const winner = invocationName === undefined ? undefined : skills.find((skill) => skill.name === invocationName);
 	if (winner && candidates) {
 		const content = candidates.get(winner.filePath);
@@ -61,12 +72,14 @@ const readResources = async (
 export const createResourceLoader = (
 	home: string = homedir(),
 	report: ReportPromptDiagnostic = warnPromptDiagnostic,
+	options?: { readonly builtinDir?: string | null },
 ) => {
+	const builtinDir = options?.builtinDir === undefined ? BUILTIN_SKILLS_DIR : options.builtinDir;
 	// Between loads, remember diagnostics only, never file contents or stat fingerprints.
 	const previous = new Map<string, Set<string>>();
 	return async (workspace: string, invocationName?: string): Promise<PromptResources> => {
 		const diagnostics: PromptDiagnostic[] = [];
-		const resources = await readResources(workspace, home, (d) => diagnostics.push(d), invocationName);
+		const resources = await readResources(workspace, home, builtinDir, (d) => diagnostics.push(d), invocationName);
 		const known = previous.get(workspace);
 		const current = new Set<string>();
 		for (const diagnostic of diagnostics) {
@@ -78,4 +91,25 @@ export const createResourceLoader = (
 		else previous.delete(workspace);
 		return resources;
 	};
+};
+
+/**
+ * Scan all three skill levels WITHOUT merging (project, then user, then builtin), each tagged
+ * with its level. Market/install UIs derive per-level install state and the active winner;
+ * conversation prompts use createResourceLoader's merged view instead.
+ */
+export const scanSkillsByLevel = async (
+	workspace: string,
+	home: string = homedir(),
+	builtinDir: string | null = BUILTIN_SKILLS_DIR,
+	report: ReportPromptDiagnostic = warnPromptDiagnostic,
+): Promise<LeveledSkill[]> => {
+	const scan = async (dir: string, level: SkillLevel): Promise<LeveledSkill[]> =>
+		(await scanSkillsDir(dir, report)).map((skill) => ({ ...skill, level }));
+	const [builtin, user, project] = await Promise.all([
+		builtinDir === null ? [] : scan(builtinDir, "builtin"),
+		scan(userSkillsDir(home), "user"),
+		scan(workspaceSkillsDir(workspace), "project"),
+	]);
+	return [...project, ...user, ...builtin];
 };

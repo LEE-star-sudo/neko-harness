@@ -6,6 +6,12 @@ import type { NekoModelRef } from "./runtime.ts";
 
 export type NekoTheme = "light" | "dark" | "auto";
 
+/** Skill market settings. */
+export type NekoSkillsConfig = {
+	/** Base URL of the skill market API; defaults to the official market. */
+	readonly marketUrl?: string;
+};
+
 /** Gateway listen addresses, consumed by the gateway change (v1 core only carries them). */
 export type NekoGatewayConfig = {
 	readonly host?: string;
@@ -21,7 +27,10 @@ export type NekoConfig = {
 	readonly storagePath?: string;
 	readonly gateway?: NekoGatewayConfig;
 	readonly theme?: NekoTheme;
+	readonly skills?: NekoSkillsConfig;
 };
+
+export const DEFAULT_SKILL_MARKET_URL = "https://skill.kirineko.tech";
 
 export const NEKO_CONFIG_BASENAME = "neko.config.json";
 
@@ -106,6 +115,9 @@ export function mergeNekoConfig(base: NekoConfig, overrides: NekoConfig): NekoCo
 					gateway: mergeGateway(base.gateway, overrides.gateway),
 				}
 			: {}),
+		...(base.skills !== undefined || overrides.skills !== undefined
+			? { skills: { ...base.skills, ...overrides.skills } }
+			: {}),
 	};
 }
 
@@ -185,5 +197,15 @@ function validate(config: Record<string, unknown>, source: string): void {
 	const theme = config.theme;
 	if (theme !== undefined && theme !== "light" && theme !== "dark" && theme !== "auto") {
 		throw new Error(`neko config: ${source}: "theme" must be "light", "dark", or "auto".`);
+	}
+	const skills = config.skills;
+	if (skills !== undefined) {
+		if (typeof skills !== "object" || skills === null) {
+			throw new Error(`neko config: ${source}: "skills" must be an object.`);
+		}
+		const { marketUrl } = skills as Record<string, unknown>;
+		if (marketUrl !== undefined && typeof marketUrl !== "string") {
+			throw new Error(`neko config: ${source}: "skills.marketUrl" must be a string.`);
+		}
 	}
 }

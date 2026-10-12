@@ -107,7 +107,9 @@ it("refreshes project instructions and skills when a new input is admitted", asy
 		await runtime.waitAnswer(await runtime.submit("after deletion"));
 		const third = getCurrentSystemMessage(contexts[2]!.messages)?.sections ?? {};
 		expect(third.project_context).toBeUndefined();
-		expect(third.skills).toBeUndefined();
+		// The workspace skill is gone; builtin skills still populate the section.
+		expect(third.skills).toBeDefined();
+		expect(third.skills).not.toContain("<name>pdf</name>");
 	} finally {
 		await runtime.close();
 	}

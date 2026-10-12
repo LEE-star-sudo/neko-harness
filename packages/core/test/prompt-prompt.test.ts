@@ -21,7 +21,7 @@ const input = (cwd: string, tools: string[]): PromptInput =>
 	({ agent: { cwd, tools: tools.map((name) => ({ name })) } }) as unknown as PromptInput;
 
 const renderAll = async (home: string, cwd: string, tools: string[]) => {
-	const load = createResourceLoader(home);
+	const load = createResourceLoader(home, undefined, { builtinDir: null });
 	const extension = createNekoPrompt((_id, workspace) => load(workspace));
 	const out: Record<string, string | undefined> = {};
 	const shared = input(cwd, tools);

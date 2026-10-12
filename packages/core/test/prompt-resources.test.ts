@@ -31,7 +31,7 @@ it("loads user-level then workspace-level AGENTS.md and merges skills with proje
 	writeSkill(join(home), "only-user", "user only");
 	writeSkill(workspace, "shared", "project shared");
 
-	const load = createResourceLoader(home);
+	const load = createResourceLoader(home, undefined, { builtinDir: null });
 	const resources = await load(workspace);
 	expect(resources.contextFiles.map((f) => f.content)).toEqual(["user rules", "project rules"]);
 	expect(resources.contextFiles[0]!.path).toBe(join(home, ".agents", "AGENTS.md"));
@@ -50,12 +50,12 @@ it("omits missing files and survives unreadable ones", async () => {
 	writeAgents(unreadable, "user rules");
 	chmodSync(join(unreadable, "AGENTS.md"), 0o000);
 	try {
-		const resources = await createResourceLoader(home)(workspace);
+		const resources = await createResourceLoader(home, undefined, { builtinDir: null })(workspace);
 		expect(resources.contextFiles.map((f) => f.content)).toEqual(["project rules"]);
 	} finally {
 		chmodSync(join(unreadable, "AGENTS.md"), 0o644);
 	}
-	const empty = await createResourceLoader(directory())(directory());
+	const empty = await createResourceLoader(directory(), undefined, { builtinDir: null })(directory());
 	expect(empty.contextFiles).toEqual([]);
 	expect(empty.skills).toEqual([]);
 });
@@ -64,7 +64,7 @@ it("reloads each workspace on AGENTS.md edits and new skills", async () => {
 	const home = directory();
 	const workspace = directory();
 	writeAgents(workspace, "v1");
-	const load = createResourceLoader(home);
+	const load = createResourceLoader(home, undefined, { builtinDir: null });
 
 	expect((await load(workspace)).contextFiles[0]!.content).toBe("v1");
 	// Loading another workspace must not affect later reads of this one.
@@ -86,7 +86,7 @@ it("refreshes permissions without mtime changes and reports failures without ins
 	const file = join(workspace, "AGENTS.md");
 	writeAgents(workspace, "private instruction body");
 	const diagnostics: { path: string; message: string }[] = [];
-	const load = createResourceLoader(home, (d) => diagnostics.push(d));
+	const load = createResourceLoader(home, (d) => diagnostics.push(d), { builtinDir: null });
 	expect((await load(workspace)).contextFiles).toHaveLength(1);
 	chmodSync(file, 0o000);
 	try {
@@ -109,7 +109,7 @@ it("diagnoses large instructions without truncating them", async () => {
 	const content = "x".repeat(65537);
 	writeAgents(workspace, content);
 	const diagnostics: { path: string; message: string }[] = [];
-	const resources = await createResourceLoader(home, (d) => diagnostics.push(d))(workspace);
+	const resources = await createResourceLoader(home, (d) => diagnostics.push(d), { builtinDir: null })(workspace);
 	expect(resources.contextFiles[0]?.content).toBe(content);
 	expect(diagnostics).toHaveLength(1);
 	expect(diagnostics[0]?.path).toBe(join(workspace, "AGENTS.md"));
@@ -127,13 +127,14 @@ it("captures the project winner for explicit invocation even when hidden from mo
 	const content = "---\ndescription: project shared\ndisable-model-invocation: true\n---\nproject body";
 	writeFileSync(filePath, content);
 
-	const load = createResourceLoader(home);
+	const load = createResourceLoader(home, undefined, { builtinDir: null });
 	const resources = await load(workspace, "shared");
 	expect(resources.skills.find((skill) => skill.name === "shared")).toEqual({
 		name: "shared",
 		description: "project shared",
 		filePath,
 		disableModelInvocation: true,
+		level: "project",
 	});
 	expect(resources.invocation).toEqual({ filePath, content });
 	expect((await load(workspace, "other")).invocation).toEqual({
@@ -142,4 +143,76 @@ it("captures the project winner for explicit invocation even when hidden from mo
 	});
 	expect(await load(workspace)).not.toHaveProperty("invocation");
 	expect(await load(workspace, "unknown")).not.toHaveProperty("invocation");
+});
+
+const writeBuiltinSkill = (dir: string, name: string, description: string) => {
+	const skillDir = join(dir, name);
+	mkdirSync(skillDir, { recursive: true });
+	writeFileSync(join(skillDir, "SKILL.md"), `---\ndescription: ${description}\n---\nbody`);
+};
+
+it("merges three levels with project > user > builtin and tags each skill's level", async () => {
+	const home = directory();
+	const workspace = directory();
+	const builtin = directory();
+	writeBuiltinSkill(builtin, "shared", "builtin shared");
+	writeBuiltinSkill(builtin, "only-builtin", "builtin only");
+	writeSkill(home, "shared", "user shared");
+	writeSkill(home, "only-user", "user only");
+	writeSkill(workspace, "shared", "project shared");
+
+	const resources = await createResourceLoader(home, undefined, { builtinDir: builtin })(workspace);
+	const byName = new Map(resources.skills.map((s) => [s.name, s]));
+	expect(byName.get("shared")?.description).toBe("project shared");
+	expect(byName.get("shared")?.level).toBe("project");
+	expect(byName.get("only-user")?.level).toBe("user");
+	expect(byName.get("only-builtin")?.level).toBe("builtin");
+
+	writeSkill(home, "only-builtin", "user override");
+	const overridden = await createResourceLoader(home, undefined, { builtinDir: builtin })(workspace);
+	expect(overridden.skills.find((s) => s.name === "only-builtin")?.level).toBe("user");
+});
+
+it("treats a missing builtin directory as empty without diagnostics", async () => {
+	const home = directory();
+	const workspace = directory();
+	writeSkill(workspace, "proj", "project only");
+	const diagnostics: { path: string; message: string }[] = [];
+	const missing = join(directory(), "no-such-builtin-dir");
+	const resources = await createResourceLoader(home, (d) => diagnostics.push(d), { builtinDir: missing })(workspace);
+	expect(resources.skills.map((s) => s.name)).toEqual(["proj"]);
+	expect(diagnostics).toEqual([]);
+});
+
+it("expands an explicitly invoked builtin skill from the builtin level", async () => {
+	const home = directory();
+	const workspace = directory();
+	const builtin = directory();
+	writeBuiltinSkill(builtin, "ship", "builtin ship");
+	const resources = await createResourceLoader(home, undefined, { builtinDir: builtin })(workspace, "ship");
+	expect(resources.invocation).toEqual({
+		filePath: join(builtin, "ship", "SKILL.md"),
+		content: "---\ndescription: builtin ship\n---\nbody",
+	});
+	expect(resources.skills.find((s) => s.name === "ship")?.level).toBe("builtin");
+});
+
+it("scanSkillsByLevel returns unmerged duplicates tagged per level", async () => {
+	const home = directory();
+	const workspace = directory();
+	const builtin = directory();
+	writeBuiltinSkill(builtin, "dup", "builtin dup");
+	writeSkill(home, "dup", "user dup");
+	writeSkill(workspace, "dup", "project dup");
+	writeSkill(workspace, "solo", "project solo");
+
+	const { scanSkillsByLevel } = await import("../src/prompt/resources.ts");
+	const skills = await scanSkillsByLevel(workspace, home, builtin);
+	const dups = skills.filter((s) => s.name === "dup");
+	expect(dups.map((s) => [s.level, s.description])).toEqual([
+		["project", "project dup"],
+		["user", "user dup"],
+		["builtin", "builtin dup"],
+	]);
+	expect(skills.find((s) => s.name === "solo")?.level).toBe("project");
 });

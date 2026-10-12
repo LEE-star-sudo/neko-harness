@@ -45,7 +45,8 @@ import { ImageMetadataDoc, imageKey, trackImageMetadata } from "./image-metadata
 import { imagePrompt, prepareInput } from "./images.ts";
 import { expandSkillCommand } from "./prompt/invoke.ts";
 import { createNekoPrompt } from "./prompt/prompt.ts";
-import { createResourceLoader } from "./prompt/resources.ts";
+import { createResourceLoader, scanSkillsByLevel } from "./prompt/resources.ts";
+import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
 import { ImageTools } from "./read-image.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
@@ -164,6 +165,8 @@ export type NekoSkillInfo = {
 	readonly description: string;
 	/** Absolute path of the SKILL.md file. */
 	readonly location: string;
+	/** Discovery level this skill was resolved from (project > user > builtin). */
+	readonly level: SkillLevel;
 };
 
 /** What one conversation currently runs with (resolved agent). */
@@ -269,8 +272,13 @@ export type NekoRuntime = {
 	removeCredential(provider: CredentialProviderId): Promise<void>;
 	/** The conversation's resolved agent: effective model, thinking level, selected extension names. */
 	getAgent(id?: ConversationId): Promise<NekoAgentInfo>;
-	/** Skills available to a conversation's workspace (user level + workspace level, project winning). */
+	/** Skills available to a conversation's workspace (project > user > builtin, merged). */
 	listSkills(id?: ConversationId): Promise<NekoSkillInfo[]>;
+	/**
+	 * Skills at every level for one workspace WITHOUT merging (duplicates across levels included),
+	 * each tagged with its level. Market/install UIs derive install state from this.
+	 */
+	listSkillsByLevel(cwd?: string): Promise<NekoSkillInfo[]>;
 	/**
 	 * Install an extension, replacing one with the same name in place (pi-durable reload semantics):
 	 * running work finishes on the code it started with; the next phase, request, or call uses the new code.
@@ -833,7 +841,21 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			const session = await sessionFor(id);
 			const agent = await session.conversation.agent(context);
 			const { skills } = await loadResources(savedWorkspace(agent.cwd));
-			return skills.map((skill) => ({ name: skill.name, description: skill.description, location: skill.filePath }));
+			return skills.map((skill) => ({
+				name: skill.name,
+				description: skill.description,
+				location: skill.filePath,
+				level: skill.level,
+			}));
+		},
+		async listSkillsByLevel(cwd: string) {
+			const skills = await scanSkillsByLevel(normalizeWorkspace(cwd ?? defaultCwd), options.promptHome ?? homedir());
+			return skills.map((skill) => ({
+				name: skill.name,
+				description: skill.description,
+				location: skill.filePath,
+				level: skill.level,
+			}));
 		},
 		installExtension(extension) {
 			registry.install(extension);
