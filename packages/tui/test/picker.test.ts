@@ -176,3 +176,83 @@ it("keeps search through updates and chooses the adjacent item when selection di
 	await tick();
 	expect(picked).toBe("c");
 });
+
+it("skips header rows in navigation and hides them while filtering", async () => {
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	const picked: string[] = [];
+	await panel.show(
+		"Market",
+		async () => [
+			{ value: "h:dev", label: "development (2)", header: true },
+			{ value: "think", label: "think" },
+			{ value: "hunt", label: "hunt" },
+			{ value: "h:docs", label: "documents (1)", header: true },
+			{ value: "pdf", label: "pdf" },
+		],
+		async (value) => {
+			picked.push(value);
+		},
+	);
+	// 初始选中第一个非组头项；Enter 不触发组头。
+	expect(panel.render(80).join("\n")).toContain("development (2)");
+	panel.handleInput("\x1b[B"); // down → hunt（跳过 dev 组头之外不移动）
+	panel.handleInput("\x1b[B"); // down → pdf（跳过 documents 组头）
+	panel.handleInput("\r");
+	await tick();
+	expect(picked).toEqual(["pdf"]);
+
+	// 搜索时组头隐藏
+	const panel2 = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	await panel2.show(
+		"Market",
+		async () => [
+			{ value: "h:dev", label: "development (1)", header: true },
+			{ value: "think", label: "think" },
+		],
+		async () => {},
+	);
+	panel2.search.setValue("thi");
+	panel2.handleInput("");
+	const text = panel2.render(80).join("\n");
+	expect(text).toContain("think");
+	expect(text).not.toContain("development (1)");
+});
+
+it("opens a detail view returned by pick and pops it with Esc before closing", async () => {
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	let closed = 0;
+	const detail = {
+		help: "Esc Back",
+		lines: () => ["DETAIL VIEW"],
+		handleKey: () => true,
+	};
+	await panel.show(
+		"Market",
+		async () => [{ value: "think", label: "think" }],
+		async () => detail,
+	);
+	const closingPanel = new PickerPanel(
+		() => {},
+		() => closed++,
+	);
+	void closingPanel;
+	panel.handleInput("\r");
+	await tick();
+	expect(panel.render(80).join("\n")).toContain("DETAIL VIEW");
+	expect(panel.detailOpen).toBe(true);
+	expect(panel.open).toBe(true);
+	panel.handleInput("\x1b"); // Esc → 弹回列表
+	expect(panel.detailOpen).toBe(false);
+	expect(panel.open).toBe(true);
+	panel.handleInput("\x1b"); // 再 Esc → 关面板
+	expect(panel.open).toBe(false);
+});

@@ -10,6 +10,7 @@ export const commands: SlashCommand[] = [
 	{ name: "think", description: "Set thinking level (/think high)" },
 	{ name: "fork", description: "Fork this session" },
 	{ name: "archive", description: "Archive this session" },
+	{ name: "skills", description: "Browse and install skills from the market" },
 ];
 export const labels = {
 	ready: "Ready",

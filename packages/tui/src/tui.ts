@@ -36,6 +36,7 @@ import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
+import { openSkillMarket } from "./skill-market-ui.ts";
 import {
 	getActiveThemeMode,
 	getEditorTheme,
@@ -349,6 +350,10 @@ class NekoTuiApp {
 			void this.openModelOverlay();
 			return;
 		}
+		if (trimmed === "/skills") {
+			void this.openSkillsOverlay();
+			return;
+		}
 		if (trimmed.startsWith("/think")) {
 			void this.configureThinking(trimmed.slice("/think".length).trim());
 			return;
@@ -580,6 +585,15 @@ class NekoTuiApp {
 		);
 		this.#sessionPanelTimer = setInterval(() => this.#panel.update(this.sessionItems()), 60_000);
 		this.#ui.setFocus(this.#panel);
+	}
+
+	/** 技能市场面板：浏览/详情/预览/两级安装与卸载（gateway neko.skill-market）。 */
+	async openSkillsOverlay(): Promise<void> {
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
+		const workspace = this.#options.cwd ?? process.cwd();
+		const ready = openSkillMarket(this.#panel, this.#gateway.client, workspace);
+		this.#ui.setFocus(this.#panel);
+		await ready;
 	}
 
 	async openModelOverlay(): Promise<void> {

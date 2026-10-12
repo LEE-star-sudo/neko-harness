@@ -11,7 +11,20 @@ import {
 import { labels } from "../labels.ts";
 import { style, theme } from "../theme.ts";
 
-export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string };
+export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string; header?: boolean };
+
+/**
+ * An in-panel detail view (list stays underneath; Esc pops back to the list).
+ * Used by the skill market for skill details / preview / inline confirms.
+ */
+export type PickerDetail = {
+	/** Body lines for the current width/height budget. */
+	lines(width: number, height: number): readonly string[];
+	/** Footer hint shown while the view is open. */
+	help: string;
+	/** Return true when the key was consumed; Esc/ctrl+c are reserved for popping the view. */
+	handleKey(data: string): boolean;
+};
 
 /** A single searchable panel. Async generations cannot reopen a closed panel. */
 export class PickerPanel implements Component {
@@ -23,7 +36,8 @@ export class PickerPanel implements Component {
 	#error = "";
 	#title = "";
 	#load: (() => Promise<readonly PickerItem[]>) | undefined;
-	#pick: ((value: string) => Promise<void>) | undefined;
+	// biome-ignore lint/suspicious/noConfusingVoidType: pick 要么无返回（关闭面板）要么返回详情视图
+	#pick: ((value: string) => Promise<void | PickerDetail>) | undefined;
 	height = 10;
 	readonly changed: () => void;
 	readonly closed: () => void;
@@ -44,7 +58,8 @@ export class PickerPanel implements Component {
 	async show(
 		title: string,
 		load: () => Promise<readonly PickerItem[]>,
-		pick: (value: string) => Promise<void>,
+		// biome-ignore lint/suspicious/noConfusingVoidType: pick 要么无返回（关闭面板）要么返回详情视图
+		pick: (value: string) => Promise<void | PickerDetail>,
 	): Promise<void> {
 		if (this.open) return;
 		this.#title = title;
@@ -81,18 +96,61 @@ export class PickerPanel implements Component {
 	}
 	close(): void {
 		++this.#generation;
+		this.#details = [];
 		this.#state = "closed";
 		this.closed();
 		this.changed();
 	}
+	/** Push a detail view above the current content (Esc pops one level at a time). */
+	showDetail(detail: PickerDetail): void {
+		if (!this.open) return;
+		this.#details.push(detail);
+		this.changed();
+	}
+	/** Pop the top detail view, back to the previous view or the list. */
+	popDetail(): void {
+		if (this.#details.length === 0) return;
+		this.#details.pop();
+		this.changed();
+	}
+	get detailOpen(): boolean {
+		return this.#details.length > 0;
+	}
+	get #detail(): PickerDetail | undefined {
+		return this.#details[this.#details.length - 1];
+	}
+	#details: PickerDetail[] = [];
 	#filtered(): readonly PickerItem[] {
 		const query = this.search.getValue().toLowerCase();
-		return this.#items.filter((item) =>
-			`${item.label} ${item.description ?? ""} ${item.searchText ?? ""}`.toLowerCase().includes(query),
-		);
+		// 搜索时隐藏组头，平铺命中项。
+		if (query !== "") return this.#items.filter((item) => !item.header && this.#matches(item, query));
+		return this.#items;
+	}
+	#matches(item: PickerItem, query: string): boolean {
+		return `${item.label} ${item.description ?? ""} ${item.searchText ?? ""}`.toLowerCase().includes(query);
+	}
+	/** 第一个可选中（非组头）下标。 */
+	#firstSelectable(items: readonly PickerItem[]): number {
+		return items.findIndex((item) => !item.header);
+	}
+	#move(delta: -1 | 1): void {
+		const items = this.#filtered();
+		let next = this.#index + delta;
+		while (next >= 0 && next < items.length && items[next]?.header) next += delta;
+		this.#index = Math.max(0, Math.min(Math.max(0, items.length - 1), next));
+		if (items[this.#index]?.header) this.#index = this.#firstSelectable(items);
 	}
 	handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
+		// 详情视图：Esc 弹回列表，其余键先交给视图。
+		if (this.#detail !== undefined) {
+			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+				this.popDetail();
+			} else if (this.#detail.handleKey(data)) {
+				this.changed();
+			}
+			return;
+		}
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 			this.close();
 			return;
@@ -103,16 +161,24 @@ export class PickerPanel implements Component {
 		}
 		if (this.#state !== "ready") return;
 		const items = this.#filtered();
-		if (matchesKey(data, "up")) this.#index = Math.max(0, this.#index - 1);
-		else if (matchesKey(data, "down")) this.#index = Math.min(Math.max(0, items.length - 1), this.#index + 1);
+		if (matchesKey(data, "up")) this.#move(-1);
+		else if (matchesKey(data, "down")) this.#move(1);
 		else if (matchesKey(data, "enter")) {
 			const item = items[this.#index];
-			if (!item) return;
+			if (!item || item.header) return;
 			const generation = this.#generation;
 			this.#state = "applying";
 			void this.#pick!(item.value).then(
-				() => {
-					if (generation === this.#generation) this.close();
+				(result) => {
+					if (generation !== this.#generation) return;
+					// pick 返回 PickerDetail 时进入详情视图而不是关闭（市场详情页）。
+					if (result !== undefined && typeof result === "object" && "lines" in result) {
+						this.#state = "ready";
+						this.showDetail(result as PickerDetail);
+						this.changed();
+						return;
+					}
+					this.close();
 				},
 				(error) => {
 					if (generation !== this.#generation) return;
@@ -123,7 +189,7 @@ export class PickerPanel implements Component {
 			);
 		} else {
 			this.search.handleInput(data);
-			this.#index = 0;
+			this.#index = this.#firstSelectable(this.#filtered());
 		}
 		this.changed();
 	}
@@ -131,6 +197,14 @@ export class PickerPanel implements Component {
 		const height = Math.max(1, this.height);
 		const w = Math.max(1, width - 2);
 		const rows = [style.bold(this.#title)];
+		if (this.#detail !== undefined) {
+			const body = this.#detail.lines(w, Math.max(1, height - 2));
+			rows.push(...body);
+			while (rows.length < height - 1) rows.push("");
+			// 详情视图的 help 由视图自行配色（键位 accent、说明 dim），面板不再整体压暗。
+			if (height > 1) rows.push(this.#detail.help);
+			return rows.slice(0, height).map((line) => theme.panel(` ${truncateToWidth(line, w, "...", true)} `));
+		}
 		if (height >= 4) rows.push(...this.search.render(w).slice(0, 1));
 		const help = this.#state === "error" ? labels.retry : this.#state === "ready" ? labels.select : labels.close;
 		const available = Math.max(1, height - rows.length - 1);
@@ -145,11 +219,19 @@ export class PickerPanel implements Component {
 		else {
 			const items = this.#filtered();
 			this.#index = Math.min(this.#index, Math.max(0, items.length - 1));
+			if (items[this.#index]?.header) {
+				const first = this.#firstSelectable(items);
+				if (first >= 0) this.#index = first;
+			}
 			const selected = items[this.#index];
 			const details = height >= 9 && selected?.description ? wrapTextWithAnsi(selected.description, w).slice(0, 2) : [];
 			const count = Math.max(1, available - details.length);
 			const start = Math.max(0, Math.min(this.#index - Math.floor(count / 2), items.length - count));
 			for (const [i, item] of items.slice(start, start + count).entries()) {
+				if (item.header) {
+					rows.push(theme.dim(` ${item.label}`));
+					continue;
+				}
 				const right = item.rightLabel ?? "";
 				const leftWidth = Math.max(1, w - 3 - visibleWidth(right));
 				const left = truncateToWidth(item.label, leftWidth, "...");
