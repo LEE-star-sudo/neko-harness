@@ -74,6 +74,8 @@ neko update
 
 完成后重新运行 `neko tui` 或 `neko web`。
 
+Windows 上的 `neko update` 会显示手动升级指引。先退出 neko，再运行 `bun add --global neko-harness@latest`，完成后重新启动。
+
 TUI 输入 `/version`，或打开 Web「设置 → 关于与更新」，可查看版本、检查更新。界面会提示何时需要升级、重启或刷新，由你手动操作。
 
 如果当前版本没有 `neko update` 命令，可重新运行 `bun add --global neko-harness`。

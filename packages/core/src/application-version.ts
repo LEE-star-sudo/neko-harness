@@ -2,6 +2,9 @@
 declare const NEKO_BUILD_VERSION: string;
 export const RUNNING_VERSION = typeof NEKO_BUILD_VERSION === "undefined" ? "development" : NEKO_BUILD_VERSION;
 export const APPLICATION_PROTOCOL = 1;
+export function upgradeCommand(platform: string): string {
+	return platform === "win32" ? "bun add --global neko-harness@latest" : "neko update";
+}
 export type UpdateState = {
 	runningVersion: string;
 	installedVersion: string | null;

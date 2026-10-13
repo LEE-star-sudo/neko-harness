@@ -2,6 +2,7 @@ import { expect, it } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { UpdateChecker } from "../../core/src/application-updates.ts";
 import { acquireUpdateLock, confirmGlobalInstallation, updateCommand } from "../src/update.ts";
 
@@ -95,5 +96,48 @@ it("serializes update attempts and releases ownership", async () => {
 		await (await acquireUpdateLock(lock))();
 	} finally {
 		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("only returns manual instructions on Windows, before touching installation or updates", async () => {
+	for (const runningVersion of ["0.2.7", "development"]) {
+		const text = await updateCommand({
+			platform: "win32",
+			runningVersion,
+			get entry(): string {
+				throw new Error("Installation must not be inspected");
+			},
+			get run(): never {
+				throw new Error("Bun must not be invoked");
+			},
+			get checker(): never {
+				throw new Error("Updates must not be checked");
+			},
+		});
+		expect(text).toBe("请先退出 neko，然后运行：\nbun add --global neko-harness@latest\n完成后重新启动 neko。");
+		expect(text).not.toContain("已升级");
+		expect(text).not.toContain("已是最新版");
+	}
+});
+
+it("documents manual Windows updates and rejects invalid update arguments", async () => {
+	const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+	for (const args of [["--help"], ["--invalid"], ["--help", "extra"]]) {
+		const child = Bun.spawn([process.execPath, "--conditions=neko-source", entry, "update", ...args], {
+			stdout: "pipe",
+			stderr: "pipe",
+		});
+		const [out, err, code] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		if (args.length === 1 && args[0] === "--help") {
+			expect(code).toBe(0);
+			expect(out).toContain("Windows：先退出 neko，再运行 bun add --global neko-harness@latest");
+		} else {
+			expect(code).not.toBe(0);
+			expect(err).toContain("用法: neko update");
+		}
 	}
 });

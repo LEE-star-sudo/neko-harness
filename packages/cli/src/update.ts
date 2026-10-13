@@ -4,11 +4,12 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { installedVersion, UpdateChecker } from "@neko-harness/core/application-updates";
-import { newer, stableVersion } from "@neko-harness/core/application-version";
+import { newer, stableVersion, upgradeCommand } from "@neko-harness/core/application-version";
 
 export type UpdateCommandOptions = {
 	entry?: string;
 	runningVersion: string;
+	platform?: NodeJS.Platform;
 	run?: (args: string[], inherit?: boolean) => Promise<string>;
 	checker?: UpdateChecker;
 };
@@ -101,6 +102,8 @@ export async function acquireUpdateLock(path: string): Promise<() => Promise<voi
 	};
 }
 export async function updateCommand(options: UpdateCommandOptions): Promise<string> {
+	if ((options.platform ?? process.platform) === "win32")
+		return `请先退出 neko，然后运行：\n${upgradeCommand("win32")}\n完成后重新启动 neko。`;
 	if (!stableVersion(options.runningVersion)) throw new Error("当前安装方式不支持自升级，请按原方式更新。");
 	const run = options.run ?? runBun;
 	let install: Awaited<ReturnType<typeof confirmGlobalInstallation>>;
