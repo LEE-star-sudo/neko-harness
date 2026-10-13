@@ -2,12 +2,10 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "@earendil-works/chord";
+import { createHost, type Link } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel, Provider } from "@earendil-works/pi-ai";
 import type { Extension } from "@earendil-works/pi-durable";
-import { isServerId } from "@earendil-works/pi-protocol";
-import { Server, type ServerListener, SessionNotFoundError } from "@earendil-works/pi-server";
-import { createUnixListener } from "@earendil-works/pi-server/unix";
 import {
 	createNekoRuntime,
 	DEFAULT_MODEL,
@@ -17,9 +15,10 @@ import {
 	type NekoModelRef,
 	type NekoRuntime,
 } from "@neko-harness/core";
+import { isServerId } from "./identity.ts";
 import { removeGatewayPortFile, writeGatewayPortFile } from "./port-file.ts";
-import { createNekoServerServices, toConversationId } from "./server-services.ts";
-import { openNekoSessionHandle } from "./session-host.ts";
+import { createNekoServerServices } from "./server-services.ts";
+import { createUnixListener } from "./unix-link.ts";
 import { createWsListener, type WsListener } from "./ws-listener.ts";
 
 /** startGateway 选项：CLI flag > neko.config.json > 内置默认；runtime 透传字段见 core。 */
@@ -66,12 +65,12 @@ const DEFAULT_PORT = 8321;
 const SERVER_ID_FILENAME = "gateway-server-id";
 
 /**
- * 启动 neko 会话网关：打开 core runtime，以 pi-server 宿主模型托管全部会话，
+ * 启动 neko 会话网关：打开 core runtime，以 Chord 宿主模型托管全部会话，
  * 同时提供 Unix socket（本地客户端）与 WebSocket（浏览器/脚本）两种传输，
  * 上传同一份 neko 服务契约（design D3）。
  *
  * 单实例约束（design Risks）：Unix 路径或端口被活跃网关占用时拒绝启动并给出提示；
- * 进程死亡遗留的 stale socket 由 pi-server Unix listener 自动识别并接管。
+ * 进程死亡遗留的 stale socket 由网关 Unix listener 自动识别并接管。
  */
 export async function startGateway(options: NekoGatewayOptions = {}): Promise<NekoGateway> {
 	const context = options.context ?? BACKGROUND_CONTEXT;
@@ -91,13 +90,14 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			? options.socketPath
 			: fileConfig.gateway?.socketPath !== undefined
 				? fileConfig.gateway.socketPath
-				: // Windows 没有可用的 Unix socket 传输（pi-server/pi-client 均不支持 win32），默认仅 WS。
+				: // Windows 没有可用的 Unix socket 传输（网关未提供 Windows 命名管道传输），默认仅 WS。
 					process.platform === "win32"
 					? null
 					: join(nekoDir, `${serverId}.sock`);
 
 	const runtime = await createNekoRuntime({
 		context,
+		onReport: (error) => options.onError?.(error instanceof Error ? error : new Error(String(error))),
 		storage: options.storage ?? "sqlite",
 		...(options.storage !== "memory" ? { storagePath } : {}),
 		...(options.credentialsPath !== undefined ? { credentialsPath: options.credentialsPath } : {}),
@@ -142,45 +142,33 @@ type BindOptions = {
 };
 
 async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<NekoGateway> {
-	const { context, host, port, socketPath, serverId, nekoDir, model } = options;
-	const modelLabel = `${model.provider}/${model.modelId}`;
-
+	const { context, host, port, socketPath, serverId, nekoDir } = options;
+	const chord = createHost({
+		name: serverId,
+		dev: true,
+		onError: (error) => options.onError?.(error instanceof Error ? error : new Error(String(error))),
+	});
 	const serverServices = await createNekoServerServices({
+		host: chord,
 		runtime,
 		context,
 		marketUrl: options.marketUrl,
 		...(options.promptHome !== undefined ? { promptHome: options.promptHome } : {}),
 	});
 	let wsListener: WsListener | undefined;
-	const listeners: ServerListener[] = [];
-	if (socketPath !== null) {
-		listeners.push(createUnixListener({ path: socketPath, onError: options.onError }));
-	}
+	const listeners: { start(accept: (link: Link) => void): Promise<void>; close(): Promise<void> }[] = [];
+	if (socketPath !== null) listeners.push(createUnixListener({ path: socketPath, onError: options.onError }));
 	if (port !== null) {
 		wsListener = createWsListener({ host, port, onError: options.onError });
 		listeners.push(wsListener);
 	}
-
-	const server = new Server(
-		{
-			serverServices: serverServices.host,
-			async resolveSession(sessionId) {
-				const session = await runtime.getConversation(toConversationId(sessionId));
-				if (session === undefined) throw new SessionNotFoundError(`Unknown session: ${sessionId}`);
-				return { id: sessionId };
-			},
-			async openSession(metadata) {
-				const session = await runtime.getConversation(toConversationId(metadata.id));
-				if (session === undefined) throw new SessionNotFoundError(`Unknown session: ${metadata.id}`);
-				return openNekoSessionHandle({ runtime, session, modelLabel, onActivity: serverServices.refresh, context });
-			},
-		},
-		{ listeners, serverId, onError: options.onError },
-	);
 	try {
-		await server.start();
+		for (const listener of listeners)
+			await listener.start((link) => chord.accept(link, { principal: { connectionId: randomUUID() } }));
 	} catch (error) {
-		await serverServices.dispose().catch(() => {});
+		await Promise.allSettled(listeners.map((listener) => listener.close()));
+		await chord.close();
+		await serverServices.dispose();
 		throw toStartupError(error, { socketPath, port, host, serverId });
 	}
 
@@ -190,25 +178,37 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		await writeGatewayPortFile(portFile.nekoDir, portFile.serverId, `ws://${host}:${wsListener.port}`);
 	}
 
-	let closed = false;
-	return {
+	let closing: Promise<void> | undefined;
+	const gateway: NekoGateway = {
 		serverId,
 		socketPath: socketPath ?? undefined,
 		wsUrl: wsListener === undefined ? undefined : `ws://${host}:${wsListener.port}`,
 		port: wsListener?.port,
 		runtime,
 		async close() {
-			if (closed) return;
-			closed = true;
-			if (portFile !== undefined) await removeGatewayPortFile(portFile.nekoDir, portFile.serverId).catch(() => {});
-			await server.close();
-			await serverServices.dispose();
-			await runtime.close();
+			if (closing) return closing;
+			closing = (async () => {
+				if (portFile !== undefined) await removeGatewayPortFile(portFile.nekoDir, portFile.serverId).catch(() => {});
+				await Promise.all(listeners.map((listener) => listener.close()));
+				await chord.close();
+				await serverServices.dispose();
+				await runtime.close();
+			})();
+			return closing;
 		},
 	};
+	void runtime.closed
+		.then(async (result) => {
+			if (result.reason === "failed") {
+				options.onError?.(new Error("Gateway storage failed"));
+				await gateway.close();
+			}
+		})
+		.catch((error) => options.onError?.(error instanceof Error ? error : new Error(String(error))));
+	return gateway;
 }
 
-/** 活跃实例占用/stale 识别由 pi-server Unix listener 负责；此处把错误翻译为可操作的提示。 */
+/** 活跃实例占用/stale 识别由 Chord Unix listener 负责；此处把错误翻译为可操作的提示。 */
 function toStartupError(
 	error: unknown,
 	info: { socketPath: string | null; port: number | null; host: string; serverId: string },

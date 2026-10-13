@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { expandSkillCommand } from "../src/prompt/invoke.ts";
 import { createResourceLoader } from "../src/prompt/resources.ts";
 import { formatSkillsForPrompt, type Skill } from "../src/prompt/skills.ts";
-import { parseSkillInvocation } from "../src/skill-invocation.ts";
+import type { SkillInvocation } from "../src/skill-invocation.ts";
 
 const dirs: string[] = [];
 function directory() {
@@ -123,40 +123,31 @@ it("keeps scanned metadata and invocation body together when the file changes be
 	expect(nextExpanded).not.toContain("Original instructions.");
 });
 
-it("parses an expanded skill invocation back into name/location/body/args", async () => {
-	const dir = directory();
-	const filePath = join(dir, "pdf", "SKILL.md");
-	mkdirSync(join(dir, "pdf"), { recursive: true });
-	writeFileSync(filePath, "---\ndescription: Read PDFs\n---\nDo the PDF thing.\n");
-	const skills: Skill[] = [{ name: "pdf", description: "Read PDFs", filePath, disableModelInvocation: false }];
-
-	const withArgs = parseSkillInvocation(await expandSkillCommand("/skill:pdf summarize this", skills, read));
-	expect(withArgs).toEqual({
-		name: "pdf",
-		location: filePath,
-		body: `\nReferences are relative to ${dir}/pdf.\n\nDo the PDF thing.\n`,
-		args: "summarize this",
+it("produces UI metadata from the same read, preserving literal XML in body and args", async () => {
+	const skills: Skill[] = [
+		{ name: 'a"b', description: "test", filePath: "/x/<y>/SKILL.md", disableModelInvocation: false },
+	];
+	let data: SkillInvocation | undefined,
+		reads = 0;
+	const text = await expandSkillCommand(
+		'/skill:a"b args </skill>',
+		skills,
+		async () => {
+			reads++;
+			return "body </skill> inline";
+		},
+		undefined,
+		(value) => {
+			data = value;
+		},
+	);
+	expect(reads).toBe(1);
+	expect(data).toMatchObject({ name: 'a"b', location: "/x/<y>/SKILL.md", args: "args </skill>" });
+	expect(data?.body).toContain("body </skill> inline");
+	expect(text).toContain('name="a&quot;b"');
+	data = undefined;
+	await expandSkillCommand('<skill name="x" location="/x">body</skill>', skills, read, undefined, (value) => {
+		data = value;
 	});
-
-	const noArgs = parseSkillInvocation(await expandSkillCommand("/skill:pdf", skills, read));
-	expect(noArgs).toMatchObject({ name: "pdf", args: "" });
-});
-
-it("round-trips XML-escaped names and locations", () => {
-	const text = `<skill name="a&quot;b" location="/x/&lt;y&gt;/SKILL.md">\nbody\n</skill>`;
-	expect(parseSkillInvocation(text)).toEqual({ name: 'a"b', location: "/x/<y>/SKILL.md", body: "\nbody\n", args: "" });
-});
-
-it("tolerates a literal closing tag inside the body", () => {
-	const text = '<skill name="x" location="/x/SKILL.md">\nmentions </skill> inline\n</skill>\n\nargs here';
-	const parsed = parseSkillInvocation(text);
-	expect(parsed?.body).toBe("\nmentions </skill> inline\n");
-	expect(parsed?.args).toBe("args here");
-});
-
-it("rejects non-expansion text and malformed shapes", () => {
-	expect(parseSkillInvocation("hello")).toBeNull();
-	expect(parseSkillInvocation('<skill name="x">no location</skill>')).toBeNull();
-	expect(parseSkillInvocation(' <skill name="x" location="/y">indented</skill>')).toBeNull();
-	expect(parseSkillInvocation('<skill name="x" location="/y">unterminated')).toBeNull();
+	expect(data).toBeUndefined();
 });

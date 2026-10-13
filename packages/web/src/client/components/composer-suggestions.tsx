@@ -12,6 +12,7 @@ export function ComposerSuggestions({
 	onSelect,
 	onAccept,
 	message,
+	onRetry,
 }: {
 	/** 定位参照（输入卡片容器），面板宽度与之对齐 */
 	anchor: RefObject<HTMLElement | null>;
@@ -22,6 +23,7 @@ export function ComposerSuggestions({
 	onSelect: (index: number) => void;
 	onAccept: (index: number) => void;
 	message?: string;
+	onRetry?: () => void;
 }) {
 	const { refs, floatingStyles, isPositioned } = useFloating({
 		elements: { reference: anchor.current },
@@ -87,6 +89,16 @@ export function ComposerSuggestions({
 					))}
 				</div>
 				{message && <output className="block break-words px-3 py-2 text-sm text-ink-500">{message}</output>}
+				{onRetry && (
+					<button
+						type="button"
+						className="px-3 py-2 text-sm text-ink-900 underline"
+						onMouseDown={(event) => event.preventDefault()}
+						onClick={onRetry}
+					>
+						重试文件查询
+					</button>
+				)}
 			</div>
 		</FloatingPortal>
 	);

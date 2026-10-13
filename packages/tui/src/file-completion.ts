@@ -1,56 +1,47 @@
 import { type AutocompleteProvider, CombinedAutocompleteProvider, type SlashCommand } from "@earendil-works/pi-tui";
-import { mentionAt } from "@neko-harness/core/file-mentions";
-import { findFd, relativeQuery, workspaceTarget } from "@neko-harness/core/workspace-files";
-/** Keep Pi's editor, quoting and ordering; constrain only @ candidates. */
+import { type FileCandidates, mentionAt, mentionValue } from "@neko-harness/core/file-mentions";
+/** Native editor insertion/quoting, with gateway-backed @ enumeration. */
 export function fileCompletion(
 	commands: SlashCommand[],
 	root: string,
 	notice: (text: string) => void,
+	search: (query: string, signal: AbortSignal) => Promise<FileCandidates>,
 ): AutocompleteProvider {
-	const fd = findFd();
-	const native = new CombinedAutocompleteProvider(commands, root, fd);
+	const native = new CombinedAutocompleteProvider(commands, root, null);
 	let lastNotice = "";
-	const notify = (message: string) => {
-		if (message !== lastNotice) {
-			lastNotice = message;
-			notice(message);
+	const notify = (text: string) => {
+		if (text !== lastNotice) {
+			lastNotice = text;
+			notice(text);
 		}
 	};
 	return {
+		triggerCharacters: ["@"],
 		applyCompletion: native.applyCompletion.bind(native),
 		shouldTriggerFileCompletion: native.shouldTriggerFileCompletion.bind(native),
 		async getSuggestions(lines, line, col, options) {
 			const token = mentionAt(lines[line] ?? "", col);
 			if (!token) return native.getSuggestions(lines, line, col, options);
-			if (!fd) {
-				notify("Install fd (or fdfind) for @ file completion.");
-				return null;
-			}
 			try {
-				relativeQuery(token.query);
-				const signal = AbortSignal.any([options.signal, AbortSignal.timeout(2000)]);
-				const result = await native.getSuggestions(lines, line, col, { ...options, signal });
-				if (signal.aborted) {
-					if (!options.signal.aborted) notify("File search timed out. Narrow the query.");
-					return null;
-				}
-				if (!result) return null;
-				const items = [];
-				for (const item of result.items) {
-					const path = item.value.slice(1).replace(/^"|"$/g, "").replace(/\/$/, "");
-					if (path.split(/[\\/]/).includes(".git")) continue;
-					try {
-						await workspaceTarget(root, path);
-						items.push(item);
-					} catch {
-						/* outside or disappeared */
-					}
-				}
-				if (items.length >= 20) notify("Showing up to 20 paths. Type more to narrow results.");
+				const value = await search(token.query, options.signal);
+				if (options.signal.aborted) return null;
+				if (value.incomplete) notify("File index incomplete. Specify a subdirectory or retry.");
+				else if (value.limited) notify("Showing up to 100 paths. Type more to narrow results.");
+				else if (!value.entries.length) notify("No matching files.");
 				else lastNotice = "";
-				return options.signal.aborted ? null : { ...result, items };
+				return value.entries.length
+					? {
+							prefix: (lines[line] ?? "").slice(token.start, col),
+							items: value.entries.map((item) => ({
+								value: mentionValue(item.path, item.kind === "directory"),
+								label: item.name + (item.kind === "directory" ? "/" : ""),
+								description: item.path,
+							})),
+						}
+					: null;
 			} catch (error) {
-				if (!options.signal.aborted) notify(error instanceof Error ? error.message : "File search failed.");
+				if (!options.signal.aborted)
+					notify(error instanceof Error ? `${error.message} Retry file search.` : "File search failed. Retry.");
 				return null;
 			}
 		},

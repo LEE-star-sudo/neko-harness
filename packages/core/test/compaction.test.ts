@@ -1,7 +1,7 @@
 import { expect, it } from "bun:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
-import { CompactionDoc } from "../src/compaction.ts";
+
 import { createNekoRuntime } from "../src/runtime.ts";
 
 it("uses native compaction, distinguishes no-op and applied, preserves recency", async () => {
@@ -14,8 +14,8 @@ it("uses native compaction, distinguishes no-op and applied, preserves recency",
 	});
 	const result = async (phase: string) => {
 		for (let i = 0; i < 200; i++) {
-			const doc = await runtime.harness.snapshot(CompactionDoc, runtime.root.id, runtime.context);
-			if (doc?.latest?.phase === phase) return doc.latest;
+			const latest = await runtime.root.compactionRecord();
+			if (latest?.phase === phase) return latest;
 			await Bun.sleep(10);
 		}
 		throw new Error(`No ${phase} result`);
@@ -68,8 +68,7 @@ for (const [label, extra, expectedBlocking] of [
 
 async function untilPhase(runtime: Awaited<ReturnType<typeof createNekoRuntime>>, phase: string) {
 	for (let n = 0; n < 600; n++) {
-		if ((await runtime.harness.snapshot(CompactionDoc, runtime.root.id, runtime.context))?.latest?.phase === phase)
-			return;
+		if ((await runtime.root.compactionRecord())?.phase === phase) return;
 		await Bun.sleep(10);
 	}
 	throw new Error(`Missing phase ${phase}`);
@@ -167,11 +166,9 @@ it("waits for the native write boundary and restores terminal state after reopen
 		await Bun.sleep(20);
 		await runtime.compact();
 		await untilPhase(runtime, "waiting-to-apply");
-		const waiting = (await runtime.harness.snapshot(CompactionDoc, runtime.root.id, runtime.context))!.latest!;
+		const waiting = (await runtime.root.compactionRecord())!;
 		await runtime.compact();
-		expect((await runtime.harness.snapshot(CompactionDoc, runtime.root.id, runtime.context))!.latest!.taskId).toBe(
-			waiting.taskId,
-		);
+		expect((await runtime.root.compactionRecord())!.taskId).toBe(waiting.taskId);
 		release();
 		await runtime.waitAnswer(running);
 		await untilPhase(runtime, "applied");
@@ -260,3 +257,68 @@ it("reports a native stale summary as skipped instead of applied", async () => {
 		await runtime.close();
 	}
 }, 15000);
+
+it("keeps the native compaction failure visible after reopening and a later no-op", async () => {
+	const { mkdtemp, rm } = await import("node:fs/promises");
+	const { tmpdir } = await import("node:os");
+	const { join } = await import("node:path");
+	const dir = await mkdtemp(join(tmpdir(), "neko-failure-restart-"));
+	const faux = fauxProvider({ models: [{ id: "compact", contextWindow: 1000000 }] });
+	const options = {
+		storagePath: join(dir, "history.sqlite"),
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "compact" },
+	};
+	let runtime = await createNekoRuntime(options);
+	try {
+		faux.setResponses(Array.from({ length: 2 }, () => fauxAssistantMessage([fauxText("answer")])));
+		await runtime.waitAnswer(await runtime.submit("a".repeat(90000)));
+		await runtime.waitAnswer(await runtime.submit("b".repeat(90000)));
+		faux.setResponses([fauxAssistantMessage([], { stopReason: "error", errorMessage: "invalid summary" })]);
+		await runtime.compact();
+		await untilPhase(runtime, "failed");
+		await runtime.close();
+		runtime = await createNekoRuntime(options);
+		const state = await runtime.viewState();
+		const { projectChatView } = await import("../src/projection.ts");
+		expect(projectChatView(state.value, "test").compaction?.failure?.error).toContain("invalid summary");
+		state.dispose();
+		await runtime.conversation.reset("empty", runtime.context);
+		await runtime.compact();
+		await untilPhase(runtime, "nothing");
+		const fresh = await runtime.viewState();
+		expect(projectChatView(fresh.value, "test").compaction?.failure?.error).toContain("invalid summary");
+		fresh.dispose();
+	} finally {
+		await runtime.close();
+		await rm(dir, { recursive: true, force: true });
+	}
+}, 15000);
+
+it("preserves the native bash nonzero result and diagnostic", async () => {
+	const faux = fauxProvider();
+	const { fauxToolCall } = await import("@earendil-works/pi-ai");
+	faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("bash", { command: "printf 'native failure\\n'; exit 7" })], {
+			stopReason: "toolUse",
+		}),
+		fauxAssistantMessage([fauxText("failed command")]),
+	]);
+	const runtime = await createNekoRuntime({
+		storage: "memory",
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "faux-1" },
+	});
+	try {
+		await runtime.waitAnswer(await runtime.submit("execute"));
+		const state = await runtime.viewState();
+		const { projectChatView } = await import("../src/projection.ts");
+		const tool = projectChatView(state.value, "test").items.find((item) => item.type === "tool")!;
+		expect(tool.type === "tool" && tool.isError).toBe(true);
+		expect(tool.type === "tool" && tool.result).toContain("native failure");
+		expect(tool.type === "tool" && tool.result).toContain("7");
+		state.dispose();
+	} finally {
+		await runtime.close();
+	}
+});

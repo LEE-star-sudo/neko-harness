@@ -1,32 +1,28 @@
-import { type Context, createRemoteServiceBinding, type RemoteServiceBinding } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
-import { Client, createClientServiceTransport } from "@earendil-works/pi-client";
 import type { ChatView, NekoConversationChange, NekoModelInfo, NekoSkillInfo } from "@neko-harness/core";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
-import {
-	type NekoBrowseOptions,
+import { createGatewayConnection, type NekoGatewayConnection } from "@neko-harness/gateway/client-session";
+import { boundedWebSocketLink } from "@neko-harness/gateway/link";
+import type {
+	NekoBrowseOptions,
 	NekoChat,
-	type NekoCredentialState,
+	NekoCredentialState,
 	NekoCredentials,
-	type NekoDirectoryPage,
-	type NekoDirectoryState,
-	type NekoMarketInstallResult,
-	type NekoMarketPreview,
-	type NekoMarketSkill,
+	NekoDirectoryPage,
+	NekoDirectoryState,
+	NekoMarketInstallResult,
+	NekoMarketPreview,
+	NekoMarketSkill,
 	NekoModels,
-	NekoSessionDirectory,
 	NekoSessionManagement,
-	type NekoSessionSummary,
+	NekoSessionSummary,
 	NekoSkillMarket,
 	NekoWorkspaceFiles,
-	type NekoWorkspaceState,
+	NekoWorkspaceState,
 	NekoWorkspaces,
 } from "./contract.ts";
-import { createBrowserWsTransportFactory } from "./transport.ts";
 
-const CONTEXT: Context = BACKGROUND_CONTEXT;
 export type ConnPhase = "connecting" | "ready" | "reconnecting";
 export type GatewayEvents = {
 	onPhase(phase: ConnPhase): void;
@@ -55,9 +51,7 @@ export function workspaceSessions(sessions: readonly NekoSessionSummary[], path:
 /** Single attachment, serialized navigation, and generation-guarded snapshots. */
 export class GatewayConnection {
 	readonly #options: GatewayConnectionOptions;
-	#client: Client | undefined;
-	#server: RemoteServiceBinding | undefined;
-	#session: RemoteServiceBinding | undefined;
+	#client: NekoGatewayConnection | undefined;
 	#management: NekoSessionManagement | undefined;
 	#workspaces: NekoWorkspaces | undefined;
 	#workspaceFiles: NekoWorkspaceFiles | undefined;
@@ -96,11 +90,11 @@ export class GatewayConnection {
 	}
 	async saveCredential(provider: CredentialProviderId, key: string): Promise<void> {
 		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
-		await this.#credentials.save({ provider, key }, CONTEXT);
+		await this.#credentials.save({ provider, key });
 	}
 	async removeCredential(provider: CredentialProviderId): Promise<void> {
 		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
-		await this.#credentials.remove({ provider }, CONTEXT);
+		await this.#credentials.remove({ provider });
 	}
 	async start(): Promise<void> {
 		this.#options.events.onPhase("connecting");
@@ -139,14 +133,14 @@ export class GatewayConnection {
 	}
 	async addWorkspace(path: string): Promise<void> {
 		await this.#operate(async (epoch) => {
-			const item = await this.#workspaces!.add({ path }, CONTEXT);
+			const item = await this.#workspaces!.add({ path });
 			this.#assert(epoch);
 			await this.#select(item.path, undefined, epoch);
 		});
 	}
 	async browse(options: NekoBrowseOptions): Promise<NekoDirectoryPage> {
 		if (!this.#connected || !this.#workspaces) throw new Error("网关未连接");
-		return this.#workspaces.browse(options, CONTEXT);
+		return this.#workspaces.browse(options);
 	}
 	async attachTo(id: string): Promise<void> {
 		await this.#operate(async (epoch) => {
@@ -157,14 +151,14 @@ export class GatewayConnection {
 	}
 	async createSession(): Promise<void> {
 		await this.#operate(async (epoch) => {
-			const created = await this.#management!.create({ cwd: this.#workspace }, CONTEXT);
+			const created = await this.#management!.create({ cwd: this.#workspace });
 			this.#assert(epoch);
 			await this.#attach(created.id, epoch);
 		});
 	}
 	async archiveSession(id: string): Promise<void> {
 		await this.#operate(async (epoch) => {
-			await this.#management!.archive(id, CONTEXT);
+			await this.#management!.archive(id);
 			this.#assert(epoch);
 			this.#sessions = this.#sessions.filter((s) => s.id !== id);
 			if (this.#currentSessionId === id) await this.#select(this.#workspace, undefined, epoch);
@@ -196,38 +190,14 @@ export class GatewayConnection {
 		const generation = this.#viewEpoch;
 		this.#currentSessionId = undefined;
 		this.#options.events.onSessionChange(null);
-		const previousActivity = this.#sessions.find((s) => s.id === id)?.lastUsedAt ?? -1;
-		const changesAttachment = client.attachment?.sessionId !== id;
-		await this.#management!.attach(id, CONTEXT);
+		const chat = await client.attach(id);
 		this.#assert(epoch);
-		await waitForAttachment(client, id);
-		if (changesAttachment) {
-			const started = Date.now();
-			while ((this.#sessions.find((s) => s.id === id)?.lastUsedAt ?? -1) <= previousActivity) {
-				if (Date.now() - started > 5000) throw new Error("等待会话目录更新超时");
-				await new Promise((r) => setTimeout(r, 5));
-				this.#assert(epoch);
-			}
-		}
-		this.#assert(epoch);
-		const binding = createRemoteServiceBinding({
-			services: [NekoChat],
-			transport: createClientServiceTransport(
-				client,
-				(
-					(attachment) => () =>
-						attachment
-				)(client.attachment),
-			),
-		});
-		this.#session = binding;
-		await binding.ready(CONTEXT);
-		this.#assert(epoch);
-		const chat = binding.use(NekoChat);
+
 		this.#chat = chat;
 		this.#currentSessionId = id;
 		this.#options.events.onSessionChange(id);
-		const publish = (view: ChatView) => {
+		const publish = (view: ChatView | undefined) => {
+			if (!view) return;
 			if (epoch === this.#epoch && generation === this.#viewEpoch) this.#options.events.onView(view);
 		};
 		if (chat.view.value) publish(chat.view.value);
@@ -237,7 +207,7 @@ export class GatewayConnection {
 		this.#dropView();
 		this.#currentSessionId = undefined;
 		this.#options.events.onSessionChange(null);
-		await this.#management!.detach(CONTEXT);
+		await this.#client!.detach();
 		this.#assert(epoch);
 	}
 	#reconcile(): void {
@@ -247,7 +217,7 @@ export class GatewayConnection {
 	}
 	async configure(change: NekoConversationChange): Promise<void> {
 		if (!this.ready) throw new Error("会话未就绪");
-		await this.#chat!.configure(change, CONTEXT);
+		await this.#chat!.configure(change);
 	}
 	async submit(
 		content: string,
@@ -263,123 +233,113 @@ export class GatewayConnection {
 			for (const file of files)
 				ids.push(
 					await uploadImage(file, {
-						begin: (i) => chat.beginImage(i, CONTEXT),
-						append: (i) => chat.appendImage(i, CONTEXT),
-						finish: (id) => chat.finishImage(id, CONTEXT),
-						release: (id) => chat.releaseImage(id, CONTEXT),
+						begin: (i) => chat.beginImage(i),
+						append: (i) => chat.appendImage(i),
+						finish: (id) => chat.finishImage(id),
+						release: (id) => chat.releaseImage(id),
 					}),
 				);
-			await chat.submit({ content, requestId, images: ids }, CONTEXT);
+			await chat.submit({ content, requestId, images: ids });
 		} finally {
-			for (const id of ids) await chat.releaseImage(id, CONTEXT).catch(() => {});
+			for (const id of ids) await chat.releaseImage(id).catch(() => {});
 		}
 	}
 	async searchFiles(query: string, workspaceRoot: string, signal: AbortSignal) {
 		if (!this.managementReady || !this.#workspaceFiles || workspaceRoot !== this.#workspace)
 			throw new Error("工作区未就绪");
-		return this.#workspaceFiles.search({ workspaceRoot, query }, withAbortSignal(signal, CONTEXT));
+		return this.#client!.host.root((ctx) => this.#workspaceFiles!.search({ workspaceRoot, query }, ctx), { signal });
 	}
 	async workspaceImage(path: string, sessionId: string, signal: AbortSignal): Promise<ImageFile> {
 		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
 		const chat = this.#chat!;
-		const ctx = withAbortSignal(signal, CONTEXT);
-		const image = await chat.importImage(path, ctx);
-		try {
-			const file = await downloadImage((offset) => chat.draftImage({ id: image.id, offset }, ctx));
-			return { ...file, name: image.name };
-		} finally {
-			await chat.releaseImage(image.id, CONTEXT).catch(() => {});
-		}
+		return this.#client!.host.root(
+			async (ctx) => {
+				const image = await chat.importImage(path, ctx);
+				try {
+					const file = await downloadImage((offset) => chat.draftImage({ id: image.id, offset }, ctx));
+					return { ...file, name: image.name };
+				} finally {
+					await chat.releaseImage(image.id).catch(() => {});
+				}
+			},
+			{ signal },
+		);
 	}
 	async compact(instructions: string, sessionId?: string): Promise<void> {
 		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
 		if (!this.ready) throw new Error("会话未就绪");
-		await this.#chat!.compact({ instructions }, CONTEXT);
+		await this.#chat!.compact({ instructions });
 	}
 	async image(entryId: number, contentIndex: number, sessionId?: string): Promise<ImageFile> {
 		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
 		if (!this.ready) throw new Error("会话未就绪");
 		const chat = this.#chat!;
-		return downloadImage((offset) => chat.getImage({ entryId, contentIndex, offset }, CONTEXT));
+		return downloadImage((offset) => chat.getImage({ entryId, contentIndex, offset }));
 	}
 	abort(): void {
-		if (this.ready) void this.#chat!.abort(CONTEXT).catch((e: unknown) => this.#error(e));
+		if (this.ready) void this.#chat!.abort(null).catch((e: unknown) => this.#error(e));
 	}
 	async listSkills(sessionId: string, signal: AbortSignal): Promise<readonly NekoSkillInfo[]> {
 		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话未就绪");
-		return this.#chat!.skills(withAbortSignal(signal, CONTEXT));
+		return this.#client!.host.root((ctx) => this.#chat!.skills(null, ctx), { signal });
 	}
 	async listModels(): Promise<readonly NekoModelInfo[]> {
-		return this.#models?.list(CONTEXT) ?? [];
+		return this.#models?.list(null) ?? [];
 	}
 	/** 技能市场：读操作直发；工作区缺省用当前工作区（项目级状态判定的依据）。 */
 	marketList(query?: string): Promise<readonly NekoMarketSkill[]> {
 		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
-		return this.#skillMarket.list({ ...(query ? { query } : {}), workspaceRoot: this.#workspace }, CONTEXT);
+		return this.#skillMarket.list({ ...(query ? { query } : {}), workspaceRoot: this.#workspace });
 	}
 	marketDetail(name: string): Promise<NekoMarketSkill> {
 		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
-		return this.#skillMarket.detail({ name, workspaceRoot: this.#workspace }, CONTEXT);
+		return this.#skillMarket.detail({ name, workspaceRoot: this.#workspace });
 	}
 	marketPreview(name: string): Promise<NekoMarketPreview> {
 		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
-		return this.#skillMarket.preview({ name }, CONTEXT);
+		return this.#skillMarket.preview({ name });
 	}
 	marketInstall(name: string, scope: "user" | "project", overwrite?: boolean): Promise<NekoMarketInstallResult> {
 		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
-		return this.#skillMarket.install(
-			{ name, scope, workspaceRoot: this.#workspace, ...(overwrite ? { overwrite } : {}) },
-			CONTEXT,
-		);
+		return this.#skillMarket.install({
+			name,
+			scope,
+			workspaceRoot: this.#workspace,
+			...(overwrite ? { overwrite } : {}),
+		});
 	}
-	marketUninstall(name: string, scope: "user" | "project"): Promise<void> {
+	async marketUninstall(name: string, scope: "user" | "project"): Promise<void> {
 		if (!this.#skillMarket) return Promise.reject(new Error("网关未连接"));
-		return this.#skillMarket.uninstall({ name, scope, workspaceRoot: this.#workspace }, CONTEXT);
+		await this.#skillMarket.uninstall({ name, scope, workspaceRoot: this.#workspace });
 	}
 	async #connect(): Promise<void> {
 		const epoch = ++this.#epoch;
-		const client = await Client.connect({
-			serverId: this.#options.serverId,
-			transportFactory: createBrowserWsTransportFactory(this.#options.url),
-			onListenerError: (e) => this.#error(e),
-		});
-		if (this.#disposed || epoch !== this.#epoch) {
-			await client.dispose();
-			return;
-		}
+		const client = createGatewayConnection(
+			boundedWebSocketLink(new WebSocket(this.#options.url)),
+			this.#options.serverId,
+		);
 		this.#client = client;
-		client.onConnectionStateChange((change) => {
-			if (change.state === "disconnected" && client === this.#client) this.#scheduleReconnect();
+		client.link.onClose(() => {
+			if (client === this.#client) this.#scheduleReconnect();
 		});
-		const binding = createRemoteServiceBinding({
-			services: [
-				NekoSessionDirectory,
-				NekoSessionManagement,
-				NekoModels,
-				NekoWorkspaces,
-				NekoCredentials,
-				NekoWorkspaceFiles,
-				NekoSkillMarket,
-			],
-			transport: createClientServiceTransport(client, () => ({ serverId: this.#options.serverId })),
-		});
-		this.#server = binding;
-		await binding.ready(CONTEXT);
+		await client.ready();
 		this.#assert(epoch);
-		this.#management = binding.use(NekoSessionManagement);
-		this.#workspaces = binding.use(NekoWorkspaces);
-		this.#workspaceFiles = binding.use(NekoWorkspaceFiles);
-		this.#models = binding.use(NekoModels);
-		this.#credentials = binding.use(NekoCredentials);
-		this.#skillMarket = binding.use(NekoSkillMarket);
+		this.#management = client.management;
+		this.#workspaces = client.workspaces;
+		this.#workspaceFiles = client.workspaceFiles;
+		this.#models = client.models;
+		this.#credentials = client.credentials;
+		this.#skillMarket = client.skillMarket;
+
 		this.#unsub.push(
 			this.#credentials.state.subscribe((value) => {
-				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value);
+				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value ?? null);
 			}),
 		);
 		if (this.#credentials.state.value) this.#options.events.onCredentials?.(this.#credentials.state.value);
-		const directory = binding.use(NekoSessionDirectory);
-		const publish = (value: NekoDirectoryState) => {
+		const directory = client.directory;
+		const publish = (value: NekoDirectoryState | undefined) => {
+			if (!value) return;
 			if (epoch !== this.#epoch) return;
 			this.#sessions = value.sessions;
 			this.#options.events.onDirectory(value);
@@ -388,29 +348,26 @@ export class GatewayConnection {
 		this.#unsub.push(directory.state.subscribe(publish));
 		this.#unsub.push(
 			this.#workspaces.state.subscribe((value) => {
-				if (epoch === this.#epoch) this.#options.events.onWorkspaces(value);
+				if (value && epoch === this.#epoch) this.#options.events.onWorkspaces(value);
 			}),
 		);
 		if (!this.#initialized) {
-			await this.#workspaces.add({ path: this.#workspace }, CONTEXT);
+			await this.#workspaces.add({ path: this.#workspace });
 			this.#assert(epoch);
 			this.#initialized = true;
 		}
-		const started = Date.now();
-		while (!directory.state.value || !this.#workspaces.state.value) {
-			if (Date.now() - started > 5000) throw new Error("等待工作区目录超时");
-			await new Promise((r) => setTimeout(r, 10));
-			this.#assert(epoch);
-		}
-		publish(directory.state.value);
-		this.#options.events.onWorkspaces(this.#workspaces.state.value);
+		const initialDirectory = directory.state.value;
+		const initialWorkspaces = this.#workspaces.state.value;
+		if (!initialDirectory || !initialWorkspaces) throw new Error("工作区目录不可用，请重连");
+		publish(initialDirectory);
+		this.#options.events.onWorkspaces(initialWorkspaces);
 		await this.#select(this.#workspace, this.#currentSessionId, epoch);
 		this.#assert(epoch);
 		this.#connected = true;
 		this.#attempt = 0;
 		this.#options.events.onPhase("ready");
 		void this.#models
-			.list(CONTEXT)
+			.list(null)
 			.then((models) => {
 				if (epoch === this.#epoch) this.#options.events.onModels(models);
 			})
@@ -439,9 +396,8 @@ export class GatewayConnection {
 		++this.#viewEpoch;
 		this.#unsubView?.();
 		this.#unsubView = undefined;
+		this.#chat?.release();
 		this.#chat = undefined;
-		void this.#session?.dispose(CONTEXT).catch(() => {});
-		this.#session = undefined;
 		this.#options.events.onView(null);
 	}
 	async #teardown(): Promise<void> {
@@ -453,11 +409,10 @@ export class GatewayConnection {
 		this.#credentials = undefined;
 		this.#options.events.onCredentials?.(null);
 		this.#models = undefined;
-		await this.#server?.dispose(CONTEXT).catch(() => {});
-		this.#server = undefined;
+
 		const client = this.#client;
 		this.#client = undefined;
-		await client?.dispose().catch(() => {});
+		await client?.close().catch(() => {});
 	}
 	dispose(): void {
 		this.#disposed = true;
@@ -466,21 +421,5 @@ export class GatewayConnection {
 		clearTimeout(this.#timer);
 		void this.#teardown();
 	}
-}
-function waitForAttachment(client: Client, id: string): Promise<void> {
-	if (client.attachment?.sessionId === id) return Promise.resolve();
-	return new Promise((resolve, reject) => {
-		const timer = setTimeout(() => {
-			unsubscribe();
-			reject(new Error("等待会话连接超时"));
-		}, 5000);
-		const unsubscribe = client.onAttachmentChange((a) => {
-			if (a?.sessionId === id) {
-				clearTimeout(timer);
-				unsubscribe();
-				resolve();
-			}
-		});
-	});
 }
 export type { NekoDirectoryState, NekoSessionSummary };

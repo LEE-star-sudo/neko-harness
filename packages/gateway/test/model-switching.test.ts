@@ -7,14 +7,13 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { ChordError } from "@earendil-works/chord";
 import {
 	type FauxProviderHandle,
 	type FauxResponseFactory,
 	fauxAssistantMessage,
 	fauxText,
 } from "@earendil-works/pi-ai";
-import { ServerError } from "@earendil-works/pi-client";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../src/index.ts";
 import { testAddress, testSocketPath, waitFor } from "./helpers.ts";
@@ -64,7 +63,7 @@ describe("per-conversation model switching over the gateway", () => {
 	it("serves the global model list from the server-level models service", async () => {
 		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
-			const models = await client.listModels();
+			const models = await client.models.list(null);
 			// Models registry 是全集（内置 deepseek + 注入的 faux），faux 双模型必须在列。
 			const ids = models.map((model) => `${model.provider}/${model.modelId}`);
 			expect(ids).toContain("faux/faux-1");
@@ -83,15 +82,14 @@ describe("per-conversation model switching over the gateway", () => {
 		try {
 			const chat = await client.attach("1");
 			const seen: ChatView[] = [];
-			chat.view.subscribe((value) => seen.push(value));
+			chat.view.subscribe((value) => {
+				if (value) seen.push(value);
+			});
 			// 初始投影：宿主默认模型。
 			expect(chat.view.value?.agent.model).toEqual({ provider: "faux", modelId: "faux-1" });
 			expect(chat.view.value?.model).toBe("faux/faux-1");
 
-			await chat.configure(
-				{ model: { provider: "faux", modelId: "faux-2" }, thinkingLevel: "high" },
-				BACKGROUND_CONTEXT,
-			);
+			await chat.configure({ model: { provider: "faux", modelId: "faux-2" }, thinkingLevel: "high" });
 
 			// 投影即时反映新值（pi.agent doc 随 configure 提交进视图，推送更新）。
 			await waitFor(() => sawAgent(seen, "faux-2", "high"), "ChatView 投影更新为 faux-2/high");
@@ -99,7 +97,7 @@ describe("per-conversation model switching over the gateway", () => {
 			expect(latest?.model).toBe("faux/faux-2");
 
 			// 下一次请求 faux 实际收到 faux-2。
-			await chat.submit({ content: "ping" }, BACKGROUND_CONTEXT);
+			await chat.submit({ content: "ping" });
 			await waitFor(
 				() => seen.some((view) => view.items.some((item) => item.type === "assistant" && item.text.includes("pong"))),
 				"收到回答",
@@ -114,15 +112,17 @@ describe("per-conversation model switching over the gateway", () => {
 		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
 			const first = await client.attach("1");
-			await first.configure({ model: { provider: "faux", modelId: "faux-2" } }, BACKGROUND_CONTEXT);
+			await first.configure({ model: { provider: "faux", modelId: "faux-2" } });
 
-			const created = await client.management.create({}, BACKGROUND_CONTEXT);
+			const created = await client.management.create({});
 			const second = await client.attach(created.id);
 			const seen: ChatView[] = [];
-			second.view.subscribe((value) => seen.push(value));
+			second.view.subscribe((value) => {
+				if (value) seen.push(value);
+			});
 			expect(second.view.value?.agent.model).toEqual({ provider: "faux", modelId: "faux-1" });
 
-			await second.submit({ content: "ping from session 2" }, BACKGROUND_CONTEXT);
+			await second.submit({ content: "ping from session 2" });
 			await waitFor(
 				() => seen.some((view) => view.items.some((item) => item.type === "assistant" && item.text.includes("pong"))),
 				"会话 2 收到回答",
@@ -137,13 +137,13 @@ describe("per-conversation model switching over the gateway", () => {
 	it("rejects configuring an unknown session with a clear remote error", async () => {
 		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
-			// 未知会话：attach 即被路由层拒绝，客户端收到带 code 的 ServerError。
+			// 未知会话：attach 即被路由层拒绝，客户端收到带 code 的 ChordError。
 			const failure = await client.attach("999").then(
 				() => undefined,
 				(error: unknown) => error,
 			);
-			expect(failure).toBeInstanceOf(ServerError);
-			expect((failure as ServerError).code).toBe("session_not_found");
+			expect(failure).toBeInstanceOf(ChordError);
+			expect((failure as ChordError).code).toBe("gone");
 		} finally {
 			await client.close();
 		}
@@ -152,12 +152,12 @@ describe("per-conversation model switching over the gateway", () => {
 	it("configure on a released session fails with a clear error", async () => {
 		const client = await connectNekoGateway(testAddress({ socketPath, wsUrl: gateway.wsUrl, serverId }));
 		try {
-			const created = await client.management.create({}, BACKGROUND_CONTEXT);
+			const created = await client.management.create({});
 			const chat = await client.attach(created.id);
 			// 归档会释放 attachment 并关闭句柄：此后 configure 的会话路由已失效，
 			// 客户端门面本地拒绝（chord 绑定守卫），错误信息清晰指明目标不可用。
-			await client.management.archive(created.id, BACKGROUND_CONTEXT);
-			const failure = await chat.configure({ model: { provider: "faux", modelId: "faux-2" } }, BACKGROUND_CONTEXT).then(
+			await client.management.archive(created.id);
+			const failure = await chat.configure({ model: { provider: "faux", modelId: "faux-2" } }).then(
 				() => undefined,
 				(error: unknown) => error,
 			);

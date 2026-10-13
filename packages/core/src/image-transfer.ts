@@ -12,9 +12,9 @@ export async function uploadImage(
 	file: ImageFile,
 	api: {
 		begin(input: { name: string; mimeType: string; size: number }): Promise<string>;
-		append(input: { id: string; offset: number; data: string }): Promise<void>;
-		finish(id: string): Promise<void>;
-		release(id: string): Promise<void>;
+		append(input: { id: string; offset: number; data: string }): Promise<unknown>;
+		finish(id: string): Promise<unknown>;
+		release(id: string): Promise<unknown>;
 	},
 ): Promise<string> {
 	const id = await api.begin({ name: file.name, mimeType: file.mimeType, size: file.bytes.length });

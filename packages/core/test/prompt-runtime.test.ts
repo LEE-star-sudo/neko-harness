@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, SystemEntry } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/index.ts";
 
 const dirs: string[] = [];
@@ -47,7 +47,7 @@ function gatedTool(started: Gate, release: Gate, onStart = () => {}) {
 					onStart();
 					started.resolve();
 					await release.promise;
-					return { content: [{ type: "text" as const, text: "tool finished" }] };
+					return { output: [{ type: "text" as const, text: "tool finished" }] };
 				},
 			}),
 		],
@@ -82,7 +82,7 @@ it("refreshes project instructions and skills when a new input is admitted", asy
 	]);
 	const runtime = await createNekoRuntime({
 		storage: "memory",
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
 		cwd: workspace,
@@ -142,7 +142,7 @@ it("keeps system resources stable after a tool edits AGENTS.md until the next in
 	]);
 	const runtime = await createNekoRuntime({
 		storage: "memory",
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
 		cwd: workspace,
@@ -208,7 +208,7 @@ it("isolates active resources between conversations sharing a workspace", async 
 	]);
 	const runtime = await createNekoRuntime({
 		storage: "memory",
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
 		cwd: workspace,

@@ -17,12 +17,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.x'
-      - name: Install file search tool (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y fd-find
-      - name: Install file search tool (macOS)
-        if: runner.os == 'macOS'
-        run: brew install fd
       - run: bun install --frozen-lockfile
       - run: bun run build:release
       - run: bun run check

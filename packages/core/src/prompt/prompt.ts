@@ -19,7 +19,7 @@ const TOOL_GUIDELINES: Record<string, readonly string[]> = {
 		"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
 	],
 	bash: ["Use bash for file operations like ls, rg, find"],
-	read_image: ["Use read_image to view image files; the read tool only returns text."],
+
 	web_search: ["Use web_search for current information from the internet instead of guessing."],
 	web_extract: ["Use web_extract to read the full content of a web page when you have its URL."],
 };

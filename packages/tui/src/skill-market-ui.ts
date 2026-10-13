@@ -2,7 +2,7 @@
  * TUI 技能市场面板（/skills）：分组列表 → 详情 → 预览/确认，逐层 Esc 回退。
  * 全部操作经 gateway 的 neko.skill-market 服务；安装/卸载结果提示下一次发送生效。
  */
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { ChordError } from "@earendil-works/chord";
 import { Markdown, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { NekoGatewayClient, NekoMarketSkill } from "@neko-harness/gateway";
 import type { PickerDetail, PickerItem, PickerPanel } from "./components/picker.ts";
@@ -12,16 +12,11 @@ import { getMarkdownTheme, style, theme } from "./theme.ts";
 const hint = (...parts: readonly (readonly [string, string])[]): string =>
 	parts.map(([key, label]) => `${theme.accent(key)} ${theme.dim(label)}`).join(theme.dim("  ·  "));
 
-const CTX = BACKGROUND_CONTEXT;
-
 const formatSize = (bytes: number): string =>
 	bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(bytes / 1024))}KB`;
 
-/** gateway 把市场错误码编在 message 前缀里（contract 约定）。 */
-const marketErrorCode = (error: unknown): string | null => {
-	const message = error instanceof Error ? error.message : String(error);
-	return /^\[([a-z_]+)\]/.exec(message)?.[1] ?? null;
-};
+const marketErrorCode = (error: unknown): string | null =>
+	error instanceof ChordError ? (error.reason ?? null) : null;
 
 const stateMarks = (skill: NekoMarketSkill): string =>
 	`${skill.installed.user ? "[u]" : ""}${skill.installed.project ? "[p]" : ""}${skill.installed.builtin ? "[b]" : ""}`;
@@ -88,10 +83,7 @@ class SkillDetailView implements PickerDetail {
 
 	private async refresh(): Promise<void> {
 		try {
-			this.#skill = await this.#client.skillMarket.detail(
-				{ name: this.#name, workspaceRoot: this.#workspaceRoot },
-				CTX,
-			);
+			this.#skill = await this.#client.skillMarket.detail({ name: this.#name, workspaceRoot: this.#workspaceRoot });
 			this.#error = "";
 		} catch (error) {
 			this.#error = error instanceof Error ? error.message : String(error);
@@ -152,7 +144,7 @@ class SkillDetailView implements PickerDetail {
 		this.#confirm = {
 			prompt: `Uninstall ${skill.name} from ${scope} level? This cannot be undone.`,
 			run: async () => {
-				await this.#client.skillMarket.uninstall({ name: this.#name, scope, workspaceRoot: this.#workspaceRoot }, CTX);
+				await this.#client.skillMarket.uninstall({ name: this.#name, scope, workspaceRoot: this.#workspaceRoot });
 				this.#notice = `Uninstalled from ${scope}. Takes effect on the next message.`;
 			},
 		};
@@ -160,10 +152,12 @@ class SkillDetailView implements PickerDetail {
 
 	private async install(scope: "user" | "project", overwrite: boolean): Promise<void> {
 		try {
-			const result = await this.#client.skillMarket.install(
-				{ name: this.#name, scope, workspaceRoot: this.#workspaceRoot, overwrite },
-				CTX,
-			);
+			const result = await this.#client.skillMarket.install({
+				name: this.#name,
+				scope,
+				workspaceRoot: this.#workspaceRoot,
+				overwrite,
+			});
 			this.#notice =
 				result.shadowedBy === "project"
 					? "Installed at user level, but the project-level copy still wins."
@@ -237,7 +231,7 @@ class SkillPreviewView implements PickerDetail {
 	constructor(name: string, client: NekoGatewayClient, panel: PickerPanel) {
 		this.#panel = panel;
 		void client.skillMarket
-			.preview({ name }, CTX)
+			.preview({ name })
 			.then((preview) => {
 				// SKILL.md 正文走 Markdown 渲染（标题/列表/代码块有样式），文件清单保持等宽。
 				this.#header = [`${theme.dim("files:")} ${preview.files.join("  ")}`, ""];
@@ -276,7 +270,7 @@ export async function openSkillMarket(
 	const openPreview = (name: string) => panel.showDetail(new SkillPreviewView(name, client, panel));
 	await panel.show(
 		"Skills Market",
-		async () => toItems(await client.skillMarket.list({ workspaceRoot }, CTX)),
+		async () => toItems(await client.skillMarket.list({ workspaceRoot })),
 		async (name) => new SkillDetailView(name, client, workspaceRoot, panel, openPreview),
 	);
 }

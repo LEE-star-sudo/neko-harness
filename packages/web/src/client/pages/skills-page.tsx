@@ -1,3 +1,4 @@
+import { ChordError } from "@earendil-works/chord";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Markdown } from "../components/markdown";
@@ -25,12 +26,8 @@ const formatSize = (bytes: number): string =>
 
 const formatDate = (iso: string): string => (iso === "" ? "" : iso.slice(0, 10));
 
-/** 市场错误码编在 message 前缀里（gateway contract 约定）。 */
-const marketErrorCode = (error: unknown): string | null => {
-	const message = error instanceof Error ? error.message : String(error);
-	const match = /^\[([a-z_]+)\]/.exec(message);
-	return match?.[1] ?? null;
-};
+const marketErrorCode = (error: unknown): string | null =>
+	error instanceof ChordError ? (error.reason ?? null) : null;
 
 type GroupBy = "category" | "source";
 

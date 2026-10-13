@@ -1,4 +1,5 @@
 import {
+	type AutocompleteProvider,
 	CURSOR_MARKER,
 	Editor,
 	isKeyRelease,
@@ -15,22 +16,56 @@ export class BoundedEditor extends Editor {
 	isImageReference: (ref: string) => boolean = () => false;
 	onClearDraft?: () => void;
 	#lastEscape = 0;
+	#completionEpoch = 0;
+	#completionProvider?: AutocompleteProvider;
+	override setAutocompleteProvider(provider: AutocompleteProvider): void {
+		this.#completionEpoch++;
+		const wrapped: AutocompleteProvider = {
+			triggerCharacters: provider.triggerCharacters,
+			shouldTriggerFileCompletion: provider.shouldTriggerFileCompletion?.bind(provider),
+			getSuggestions: provider.getSuggestions.bind(provider),
+			applyCompletion: (...args) => {
+				const result = provider.applyCompletion(...args);
+				if (args[4].startsWith("@") && args[3].label.endsWith("/")) {
+					const epoch = this.#completionEpoch;
+					// Pi closes the current list after applying. Resume via its public Tab path.
+					queueMicrotask(() => {
+						const cursor = this.getCursor();
+						if (
+							epoch === this.#completionEpoch &&
+							this.getText() === result.lines.join("\n") &&
+							cursor.line === result.cursorLine &&
+							cursor.col === result.cursorCol
+						)
+							super.handleInput("\t");
+					});
+				}
+				return result;
+			},
+		};
+		this.#completionProvider = wrapped;
+		super.setAutocompleteProvider(wrapped);
+	}
 	resetEscapeSequence(): void {
 		this.#lastEscape = 0;
 	}
 	override setText(text: string): void {
+		this.#completionEpoch++;
 		this.resetEscapeSequence();
 		super.setText(text);
 	}
 
 	override handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
+		this.#completionEpoch++;
 		if (matchesKey(data, "escape") && this.isShowingAutocomplete()) {
 			this.resetEscapeSequence();
 			super.handleInput(data);
 			return;
 		}
 		if (matchesKey(data, "escape")) {
+			// Also cancel a pending directory query before its list becomes visible.
+			if (this.#completionProvider) super.setAutocompleteProvider(this.#completionProvider);
 			if (isKeyRepeat(data)) return;
 			const now = Date.now();
 			if (this.#lastEscape && now - this.#lastEscape <= 400) {

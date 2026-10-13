@@ -1,4 +1,4 @@
-export { CompactionDoc, type CompactionRecord } from "./compaction.ts";
+export type { CompactionRecord } from "./compaction.ts";
 export {
 	DEFAULT_NEKO_CONFIG,
 	DEFAULT_SKILL_MARKET_URL,
@@ -20,9 +20,9 @@ export {
 	credentialProvider,
 	DEFAULT_CREDENTIALS_PATH,
 	FileCredentialStore,
-	MemoryCredentialStore,
+	InMemoryCredentialStore,
 } from "./credentials.ts";
-export { ImageMetadataDoc } from "./image-metadata.ts";
+
 export { decodeImage, IMAGE_LIMITS, type ImageInfo, prepareImage, terminalImage } from "./images.ts";
 export {
 	type ChatImage,
@@ -58,5 +58,5 @@ export {
 	type NekoSubmitOptions,
 } from "./runtime.ts";
 export { mergeUsage } from "./session-metadata.ts";
-export { parseSkillInvocation, type SkillInvocation } from "./skill-invocation.ts";
+export type { SkillInvocation } from "./skill-invocation.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

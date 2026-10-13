@@ -20,10 +20,11 @@ export {
 	type NekoGatewayOptions,
 	startGateway,
 } from "./gateway.ts";
+export { isServerId } from "./identity.ts";
 export { gatewayPortFilePath, readGatewayPortFile, removeGatewayPortFile } from "./port-file.ts";
 export { gatewayCommand, stopGatewayProcess } from "./process.ts";
 export {
-	createWsByteTransportFactory,
+	createWsLink,
 	createWsListener,
 	type WsListener,
 	type WsListenerOptions,

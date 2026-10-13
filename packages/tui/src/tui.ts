@@ -1,4 +1,3 @@
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	Container,
@@ -21,6 +20,7 @@ import type {
 } from "@neko-harness/core";
 import { normalizeWorkspace } from "@neko-harness/core";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
+import type { NekoChat } from "@neko-harness/gateway/contract";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
@@ -60,8 +60,6 @@ export type NekoTuiOptions = {
 	readonly theme?: ThemePreference;
 };
 
-type ChatFacade = Awaited<ReturnType<NekoTuiGateway["client"]["attach"]>>;
-
 const EXIT_COMMANDS = new Set(["/exit", "/quit"]);
 const SESSIONS_COMMANDS = new Set(["/sessions", "/session"]);
 const NEW_SESSION_VALUE = "__new__";
@@ -83,7 +81,7 @@ class NekoTuiApp {
 	readonly #gateway: NekoTuiGateway;
 	readonly #options: NekoTuiOptions;
 	readonly #ui: TuiAltScreen;
-	readonly #chat = new ImageTranscript(() => this.#transcript);
+	readonly #imageTranscript = new ImageTranscript(() => this.#transcript);
 	readonly #notices = new Container();
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
@@ -97,7 +95,7 @@ class NekoTuiApp {
 	readonly #editor: BoundedEditor;
 	readonly #footer = new StatusFooter();
 
-	#chatFacade: ChatFacade | undefined;
+	#chat: NekoChat | undefined;
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
 	#directoryUnsubscribe: (() => void) | undefined;
@@ -148,10 +146,27 @@ class NekoTuiApp {
 		this.#login = new LoginPanel({
 			changed: () => this.#ui.requestRender(),
 			closed: () => this.#ui.setFocus(this.#editor),
-			save: (provider, key) => this.#gateway.client.credentials.save({ provider, key }, BACKGROUND_CONTEXT),
-			remove: (provider) => this.#gateway.client.credentials.remove({ provider }, BACKGROUND_CONTEXT),
+			save: async (provider, key) => {
+				await this.#gateway.client.credentials.save({ provider, key });
+			},
+			remove: async (provider) => {
+				await this.#gateway.client.credentials.remove({ provider });
+			},
 		});
-		const complete = fileCompletion(this.#commands, options.cwd ?? process.cwd(), (text) => this.addNotice(text));
+		const complete = fileCompletion(
+			this.#commands,
+			options.cwd ?? process.cwd(),
+			(text) => this.addNotice(text),
+			(query, signal) =>
+				this.#gateway.client.host.root(
+					(ctx) =>
+						this.#gateway.client.workspaceFiles.search(
+							{ workspaceRoot: this.#lastView?.cwd ?? options.cwd ?? process.cwd(), query },
+							ctx,
+						),
+					{ signal },
+				),
+		);
 		const original = complete.applyCompletion.bind(complete);
 		complete.applyCompletion = (lines, line, col, item, prefix) => {
 			const result = original(lines, line, col, item, prefix);
@@ -255,10 +270,16 @@ class NekoTuiApp {
 	}
 
 	async run(initialSessionId: string): Promise<void> {
+		this.#gateway.client.link.onClose(() => {
+			if (this.#exitStarted) return;
+			this.#chat = undefined;
+			if (this.#lastView) this.applyView({ ...this.#lastView, busy: false, status: null, streaming: null });
+			this.addNotice("Gateway unavailable. Restart to reconnect.", true);
+		});
 		const picker = this.#panel,
 			login = this.#login;
 		const content = new Container();
-		content.addChild(this.#chat);
+		content.addChild(this.#imageTranscript);
 		this.#transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });
 		this.#ui.setLayoutRoot(
 			createAppLayout({
@@ -315,10 +336,10 @@ class NekoTuiApp {
 		if (trimmed === "") return;
 		const instructions = compactInstructions(trimmed);
 		if (instructions !== null) {
-			const chat = this.#chatFacade;
+			const chat = this.#chat;
 			const session = this.#sessionId;
 			if (chat)
-				void chat.compact({ instructions }, BACKGROUND_CONTEXT).catch((e) => {
+				void chat.compact({ instructions }).catch((e) => {
 					if (session === this.#sessionId) {
 						this.#editor.setText(text);
 						this.addNotice(messageOf(e), true);
@@ -337,7 +358,11 @@ class NekoTuiApp {
 		if (trimmed === "/login") {
 			if (!this.#panel.open && !this.#login.open) {
 				const service = this.#gateway.client.credentials;
-				this.#login.show(service.state.value, (fn) => service.state.subscribe(fn));
+				this.#login.show(service.state.value, (fn) =>
+					service.state.subscribe((value) => {
+						if (value) fn(value);
+					}),
+				);
 				this.#ui.setFocus(this.#login);
 			}
 			return;
@@ -366,7 +391,7 @@ class NekoTuiApp {
 			void this.#manage(() => this.archiveSession());
 			return;
 		}
-		const chat = this.#chatFacade;
+		const chat = this.#chat;
 		if (chat === undefined) return;
 		if (
 			this.#lastView?.agent.model?.provider === "deepseek" &&
@@ -429,7 +454,7 @@ class NekoTuiApp {
 		}
 	}
 	private async sendImages(text: string, whenBusy?: "steer" | "followUp"): Promise<void> {
-		const chat = this.#chatFacade;
+		const chat = this.#chat;
 		const session = this.#sessionId;
 		if (!chat || this.#sending.has(session)) return;
 		this.#sending.add(session);
@@ -444,7 +469,7 @@ class NekoTuiApp {
 		const requestId = old?.text === text ? old.id : crypto.randomUUID();
 		this.#retryRequests.set(session, { text, id: requestId });
 		try {
-			const models = await this.#gateway.client.listModels();
+			const models = await this.#gateway.client.models.list(null);
 			const model = models.find((m) => m.provider === modelRef?.provider && m.modelId === modelRef?.modelId);
 			if (refs.length && !model?.input.includes("image"))
 				throw new Error("This model does not support images. Switch model or remove the image references.");
@@ -454,18 +479,15 @@ class NekoTuiApp {
 				const file = await promise;
 				ids.push(
 					await uploadImage(file, {
-						begin: (i) => chat.beginImage(i, BACKGROUND_CONTEXT),
-						append: (i) => chat.appendImage(i, BACKGROUND_CONTEXT),
-						finish: (id) => chat.finishImage(id, BACKGROUND_CONTEXT),
-						release: (id) => chat.releaseImage(id, BACKGROUND_CONTEXT),
+						begin: (i) => chat.beginImage(i),
+						append: (i) => chat.appendImage(i),
+						finish: (id) => chat.finishImage(id),
+						release: (id) => chat.releaseImage(id),
 					}),
 				);
 				content = content.replaceAll(ref, "");
 			}
-			await chat.submit(
-				{ content: content.trim(), images: ids, requestId, ...(whenBusy ? { whenBusy } : {}) },
-				BACKGROUND_CONTEXT,
-			);
+			await chat.submit({ content: content.trim(), images: ids, requestId, ...(whenBusy ? { whenBusy } : {}) });
 			if (session === this.#sessionId && this.#editor.getText() === before) this.#editor.setText("");
 			if (this.#texts.get(session) === before) this.#texts.delete(session);
 			const remaining = session === this.#sessionId ? this.#editor.getText() : (this.#texts.get(session) ?? "");
@@ -474,16 +496,16 @@ class NekoTuiApp {
 		} catch (e) {
 			if (session === this.#sessionId) this.addNotice(messageOf(e), true);
 		} finally {
-			for (const id of ids) await chat.releaseImage(id, BACKGROUND_CONTEXT).catch(() => {});
+			for (const id of ids) await chat.releaseImage(id).catch(() => {});
 			this.#sending.delete(session);
 			this.#ui.requestRender();
 		}
 	}
 
 	abort(): void {
-		const chat = this.#chatFacade;
+		const chat = this.#chat;
 		if (chat === undefined) return;
-		chat.abort(BACKGROUND_CONTEXT).catch((error: unknown) => this.addNotice(messageOf(error), true));
+		chat.abort(null).catch((error: unknown) => this.addNotice(messageOf(error), true));
 	}
 
 	exit(): void {
@@ -499,13 +521,13 @@ class NekoTuiApp {
 		if (this.#sessionId) this.#texts.set(this.#sessionId, this.#editor.getText());
 		this.#viewUnsubscribe?.();
 		this.#viewUnsubscribe = undefined;
-		const facade = await this.#gateway.client.attach(id);
-		this.#chatFacade = facade;
+		const handle = await this.#gateway.client.attach(id);
+		this.#chat = handle;
 		this.#sessionId = id;
-		void this.#refreshSkills(facade);
+		void this.#refreshSkills(handle);
 		this.#editor.setText(this.#texts.get(id) ?? "");
 		this.#resetTranscript();
-		const view = facade.view;
+		const view = handle.view;
 		if (view.value !== undefined) this.applyView(view.value);
 		this.#viewUnsubscribe = view.subscribe(() => {
 			this.scheduleApply();
@@ -515,11 +537,11 @@ class NekoTuiApp {
 	}
 
 	/** 拉取当前会话的技能列表进补全命令表（数组与 fileCompletion 共享，原地更新即生效）。 */
-	async #refreshSkills(facade: ChatFacade): Promise<void> {
+	async #refreshSkills(handle: NekoChat): Promise<void> {
 		this.#commands.splice(0, this.#commands.length, ...commands);
 		try {
-			const skills = await facade.skills(BACKGROUND_CONTEXT);
-			if (facade !== this.#chatFacade) return;
+			const skills = await handle.skills(null);
+			if (handle !== this.#chat) return;
 			for (const skill of skills)
 				this.#commands.push({ name: `skill:${skill.name}`, description: skill.description, argumentHint: "[args]" });
 		} catch {
@@ -539,21 +561,20 @@ class NekoTuiApp {
 		}
 	}
 	async createSession(): Promise<void> {
-		const created = await this.#gateway.client.management.create(
-			{ ...(this.#options.cwd !== undefined ? { cwd: this.#options.cwd } : {}) },
-			BACKGROUND_CONTEXT,
-		);
+		const created = await this.#gateway.client.management.create({
+			...(this.#options.cwd !== undefined ? { cwd: this.#options.cwd } : {}),
+		});
 		await this.switchSession(created.id);
 	}
 
 	async forkSession(): Promise<void> {
-		const forked = await this.#gateway.client.management.fork(this.#sessionId, BACKGROUND_CONTEXT);
+		const forked = await this.#gateway.client.management.fork(this.#sessionId);
 		await this.switchSession(forked.id);
 	}
 
 	async archiveSession(): Promise<void> {
 		const current = this.#sessionId;
-		await this.#gateway.client.management.archive(current, BACKGROUND_CONTEXT);
+		await this.#gateway.client.management.archive(current);
 		const next = recentlyVisited(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).find(
 			(s) => s.id !== current,
 		);
@@ -598,14 +619,14 @@ class NekoTuiApp {
 
 	async openModelOverlay(): Promise<void> {
 		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
-		const chat = this.#chatFacade;
+		const chat = this.#chat;
 		const current = this.#lastView?.agent.model;
 		const currentKey = current ? `${current.provider}/${current.modelId}` : null;
 		let models: readonly NekoModelInfo[] = [];
 		const ready = this.#panel.show(
 			"Models",
 			async () => {
-				models = await this.#gateway.client.listModels();
+				models = await this.#gateway.client.models.list(null);
 				return [...models]
 					.sort((a, b) => Number(keyOf(b) === currentKey) - Number(keyOf(a) === currentKey))
 					.map((model) => ({
@@ -617,10 +638,7 @@ class NekoTuiApp {
 			async (value) => {
 				const selected = models.find((m) => keyOf(m) === value);
 				if (selected && value !== currentKey)
-					await chat?.configure(
-						{ model: { provider: selected.provider, modelId: selected.modelId } },
-						BACKGROUND_CONTEXT,
-					);
+					await chat?.configure({ model: { provider: selected.provider, modelId: selected.modelId } });
 			},
 		);
 		this.#ui.setFocus(this.#panel);
@@ -629,21 +647,21 @@ class NekoTuiApp {
 
 	async configureThinking(raw: string): Promise<void> {
 		if (this.#panel.open || this.#login.open) return;
-		const chat = this.#chatFacade;
+		const chat = this.#chat;
 		const ref = this.#lastView?.agent.model;
 		if (!chat || !ref) return;
 		try {
-			const model = (await this.#gateway.client.listModels()).find(
+			const model = (await this.#gateway.client.models.list(null)).find(
 				(m) => m.provider === ref.provider && m.modelId === ref.modelId,
 			);
-			if (chat !== this.#chatFacade || this.#exitStarted || this.#panel.open || this.#login.open || !model) return;
+			if (chat !== this.#chat || this.#exitStarted || this.#panel.open || this.#login.open || !model) return;
 			if (raw) {
 				const level = model.supportedThinkingLevels.find((value) => value === raw);
 				if (!level) {
 					this.addNotice(`Available levels: ${model.supportedThinkingLevels.join(" / ")}`, true);
 					return;
 				}
-				await chat.configure({ thinkingLevel: level }, BACKGROUND_CONTEXT);
+				await chat.configure({ thinkingLevel: level });
 			} else {
 				this.#thinkingModel = keyOf(model);
 				void this.#panel.show(
@@ -654,7 +672,7 @@ class NekoTuiApp {
 							label: `${level}${level === this.#lastView?.agent.thinkingLevel ? " (Current)" : ""}`,
 						})),
 					async (value) => {
-						await chat.configure({ thinkingLevel: value as ModelThinkingLevel }, BACKGROUND_CONTEXT);
+						await chat.configure({ thinkingLevel: value as ModelThinkingLevel });
 					},
 				);
 				this.#ui.setFocus(this.#panel);
@@ -696,7 +714,7 @@ class NekoTuiApp {
 			if (this.#exitStarted) return;
 			const again = this.#applyQueued;
 			this.#applyQueued = false;
-			const view = this.#chatFacade?.view.value;
+			const view = this.#chat?.view.value;
 			if (view !== undefined) this.applyView(view);
 			if (again) this.scheduleApply();
 		});
@@ -710,8 +728,8 @@ class NekoTuiApp {
 			view.items.some((i) => (i.type === "user" || i.type === "tool") && i.images?.length)
 		) {
 			this.#imageWarningModel = imageModel;
-			void this.#gateway.client
-				.listModels()
+			void this.#gateway.client.models
+				.list(null)
 				.then((models) => {
 					if (
 						this.#imageWarningModel === imageModel &&
@@ -786,7 +804,7 @@ class NekoTuiApp {
 	}
 
 	#appendImages(images: readonly import("@neko-harness/core").ChatImage[]): void {
-		const chat = this.#chatFacade;
+		const chat = this.#chat;
 		const session = this.#sessionId;
 		if (!chat) return;
 		for (const image of images) {
@@ -794,28 +812,28 @@ class NekoTuiApp {
 				image,
 				() =>
 					downloadImage((offset) =>
-						chat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }, BACKGROUND_CONTEXT),
+						chat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }),
 					),
 				() => {
 					if (session === this.#sessionId) this.#ui.requestRender();
 				},
 			);
 			this.#imageComponents.set(`${image.entryId}:${image.contentIndex}`, component);
-			this.#chat.addChild(component);
+			this.#imageTranscript.addChild(component);
 		}
 	}
 
 	#appendItem(item: ChatItem): void {
-		if (item.type === "user" || item.type === "system") this.#chat.addChild(new Spacer(1));
+		if (item.type === "user" || item.type === "system") this.#imageTranscript.addChild(new Spacer(1));
 		if (item.type === "user") {
-			const component = new UserMessageComponent(item.text);
-			this.#chat.addChild(component);
+			const component = new UserMessageComponent(item.text, item.skill);
+			this.#imageTranscript.addChild(component);
 			this.#items.set(item.key, { kind: "user", component });
 			return;
 		}
 		if (item.type === "assistant") {
 			const component = new AssistantMessageComponent(assistantContent(item), false);
-			this.#chat.addChild(component);
+			this.#imageTranscript.addChild(component);
 			this.#items.set(item.key, { kind: "assistant", component });
 			return;
 		}
@@ -833,7 +851,7 @@ class NekoTuiApp {
 			return;
 		}
 		const component = new Text(theme.dim(item.text), 1, 0);
-		this.#chat.addChild(component);
+		this.#imageTranscript.addChild(component);
 		this.#items.set(item.key, { kind: "system", component });
 	}
 
@@ -867,7 +885,7 @@ class NekoTuiApp {
 		const existing = this.#toolCards.get(call.callId);
 		if (existing !== undefined) return existing;
 		const component = new ToolExecutionComponent(streamingCardState(call));
-		this.#chat.addChild(component);
+		this.#imageTranscript.addChild(component);
 		this.#toolCards.set(call.callId, component);
 		this.#items.set(`t${call.callId}`, { kind: "tool", component });
 		return component;
@@ -876,14 +894,14 @@ class NekoTuiApp {
 	#syncStreaming(streaming: StreamingView | null): void {
 		if (streaming === null) {
 			if (this.#streamingComp !== undefined) {
-				this.#chat.removeChild(this.#streamingComp);
+				this.#imageTranscript.removeChild(this.#streamingComp);
 				this.#streamingComp = undefined;
 			}
 			return;
 		}
 		if (this.#streamingComp === undefined) {
 			this.#streamingComp = new AssistantMessageComponent();
-			this.#chat.addChild(this.#streamingComp);
+			this.#imageTranscript.addChild(this.#streamingComp);
 		}
 		this.#streamingComp.updateContent({ thinking: streaming.thinking, text: streaming.text, note: null }, true);
 	}
@@ -909,18 +927,20 @@ class NekoTuiApp {
 					: view.compaction.active.some((c) => c.blocking)
 						? "Waiting for compaction"
 						: "Compacting context"
-				: view.compaction?.latest &&
-						(view.compaction.latest.phase === "waiting-to-apply" || Date.now() - view.compaction.latest.at < 10000)
-					? {
-							applied: "Context compacted",
-							nothing: "Nothing to compact",
-							skipped: "Summary skipped",
-							cancelled: "Compaction cancelled",
-							failed: "Compaction failed",
-							summarizing: "Compacting context",
-							"waiting-to-apply": "Applying summary",
-						}[view.compaction.latest.phase]
-					: undefined,
+				: view.compaction?.failure
+					? `Compaction failed: ${view.compaction.failure.error}`
+					: view.compaction?.latest &&
+							(view.compaction.latest.phase === "waiting-to-apply" || Date.now() - view.compaction.latest.at < 10000)
+						? {
+								applied: "Context compacted",
+								nothing: "Nothing to compact",
+								skipped: "Summary skipped",
+								cancelled: "Compaction cancelled",
+								failed: "Compaction failed",
+								summarizing: "Compacting context",
+								"waiting-to-apply": "Applying summary",
+							}[view.compaction.latest.phase]
+						: undefined,
 			contextUsage: view.contextUsage,
 			usageText: usageText(view.usage.input, view.usage.output, view.usage.cacheRead, view.usage.cost),
 			cwd: view.cwd,
@@ -928,7 +948,7 @@ class NekoTuiApp {
 	}
 
 	#resetTranscript(): void {
-		this.#chat.clear();
+		this.#imageTranscript.clear();
 		this.#imageKeys.clear();
 		this.#imageComponents.clear();
 		this.#items.clear();
@@ -1047,5 +1067,5 @@ export async function initialSessionId(gateway: NekoTuiGateway, cwd: string): Pr
 	const sessions = state.value?.sessions ?? [];
 	const first = recentlyVisited(sessions, cwd)[0];
 	if (first !== undefined) return first.id;
-	return (await gateway.client.management.create({ ...(cwd !== undefined ? { cwd } : {}) }, BACKGROUND_CONTEXT)).id;
+	return (await gateway.client.management.create({ ...(cwd !== undefined ? { cwd } : {}) })).id;
 }

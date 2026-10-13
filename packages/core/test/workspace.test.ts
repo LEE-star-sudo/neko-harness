@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime, normalizeWorkspace, projectChatView } from "../src/index.ts";
 
 import { SessionMetadataDoc } from "../src/session-metadata.ts";
@@ -41,7 +41,7 @@ it("persists workspaces and activity, forks empty and populated sessions, and ex
 		],
 	});
 	const options = { storagePath, providers: [faux.provider], model };
-	let runtime = await createNekoRuntime({ credentials: new MemoryCredentialStore(), ...options, cwd: a });
+	let runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: a });
 	try {
 		const session = await runtime.createConversation({ cwd: b, thinkingLevel: "high" });
 		const empty = await runtime.forkConversation(session.id);
@@ -61,7 +61,7 @@ it("persists workspaces and activity, forks empty and populated sessions, and ex
 		expect((await runtime.getAgent(fork.id)).thinkingLevel).toBe("low");
 		expect((await runtime.getAgent(fork.id)).model?.modelId).toBe("faux-2");
 		await runtime.close();
-		runtime = await createNekoRuntime({ credentials: new MemoryCredentialStore(), ...options, cwd: b });
+		runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: b });
 		expect((await runtime.getAgent()).cwd).toBe(a);
 		expect((await runtime.listConversations()).find((s) => s.id === session.id)!.lastUsedAt).toBe(used);
 		faux.setResponses([
@@ -100,15 +100,15 @@ it("rejects old storage without deleting it, and never rebinds a missing saved d
 	const storagePath = join(a, "history.sqlite");
 	const faux = fauxProvider();
 	const options = { storagePath, model, providers: [faux.provider] };
-	let runtime = await createNekoRuntime({ credentials: new MemoryCredentialStore(), ...options, cwd: b });
+	let runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: b });
 	await runtime.close();
 	rmSync(b, { recursive: true });
-	runtime = await createNekoRuntime({ credentials: new MemoryCredentialStore(), ...options, cwd: a });
+	runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: a });
 	expect((await runtime.getAgent()).cwd).toBe(b);
 	await expect(runtime.submit("no directory")).rejects.toThrow("Workspace is not available");
 	await runtime.conversation.configure({ cwd: "relative-old-path" }, runtime.context);
 	await runtime.close();
-	await expect(createNekoRuntime({ credentials: new MemoryCredentialStore(), ...options, cwd: a })).rejects.toThrow(
+	await expect(createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: a })).rejects.toThrow(
 		"Unsupported session storage",
 	);
 	expect(readFileSync(storagePath).length).toBeGreaterThan(0);

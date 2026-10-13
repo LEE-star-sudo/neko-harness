@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/index.ts";
 
 describe("createNekoRuntime", () => {
@@ -9,7 +9,7 @@ describe("createNekoRuntime", () => {
 		const original = process.env.DEEPSEEK_API_KEY;
 		delete process.env.DEEPSEEK_API_KEY;
 		try {
-			const runtime = await createNekoRuntime({ credentials: new MemoryCredentialStore(), storage: "memory" });
+			const runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), storage: "memory" });
 			await expect(runtime.submit("hello")).rejects.toThrow(/DEEPSEEK_KEY_REQUIRED/);
 			await runtime.close();
 		} finally {
@@ -22,7 +22,7 @@ describe("createNekoRuntime", () => {
 		delete process.env.TAVILY_API_KEY;
 		try {
 			const runtime = await createNekoRuntime({
-				credentials: new MemoryCredentialStore(),
+				credentials: new InMemoryCredentialStore(),
 				storage: "memory",
 				tavilyApiKey: "test-tavily-override",
 			});
@@ -42,7 +42,7 @@ describe("createNekoRuntime", () => {
 		const faux = fauxProvider();
 		faux.setResponses([fauxAssistantMessage([fauxText("2")])]);
 		const runtime = await createNekoRuntime({
-			credentials: new MemoryCredentialStore(),
+			credentials: new InMemoryCredentialStore(),
 			storage: "memory",
 			model: { provider: "faux", modelId: "faux-1" },
 			providers: [faux.provider],

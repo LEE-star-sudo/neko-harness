@@ -231,18 +231,20 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			: active.some((c) => c.blocking)
 				? "等待上下文压缩"
 				: "正在压缩上下文"
-		: latest && !expired
-			? {
-					applied: "上下文已压缩",
-					nothing: "当前无需压缩",
-					skipped: "已跳过过期摘要",
-					cancelled: "压缩已取消",
-					failed: "压缩失败，可重试",
-					summarizing: "正在压缩上下文",
-					"waiting-to-apply": "等待应用压缩摘要",
-				}[latest.phase]
-			: null;
-	const compactionFailed = !active.length && latest?.phase === "failed";
+		: view?.compaction?.failure
+			? `压缩失败：${view.compaction.failure.error}`
+			: latest && !expired
+				? {
+						applied: "上下文已压缩",
+						nothing: "当前无需压缩",
+						skipped: "已跳过过期摘要",
+						cancelled: "压缩已取消",
+						failed: "压缩失败，可重试",
+						summarizing: "正在压缩上下文",
+						"waiting-to-apply": "等待应用压缩摘要",
+					}[latest.phase]
+				: null;
+	const compactionFailed = !active.length && (!!view?.compaction?.failure || latest?.phase === "failed");
 	const usage = view?.usage ?? null;
 	const compact = async (instructions: string) => {
 		if (locked.current || props.disabled) return;

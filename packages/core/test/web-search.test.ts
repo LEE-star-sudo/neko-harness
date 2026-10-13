@@ -29,7 +29,7 @@ function tools(resolveKey: () => Promise<string | undefined>, fetchImpl: TavilyF
 const api = undefined as never;
 
 function textOf(result: unknown): string {
-	const content = (result as { content: { type: string; text?: string }[] }).content;
+	const content = (result as { output: { type: string; text?: string }[] }).output;
 	return content.flatMap((block) => (block.type === "text" ? [block.text ?? ""] : [])).join("");
 }
 

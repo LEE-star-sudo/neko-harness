@@ -1,9 +1,11 @@
 import type { AssistantMessage, ModelThinkingLevel, Usage, UserMessage } from "@earendil-works/pi-ai";
-import type { ConversationView, LiveState, ToolSlot, UsageState } from "@earendil-works/pi-durable";
+import type { ConversationView, LiveState, ToolDiagnostic, ToolSlot, UsageState } from "@earendil-works/pi-durable";
 import type { CompactionRecord } from "./compaction.ts";
-import { imageKey } from "./image-metadata.ts";
+import type { ImageMetadata } from "./image-metadata.ts";
 import type { ImageInfo } from "./images.ts";
+import type { InputData } from "./input.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
+import type { SkillInvocation } from "./skill-invocation.ts";
 import { savedWorkspace } from "./workspace.ts";
 
 /**
@@ -27,7 +29,11 @@ export type UsageTotals = {
 export type ChatView = {
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
 	contextUsage?: { tokens: number | null; window: number; percent: number | null };
-	compaction?: { active: NonNullable<LiveState["compactions"]>; latest: CompactionRecord | null };
+	compaction?: {
+		active: (Omit<NonNullable<LiveState["compactions"]>[number], "taskId"> & { taskId: number })[];
+		latest: CompactionRecord | null;
+		failure?: Omit<NonNullable<LiveState["compactionFailure"]>, "taskId"> & { taskId: number };
+	};
 	/** 模型标签，如 "deepseek/deepseek-flash"；pi.agent 有显式模型时取自它（切换后立即更新）。 */
 	model: string;
 	/** 当前会话生效的代理配置（pi.agent doc 投影，configure 提交后随视图推送更新）。 */
@@ -52,7 +58,7 @@ export type ChatView = {
 /** 已提交条目投影；`key` 是稳定的 React key。 */
 export type ChatImage = ImageInfo & { entryId: number; contentIndex: number };
 export type ChatItem =
-	| { type: "user"; key: string; id: number; text: string; images?: ChatImage[] }
+	| { type: "user"; key: string; id: number; text: string; images?: ChatImage[]; skill?: SkillInvocation }
 	| {
 			type: "assistant";
 			key: string;
@@ -201,7 +207,11 @@ type AgentDocView = {
 export function projectChatView(
 	view: ConversationView,
 	modelLabel: string,
-	options: { models?: readonly NekoModelInfo[]; contextEntries?: ConversationView["entries"] } = {},
+	options: {
+		models?: readonly NekoModelInfo[];
+		contextEntries?: ConversationView["entries"];
+		compaction?: CompactionRecord | null;
+	} = {},
 ): ChatView {
 	const live = (view.docs["pi.live"] ?? {}) as LiveState;
 	const usage = totalUsage((view.docs["pi.usage"] ?? { models: {}, tools: {} }) as UsageState);
@@ -221,6 +231,7 @@ export function projectChatView(
 	for (const entry of view.entries) {
 		for (const message of entry.model ?? []) {
 			if (message.role !== "toolResult") continue;
+			const diagnostics = (entry.data as { diagnostics?: ToolDiagnostic[] } | undefined)?.diagnostics ?? [];
 			results.set(message.toolCallId, {
 				type: "tool",
 				key: `t${message.toolCallId}`,
@@ -231,16 +242,24 @@ export function projectChatView(
 				phase: "done",
 				isError: message.isError,
 				output: null,
-				result: toolResultText(message.content),
+				result: [
+					toolResultText(diagnostics.length ? message.content.slice(0, -1) : message.content),
+					...diagnostics.map((d) => `[${d.severity}] ${d.message}`),
+				]
+					.filter(Boolean)
+					.join("\n"),
 				durationMs: message.durationMs ?? null,
 				note: null,
 			});
 		}
 	}
 
-	const imageDescriptors = (entryId: number, content: UserMessage["content"], toolCallId?: string): ChatImage[] => {
+	const imageDescriptors = (
+		entryId: number,
+		content: UserMessage["content"],
+		metadata: readonly ImageMetadata[] = [],
+	): ChatImage[] => {
 		if (typeof content === "string") return [];
-		const metadata = (view.docs["app.neko.images"]?.images ?? {}) as Record<string, ImageInfo>;
 		return content.flatMap((b, contentIndex) =>
 			b.type !== "image"
 				? []
@@ -248,16 +267,13 @@ export function projectChatView(
 						{
 							entryId,
 							contentIndex,
-							...((toolCallId
-								? metadata[`tool:${toolCallId}:${contentIndex}`]
-								: metadata[`entry:${entryId}:${contentIndex}`]) ??
-								metadata[imageKey(b.data)] ?? {
-									name: "Image",
-									mimeType: b.mimeType,
-									width: 0,
-									height: 0,
-									bytes: Math.floor((b.data.length * 3) / 4),
-								}),
+							...(metadata.find((info) => info.contentIndex === contentIndex) ?? {
+								name: "Image",
+								mimeType: b.mimeType,
+								width: 0,
+								height: 0,
+								bytes: Math.floor((b.data.length * 3) / 4),
+							}),
 						},
 					],
 		);
@@ -266,18 +282,24 @@ export function projectChatView(
 		for (const message of entry.model ?? [])
 			if (message.role === "toolResult") {
 				const item = results.get(message.toolCallId);
-				if (item) item.images = imageDescriptors(entry.id, message.content, message.toolCallId);
+				if (item)
+					item.images = imageDescriptors(
+						entry.id,
+						message.content,
+						(message.details as { neko?: { images?: ImageMetadata[] } } | undefined)?.neko?.images,
+					);
 			}
 	const items: ChatItem[] = [];
 	for (const entry of view.entries) {
 		const message = entry.model?.[0];
-		if (entry.kind === "pi.user" && message?.role === "user") {
+		if (message?.role === "user") {
 			items.push({
 				type: "user",
 				key: `e${entry.id}`,
 				id: entry.id,
 				text: userText(message.content),
-				images: imageDescriptors(entry.id, message.content),
+				images: imageDescriptors(entry.id, message.content, (entry.data as InputData | undefined)?.images),
+				...((entry.data as InputData | undefined)?.skill ? { skill: (entry.data as InputData).skill! } : {}),
 			});
 			continue;
 		}
@@ -337,7 +359,8 @@ export function projectChatView(
 		},
 		compaction: {
 			active: [...(live.compactions ?? [])],
-			latest: (view.docs["app.neko.compaction"]?.latest as CompactionRecord | null) ?? null,
+			latest: options.compaction ?? null,
+			...(live.compactionFailure ? { failure: live.compactionFailure } : {}),
 		},
 		model: agentModel !== null ? `${agentModel.provider}/${agentModel.modelId}` : modelLabel,
 		agent: {

@@ -1,4 +1,5 @@
 import { dirname } from "node:path";
+import type { SkillInvocation } from "../skill-invocation.ts";
 import { type ReportPromptDiagnostic, warnPromptDiagnostic } from "./diagnostics.ts";
 import { stripFrontmatter } from "./frontmatter.ts";
 import { escapeXml, type Skill } from "./skills.ts";
@@ -13,6 +14,7 @@ export const expandSkillCommand = async (
 	skills: readonly Skill[],
 	readFile: (path: string) => Promise<string>,
 	report: ReportPromptDiagnostic = warnPromptDiagnostic,
+	metadata?: (skill: SkillInvocation) => void,
 ): Promise<string> => {
 	if (!text.startsWith("/skill:")) return text;
 	const spaceIndex = text.indexOf(" ");
@@ -27,6 +29,12 @@ export const expandSkillCommand = async (
 		report({ path: skill.filePath, message: "Cannot expand known skill; original input preserved." });
 		return text;
 	}
+	metadata?.({
+		name: skill.name,
+		location: skill.filePath,
+		body: `References are relative to ${dirname(skill.filePath)}.\n\n${body}`,
+		args,
+	});
 	const block = `<skill name="${escapeXml(skill.name)}" location="${escapeXml(skill.filePath)}">\nReferences are relative to ${dirname(skill.filePath)}.\n\n${body}\n</skill>`;
 	return args ? `${block}\n\n${args}` : block;
 };

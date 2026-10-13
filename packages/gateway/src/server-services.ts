@@ -1,20 +1,22 @@
-import type { Context } from "@earendil-works/chord";
+import { randomUUID } from "node:crypto";
 import {
-	createRemoteServiceEndpoint,
-	type JsonValue,
-	RemoteServiceError,
-	RemoteServiceProvider,
-	replicatedState,
+	ChordError,
+	type Context,
+	cell,
+	type Host,
+	hostPrincipal,
+	listener,
+	local,
+	method,
 } from "@earendil-works/chord";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import type { RoutedServerServiceAttachment, RoutedServerServiceHost } from "@earendil-works/pi-server";
-import type { NekoRuntime } from "@neko-harness/core";
-import { CREDENTIAL_PROVIDERS } from "@neko-harness/core";
-import { MissingFileSearchDependencyError, searchWorkspaceFiles } from "@neko-harness/core/workspace-files";
+import { CREDENTIAL_PROVIDERS, type NekoRuntime } from "@neko-harness/core";
+import { Type } from "typebox";
 import {
+	CredentialStateSchema,
+	DirectoryStateSchema,
 	type NekoCredentialState,
 	NekoCredentials,
-	type NekoDirectoryState,
 	type NekoMarketSkill,
 	NekoModels,
 	NekoSessionDirectory,
@@ -22,45 +24,40 @@ import {
 	type NekoSessionSummary,
 	NekoSkillMarket,
 	NekoWorkspaceFiles,
-	type NekoWorkspaceState,
 	NekoWorkspaces,
+	WorkspaceStateSchema,
 } from "./contract.ts";
-import { fileSearchInstallHelp } from "./file-search-help.ts";
+import { Owner, serveSessions } from "./session-host.ts";
 import { activeLevelOf, createSkillMarketClient, SkillMarketError } from "./skill-market.ts";
 import { browseWorkspaces } from "./workspaces.ts";
 
-/**
- * 服务器级服务（目录订阅 + 会话管理 + 模型目录），模式对照 coding-agent experimental services/server.ts：
- * 每个连接一个 RemoteServiceProvider + endpoint，目录为共享复制状态，变化推送给所有订阅。
- */
-export type NekoServerServices = {
-	readonly host: RoutedServerServiceHost;
-	/** 重新列出目录并递增 revision（创建/归档后由管理方法内部调用）。 */
-	refresh(): Promise<void>;
-	dispose(): Promise<void>;
-};
-
+const ServerState = local("neko.server-state", {
+	version: 1,
+	input: Type.Object({}),
+	members: {
+		directory: DirectoryStateSchema,
+		workspaces: WorkspaceStateSchema,
+		credentials: CredentialStateSchema,
+		refreshCredentials: method(Type.Null(), Type.Null()),
+	},
+});
 export async function createNekoServerServices(options: {
-	readonly runtime: NekoRuntime;
-	readonly context: Context;
-	/** 市场 API 地址（core config skills.marketUrl 或默认）。 */
-	readonly marketUrl: string;
-	/** 用户级技能根（`<home>/.agents` 的 home）；测试覆盖用。 */
-	readonly promptHome?: string;
-}): Promise<NekoServerServices> {
-	const { runtime, context } = options;
+	host: Host;
+	runtime: NekoRuntime;
+	context: Context;
+	marketUrl: string;
+	promptHome?: string;
+}) {
+	const { runtime, context, host } = options;
 	const market = createSkillMarketClient({
 		marketUrl: options.marketUrl,
 		...(options.promptHome !== undefined ? { home: options.promptHome } : {}),
 	});
-	// chord 错误码是固定集合：市场错误码以 `[code]` 前缀编进 message，前端据此识别（如 skill_exists 弹覆盖确认）。
+	// Chord 的 reason 保留业务原因，前端无需解析格式化后的 message。
 	const toRemote = (error: unknown): never => {
 		if (error instanceof SkillMarketError) {
-			const code =
-				error.code === "skill_not_found" || error.code === "skill_not_installed"
-					? "service_not_found"
-					: "service_invalid_value";
-			throw new RemoteServiceError(code, `[${error.code}] ${error.message}`);
+			const code = error.code === "skill_not_found" || error.code === "skill_not_installed" ? "gone" : "invalid";
+			throw new ChordError(code, error.message, { reason: error.code });
 		}
 		throw error;
 	};
@@ -99,215 +96,182 @@ export async function createNekoServerServices(options: {
 			status: info.status,
 		}));
 
-	let revision = 1;
-	let fileQueries = 0;
 	const readStatuses = async (): Promise<NekoCredentialState["statuses"]> =>
 		Object.fromEntries(
 			await Promise.all(CREDENTIAL_PROVIDERS.map(async (spec) => [spec.id, await runtime.credentialStatus(spec.id)])),
 		) as NekoCredentialState["statuses"];
-	const credentials = replicatedState<NekoCredentialState>({ revision: 1, statuses: await readStatuses() });
-	const workspaces = replicatedState<NekoWorkspaceState>({ revision, workspaces: await runtime.listWorkspaces() });
-	const directory = replicatedState<NekoDirectoryState>({ revision, sessions: await list() });
-	const attachments = new Set<RoutedServerServiceAttachment>();
+	const [sessions, workspaces, statuses] = await Promise.all([list(), runtime.listWorkspaces(), readStatuses()]);
 	let mutationTail = Promise.resolve();
-
-	const serialize = <T>(operation: () => Promise<T>): Promise<T> => {
-		const result = mutationTail.catch(() => {}).then(operation);
+	const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
+		const result = mutationTail.catch(() => {}).then(fn);
 		mutationTail = result.then(
-			() => undefined,
-			() => undefined,
+			() => {},
+			() => {},
 		);
 		return result;
 	};
-
-	const refreshNow = async (): Promise<void> => {
-		const sessions = await list();
-		const items = await runtime.listWorkspaces();
-		workspaces.change(context, (draft) => {
-			draft.revision++;
-			draft.workspaces = items;
-		});
-		revision += 1;
-		directory.change(context, (draft) => {
-			draft.revision = revision;
-			draft.sessions = sessions;
-		});
-	};
-
-	const unsubscribe = runtime.onDirectoryChange(() => {
-		void serialize(refreshNow).catch(() => {});
-	});
-	return {
-		host: {
-			attachClient(presentation) {
-				let activeSessionId: string | undefined;
-				let fileQuery: AbortController | undefined;
-				const provider = new RemoteServiceProvider([
-					{ service: NekoSessionDirectory, mode: "singleton" },
-					{ service: NekoSessionManagement, mode: "singleton" },
-					{ service: NekoModels, mode: "singleton" },
-					{ service: NekoCredentials, mode: "singleton" },
-					{ service: NekoWorkspaces, mode: "singleton" },
-					{ service: NekoWorkspaceFiles, mode: "singleton" },
-					{ service: NekoSkillMarket, mode: "singleton" },
-				]);
-				provider.provide(NekoSessionDirectory, { state: directory });
-				const updateCredentials = (operation: () => Promise<void>) =>
-					serialize(async () => {
-						await operation();
-						const statuses = await readStatuses();
-						credentials.change(context, (draft) => {
-							Object.assign(draft, { statuses });
-							draft.revision++;
+	host.serve(
+		ServerState,
+		(_input, _principal, self) => {
+			const state = self.state({
+				directory: cell(DirectoryStateSchema, { revision: 1, sessions }),
+				workspaces: cell(WorkspaceStateSchema, { revision: 1, workspaces }),
+				credentials: cell(CredentialStateSchema, { revision: 1, statuses }),
+			});
+			self.listen({
+				directory: listener(
+					{ subscribe: runtime.harness.subscribeCommits.bind(runtime.harness) },
+					async (event, ctx) => {
+						if (
+							!event.changes.some(
+								(change) =>
+									change.type === "conversation" ||
+									(change.type === "document" &&
+										[
+											"app.neko.session-metadata",
+											"app.neko.activity",
+											"app.neko.conversation",
+											"app.neko.workspaces",
+											"pi.agent",
+										].includes(change.record.kind)),
+							)
+						)
+							return;
+						await serialize(async () => {
+							const [items, roots] = await Promise.all([list(), runtime.listWorkspaces()]);
+							state.directory.replace(ctx, { revision: state.directory.value.revision + 1, sessions: items });
+							state.workspaces.replace(ctx, { revision: state.workspaces.value.revision + 1, workspaces: roots });
 						});
+					},
+				),
+			});
+			return {
+				...state,
+				async refreshCredentials(_input: null, ctx: import("@earendil-works/chord").Ctx) {
+					state.credentials.replace(ctx, {
+						revision: state.credentials.value.revision + 1,
+						statuses: await readStatuses(),
 					});
-				provider.provide(NekoCredentials, {
-					state: credentials,
-					save: (input) => updateCredentials(() => runtime.saveCredential(input.provider, input.key)),
-					remove: (input) => updateCredentials(() => runtime.removeCredential(input.provider)),
-				});
-				provider.provide(NekoWorkspaces, {
-					state: workspaces,
-					browse: (input) => browseWorkspaces(input),
-					add: (input) =>
-						serialize(async () => {
-							const item = await runtime.addWorkspace(input.path);
-							await refreshNow();
-							return item;
-						}),
-				});
-				// 模型目录是全局快照（Models registry），列表查询无需序列化。
-				provider.provide(NekoWorkspaceFiles, {
-					search: async (input, ctx) => {
-						fileQuery?.abort();
-						if (fileQueries >= 4) throw new Error("File search busy. Please retry.");
-						const controller = new AbortController();
-						fileQuery = controller;
-						fileQueries++;
-						try {
-							const roots = await runtime.listWorkspaces();
-							if (!roots.some((w) => w.path === input.workspaceRoot)) throw new Error("Unknown workspace.");
-							return await searchWorkspaceFiles(
-								input.workspaceRoot,
-								input.query,
-								AbortSignal.any([controller.signal, ...(ctx.abortSignal ? [ctx.abortSignal] : [])]),
-							);
-						} catch (error) {
-							if (error instanceof MissingFileSearchDependencyError)
-								throw new RemoteServiceError("service_not_allowed", fileSearchInstallHelp());
-							throw error;
-						} finally {
-							fileQueries--;
-							if (fileQuery === controller) fileQuery = undefined;
-						}
-					},
-				});
-				provider.provide(NekoModels, { list: async () => runtime.listModels() });
-				provider.provide(NekoSkillMarket, {
-					list: (input) =>
-						market
-							.list(input.query)
-							.then((skills) => Promise.all(skills.map((skill) => withInstallState(skill, input.workspaceRoot))))
-							.catch(toRemote),
-					detail: (input) =>
-						market
-							.detail(input.name)
-							.then((skill) => withInstallState(skill, input.workspaceRoot))
-							.catch(toRemote),
-					preview: (input) => market.preview(input.name).catch(toRemote),
-					install: (input) =>
-						serialize(() =>
-							market
-								.install(input)
-								.then((result) => ({ ...result }))
-								.catch(toRemote),
-						),
-					uninstall: (input) => serialize(() => market.uninstall(input).catch(toRemote)),
-				});
-				provider.provide(NekoSessionManagement, {
-					create: (createOptions) =>
-						serialize(async () => {
-							const created = await runtime.createConversation(
-								createOptions.model !== undefined ||
-									createOptions.thinkingLevel !== undefined ||
-									createOptions.cwd !== undefined
-									? {
-											...(createOptions.model !== undefined ? { model: createOptions.model } : {}),
-											...(createOptions.thinkingLevel !== undefined
-												? { thinkingLevel: createOptions.thinkingLevel }
-												: {}),
-											...(createOptions.cwd !== undefined ? { cwd: createOptions.cwd } : {}),
-										}
-									: undefined,
-							);
-							await refreshNow();
-							return (await list()).find((item) => item.id === String(created.id))!;
-						}),
-					archive: (sessionId) =>
-						serialize(async () => {
-							await presentation.prepareSessionRemoval(sessionId, context);
-							await runtime.archiveConversation(toConversationId(sessionId));
-							await refreshNow();
-						}),
-					attach: (sessionId) =>
-						serialize(async () => {
-							await presentation.attachSession(sessionId, context);
-							if (activeSessionId !== sessionId) {
-								activeSessionId = sessionId;
-								await runtime.touchConversation(toConversationId(sessionId));
-								await refreshNow();
-							}
-						}),
-					detach: () =>
-						serialize(async () => {
-							await presentation.detachSession(context);
-							activeSessionId = undefined;
-						}),
-					fork: (sessionId) =>
-						serialize(async () => {
-							const forked = await runtime.forkConversation(toConversationId(sessionId));
-							await refreshNow();
-							return (await list()).find((item) => item.id === String(forked.id))!;
-						}),
-				});
-				const endpoint = createRemoteServiceEndpoint(provider);
-				let released = false;
-				const attachment: RoutedServerServiceAttachment = {
-					invokeService(call, publish, invokeContext): Promise<JsonValue | undefined> {
-						if (released) return Promise.reject(new Error("Server service attachment is released"));
-						return endpoint.invoke(call, publish, invokeContext);
-					},
-					release() {
-						if (released) return;
-						released = true;
-						fileQuery?.abort();
-						endpoint.dispose();
-						provider.dispose();
-						attachments.delete(attachment);
-					},
-				};
-				attachments.add(attachment);
-				return attachment;
-			},
+					return null;
+				},
+			};
 		},
-		refresh: () => serialize(refreshNow),
+		{ eager: { input: {} } },
+	);
+	const shared = (self: import("@earendil-works/chord").Self) =>
+		self.get(ServerState, {}, { principal: hostPrincipal });
+	host.serve(NekoSessionDirectory, (_input, _principal, self) => ({ kind: "ready", state: shared(self).directory }));
+	host.serve(NekoWorkspaces, (_input, _principal, self) => ({
+		kind: "ready",
+		state: shared(self).workspaces,
+		browse: (input) => browseWorkspaces(input),
+		add: (input) => serialize(() => runtime.addWorkspace(input.path)),
+	}));
+	host.serve(NekoCredentials, (_input, _principal, self) => {
+		const hub = shared(self);
+		return {
+			kind: "ready",
+			state: hub.credentials,
+			save: async (input, ctx) => {
+				await runtime.saveCredential(input.provider, input.key);
+				return hub.refreshCredentials(null, ctx);
+			},
+			remove: async (input, ctx) => {
+				await runtime.removeCredential(input.provider);
+				return hub.refreshCredentials(null, ctx);
+			},
+		};
+	});
+	host.serve(NekoModels, () => ({
+		kind: "ready",
+		list: async () =>
+			[...runtime.listModels()].map((value) => ({
+				...value,
+				input: [...value.input],
+				supportedThinkingLevels: [...value.supportedThinkingLevels],
+			})),
+	}));
+	host.serve(NekoWorkspaceFiles, () => ({
+		kind: "ready",
+		search: async (input, ctx) => {
+			const roots = await runtime.listWorkspaces();
+			if (!roots.some((root) => root.path === input.workspaceRoot))
+				throw new ChordError("invalid", "Unknown workspace.");
+			return runtime.workspaceFiles.search(input.workspaceRoot, input.query, ctx.signal);
+		},
+	}));
+	serveSessions(host, runtime, context);
+	host.serve(NekoSessionManagement, (_input, principal, self) => {
+		const owner = self.get(Owner, {}, { principal });
+		const summary = async (id: ConversationId) => {
+			const found = (await list()).find((item) => item.id === String(id));
+			if (!found) throw new ChordError("gone", "Session unavailable");
+			return found;
+		};
+		return {
+			kind: "ready",
+			create: (input) => serialize(async () => summary((await runtime.createConversation(input)).id)),
+			fork: (id) => serialize(async () => summary((await runtime.forkConversation(toConversationId(id))).id)),
+			archive: async (id) => {
+				await runtime.archiveConversation(toConversationId(id));
+				return null;
+			},
+			attach: (id) =>
+				serialize(async () => {
+					if (!(await runtime.getConversation(toConversationId(id))))
+						throw new ChordError("gone", `Unknown session: ${id}`);
+					if (owner.owner!.active?.sessionId !== id) {
+						owner.owner!.active = { sessionId: id, attachmentId: randomUUID() };
+						await runtime.touchConversation(toConversationId(id));
+					}
+					return owner.owner!.active!;
+				}),
+			detach: async () => {
+				owner.owner!.active = null;
+				return null;
+			},
+		};
+	});
+	host.serve(NekoSkillMarket, () => ({
+		kind: "ready",
+		list: (input) =>
+			market
+				.list(input.query)
+				.then((skills) => Promise.all(skills.map((skill) => withInstallState(skill, input.workspaceRoot))))
+				.catch(toRemote),
+		detail: (input) =>
+			market
+				.detail(input.name)
+				.then((skill) => withInstallState(skill, input.workspaceRoot))
+				.catch(toRemote),
+		preview: (input) =>
+			market
+				.preview(input.name)
+				.then((value) => ({ ...value, files: [...value.files] }))
+				.catch(toRemote),
+		install: (input) =>
+			serialize(() =>
+				market
+					.install(input)
+					.then((result) => ({ ...result }))
+					.catch(toRemote),
+			),
+		uninstall: (input) =>
+			serialize(async () => {
+				await market.uninstall(input).catch(toRemote);
+				return null;
+			}),
+	}));
+	await host.ready();
+	return {
 		async dispose() {
-			unsubscribe();
-			const releases = await Promise.allSettled([...attachments].map((attachment) => attachment.release(context)));
-			attachments.clear();
 			await mutationTail;
-			const errors = releases.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
-			if (errors.length === 1) throw errors[0];
-			if (errors.length > 1) throw new AggregateError(errors, "Failed to release server service attachments");
 		},
 	};
 }
-
-/** 目录/路由用的十进制会话 id → pi-durable 的数字 ConversationId。 */
 export function toConversationId(sessionId: string): ConversationId {
 	const numeric = Number(sessionId);
-	if (!Number.isSafeInteger(numeric) || numeric < 1) {
-		throw new Error(`Invalid neko session id: ${sessionId}`);
-	}
+	if (!Number.isSafeInteger(numeric) || numeric < 1 || String(numeric) !== sessionId)
+		throw new ChordError("invalid", `Invalid neko session id: ${sessionId}`);
 	return numeric as ConversationId;
 }

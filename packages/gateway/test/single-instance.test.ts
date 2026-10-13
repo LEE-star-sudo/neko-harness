@@ -18,7 +18,7 @@ afterEach(async () => {
 	await cleanup(target);
 });
 
-// 整个文件测 Unix socket 单实例语义（pi-server POSIX 专用），Windows 无 Unix 传输，整包跳过。
+// 整个文件测 Unix socket 单实例语义（网关 POSIX 专用），Windows 无 Unix 传输，整包跳过。
 describe.skipIf(IS_WINDOWS)("single-instance constraint", () => {
 	it("refuses to start when the unix socket is owned by a live gateway", async () => {
 		let message = "";

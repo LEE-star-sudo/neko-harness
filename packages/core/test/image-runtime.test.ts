@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
-import { createNekoRuntime, ImageMetadataDoc, projectChatView } from "../src/index.ts";
+import { createNekoRuntime, projectChatView } from "../src/index.ts";
 import { SessionMetadataDoc } from "../src/session-metadata.ts";
 
 it("persists image-only input, preserves content order, forks and reopens without source files", async () => {
@@ -53,10 +53,7 @@ it("persists image-only input, preserves content order, forks and reopens withou
 				image,
 				{ type: "text", text: "after" },
 			]);
-			expect(
-				(await runtime.harness.snapshot(ImageMetadataDoc, id, runtime.context))!.images[`entry:${users[0]!.id}:0`]
-					?.name,
-			).toBe("source.png");
+			expect((users[0]!.data as { images: { name: string }[] }).images[0]?.name).toBe("source.png");
 		}
 		// Configure first: admission must reject new images while retaining history.
 		const change = runtime.configureConversation(runtime.root.id, { model: { provider: "faux", modelId: "text" } });
@@ -71,7 +68,7 @@ it("persists image-only input, preserves content order, forks and reopens withou
 		await rm(dir, { recursive: true, force: true });
 	}
 }, 15000);
-it("read_image uses each workspace, allows explicit paths, leaves read unchanged and rejects text-only models", async () => {
+it("native read uses each workspace and persists image details, including for text-only models", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "neko-read-image-"));
 	const other = await mkdtemp(join(tmpdir(), "neko-read-image-other-"));
 	const faux = fauxProvider({
@@ -101,7 +98,7 @@ it("read_image uses each workspace, allows explicit paths, leaves read unchanged
 			[otherSession, join(dir, "same.png"), 32],
 		] as const) {
 			faux.setResponses([
-				fauxAssistantMessage([fauxToolCall("read_image", { path })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
 				fauxAssistantMessage([fauxText("Seen")]),
 			]);
 			await session.waitAnswer(await session.submit("read image"));
@@ -111,11 +108,11 @@ it("read_image uses each workspace, allows explicit paths, leaves read unchanged
 				.at(-1)!;
 			state.dispose();
 			expect(tool.type === "tool" && tool.isError).toBe(false);
-			expect(tool.type === "tool" && tool.result).toContain(`${width}x24`);
+			expect(tool.type === "tool" && tool.images?.[0]?.width).toBe(width);
 		}
 		for (const [name, path] of [
-			["read", "same.png"],
-			["read_image", "missing.png"],
+			["read", "invalid.png"],
+			["read", "missing.png"],
 		]) {
 			faux.setResponses([
 				fauxAssistantMessage([fauxToolCall(name!, { path: path! })], { stopReason: "toolUse" }),
@@ -131,12 +128,12 @@ it("read_image uses each workspace, allows explicit paths, leaves read unchanged
 		}
 		await runtime.configureConversation(runtime.root.id, { model: { provider: "faux", modelId: "text" } });
 		faux.setResponses([
-			fauxAssistantMessage([fauxToolCall("read_image", { path: "same.png" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("read", { path: "same.png" })], { stopReason: "toolUse" }),
 			fauxAssistantMessage([fauxText("error")]),
 		]);
 		await runtime.waitAnswer(await runtime.submit("read"));
 		const state = await runtime.viewState();
-		expect(JSON.stringify(projectChatView(state.value, "test"))).toContain("does not support images");
+		expect(JSON.stringify(projectChatView(state.value, "test"))).toContain("placeholder");
 		state.dispose();
 	} finally {
 		await runtime.close();
@@ -173,11 +170,7 @@ it("keeps distinct filenames for identical image bytes and queued messages", asy
 		await runtime.waitAnswer(one);
 		await runtime.waitAnswer(two);
 		const view = await runtime.viewState();
-		const images = await runtime.harness.snapshot(ImageMetadataDoc, runtime.root.id, runtime.context);
-		const projected = projectChatView(
-			{ ...view.value, docs: { ...view.value.docs, "app.neko.images": images! } },
-			"test",
-		);
+		const projected = projectChatView(view.value, "test");
 		view.dispose();
 		expect(projected.items.filter((i) => i.type === "user").map((i) => i.images?.[0]?.name)).toEqual([
 			"first.png",
@@ -207,7 +200,7 @@ it("reports denied and changing files as image tool errors", async () => {
 	});
 	const call = async () => {
 		faux.setResponses([
-			fauxAssistantMessage([fauxToolCall("read_image", { path })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
 			fauxAssistantMessage([fauxText("error reported")]),
 		]);
 		await runtime.waitAnswer(await runtime.submit("read image"));
@@ -241,7 +234,7 @@ it("reports denied and changing files as image tool errors", async () => {
 		});
 		const changed = await call();
 		expect(changed.isError).toBe(true);
-		expect(changed.result).toContain("changed while reading");
+		expect(changed.result).toContain("changed while it was read");
 	} finally {
 		spy?.mockRestore();
 		await chmod(path, 0o600);
@@ -285,5 +278,100 @@ it("names image-only first turns using an off-mode text placeholder, never image
 		expect(faux.state.callCount).toBe(2);
 	} finally {
 		await runtime.close();
+	}
+});
+
+it("projects actual resized read output at index zero with one diagnostic and persists it after source deletion", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "neko-read-resize-"));
+	const faux = fauxProvider({
+		models: [
+			{
+				id: "vision",
+				input: ["text", "image"],
+				inputLimits: { images: { resize: { maxWidth: 16, maxHeight: 16, maxBytes: 100000 } } },
+			},
+		],
+	});
+	const options = {
+		storagePath: join(dir, "history.sqlite"),
+		cwd: dir,
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "vision" },
+	};
+	let runtime = await createNekoRuntime(options);
+	try {
+		await sharp({ create: { width: 32, height: 24, channels: 3, background: "red" } })
+			.png()
+			.toFile(join(dir, "source.png"));
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path: "source.png" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Seen")]),
+		]);
+		await runtime.waitAnswer(await runtime.submit("read"));
+		const history = await runtime.conversation.entries({ order: "ascending" }, 100, undefined, runtime.context);
+		const result = history.items.find((entry) => entry.model?.[0]?.role === "toolResult")!;
+		const message = result.model![0]!;
+		if (message.role !== "toolResult") throw new Error("No result");
+		const image = message.content[0]!;
+		if (image.type !== "image") throw new Error("No image");
+		const bytes = Buffer.from(image.data, "base64");
+		expect((await sharp(bytes).metadata()).width).toBe(16);
+		expect(message.details).toMatchObject({
+			neko: { images: [{ contentIndex: 0, width: 16, height: 12, bytes: bytes.length }] },
+		});
+		await rm(join(dir, "source.png"));
+		await runtime.close();
+		runtime = await createNekoRuntime(options);
+		const state = await runtime.viewState();
+		const tool = projectChatView(state.value, "test").items.find((item) => item.type === "tool")!;
+		if (tool.type !== "tool") throw new Error("No tool");
+		expect(tool.images?.[0]?.contentIndex).toBe(0);
+		expect(tool.images?.[0]?.width).toBe(16);
+		expect(tool.result?.match(/Resized/g)).toHaveLength(1);
+		expect(tool.result).not.toContain("<harness>");
+		state.dispose();
+	} finally {
+		await runtime.close();
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+it("keeps native read decode and processing-limit diagnostics without a successful preview", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "neko-read-decode-"));
+	const faux = fauxProvider({
+		models: [{ id: "limited", input: ["text", "image"], inputLimits: { images: { resize: { maxBytes: 1 } } } }],
+	});
+	const runtime = await createNekoRuntime({
+		storage: "memory",
+		cwd: dir,
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "limited" },
+	});
+	try {
+		const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } })
+			.png()
+			.toBuffer();
+		await writeFile(join(dir, "invalid.png"), png.subarray(0, 33));
+		await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } })
+			.png()
+			.toFile(join(dir, "valid.png"));
+		for (const path of ["invalid.png", "valid.png"]) {
+			faux.setResponses([
+				fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxText("failed")]),
+			]);
+			await runtime.waitAnswer(await runtime.submit("read"));
+			const state = await runtime.viewState();
+			const item = projectChatView(state.value, "test")
+				.items.filter((item) => item.type === "tool")
+				.at(-1)!;
+			expect(item.type === "tool" && item.isError).toBe(true);
+			expect(item.type === "tool" ? (item.images?.length ?? 0) : -1).toBe(0);
+			expect(item.type === "tool" && item.result?.length).toBeGreaterThan(0);
+			state.dispose();
+		}
+	} finally {
+		await runtime.close();
+		await rm(dir, { recursive: true, force: true });
 	}
 });

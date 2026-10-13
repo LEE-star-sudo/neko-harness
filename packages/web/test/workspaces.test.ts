@@ -1,11 +1,80 @@
-import { expect, it } from "bun:test";
+import { expect, it, spyOn } from "bun:test";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { connectNekoGateway } from "../../gateway/src/client.ts";
 import { cleanup, makeGateway, testAddress, waitFor } from "../../gateway/test/helpers.ts";
 import { GatewayConnection, type GatewayEvents, workspaceSessions } from "../src/client/lib/gateway.ts";
 import { startWebServer } from "../src/server.ts";
+
+it("waits for the first chat snapshot and ignores a late operation after connection disposal", async () => {
+	const target = await makeGateway();
+	const runtime = target.gateway.runtime;
+	const get = runtime.getConversation.bind(runtime);
+	let release = () => {};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const delayed = spyOn(runtime, "getConversation").mockImplementation(async (id) => {
+		await gate;
+		return get(id);
+	});
+	const phases: string[] = [];
+	const web = new GatewayConnection({
+		url: target.wsUrl,
+		serverId: target.serverId,
+		workspaceRoot: (await runtime.listConversations())[0]!.workspaceRoot,
+		events: {
+			onPhase: (phase) => {
+				phases.push(phase);
+			},
+			onError() {},
+			onDirectory() {},
+			onWorkspaces() {},
+			onWorkspace() {},
+			onOperation() {},
+			onModels() {},
+			onSessionChange() {},
+			onView() {},
+		},
+	});
+	let creating: ReturnType<typeof spyOn> | undefined;
+	try {
+		const start = web.start();
+		await waitFor(() => delayed.mock.calls.length > 0, "delayed chat acquisition");
+		expect(web.ready).toBe(false);
+		expect(phases).not.toContain("ready");
+		release();
+		await start;
+		expect(web.ready).toBe(true);
+		delayed.mockRestore();
+		const create = runtime.createConversation.bind(runtime);
+		const pendingGate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		creating = spyOn(runtime, "createConversation").mockImplementation(async (options) => {
+			await pendingGate;
+			return create(options);
+		});
+		const pending = web.createSession();
+		const rejected = pending.then(
+			() => false,
+			() => true,
+		);
+		await waitFor(() => creating!.mock.calls.length > 0, "delayed create");
+		web.dispose();
+		const phaseCount = phases.length;
+		release();
+		expect(await rejected).toBe(true);
+		expect(web.ready).toBe(false);
+		expect(phases).toHaveLength(phaseCount);
+	} finally {
+		release();
+		delayed.mockRestore();
+		creating?.mockRestore();
+		web.dispose();
+		await cleanup(target);
+	}
+}, 15000);
 
 it("scopes Web discovery to its launch directory while reusing another workspace gateway", async () => {
 	const target = await makeGateway();
@@ -78,7 +147,7 @@ it("navigates, creates and archives only within the selected workspace", async (
 		await web.selectWorkspace(root.workspaceRoot);
 		await web.selectWorkspace(b);
 		expect(web.currentSessionId).toBe(id);
-		await peer.management.archive(id, ctx);
+		await peer.management.archive(id);
 		await waitFor(() => web.currentSessionId === newer && web.ready, "same-workspace fallback");
 		await web.archiveSession(newer);
 		expect(web.currentSessionId).toBeUndefined();
@@ -175,7 +244,7 @@ it("reconnects within the selected workspace and a fresh page uses the launch wo
 		const second = web.currentSessionId!;
 		sockets[0]!.close();
 		await waitFor(() => phase === "reconnecting", "disconnect");
-		await peer.management.archive(second, ctx);
+		await peer.management.archive(second);
 		await waitFor(() => phase === "ready" && web.ready, "reconnect");
 		expect(web.currentSessionId).toBe(first);
 		expect(web.workspaceRoot).toBe(b);

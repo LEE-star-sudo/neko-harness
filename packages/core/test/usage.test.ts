@@ -1,5 +1,5 @@
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 // 2.5 用量统计：一轮带工具调用的对话后，usage 按 provider/modelId 与工具名分组，
 // 且带 usage 的失败工具结果也计入。
 
@@ -25,7 +25,7 @@ const Metered = defineExtension({
 			description: "Succeeds and reports usage.",
 			parameters: Type.Object({}),
 			execute: async () => ({
-				content: [{ type: "text", text: "metered ok" }],
+				output: [{ type: "text", text: "metered ok" }],
 				usage: meteredUsage(3, 2),
 			}),
 		}),
@@ -35,7 +35,7 @@ const Metered = defineExtension({
 			parameters: Type.Object({}),
 			execute: async () => ({
 				isError: true,
-				content: [{ type: "text", text: "boom" }],
+				output: [{ type: "text", text: "boom" }],
 				usage: meteredUsage(1, 1),
 			}),
 		}),
@@ -53,7 +53,7 @@ describe("usage accounting (2.5)", () => {
 			fauxAssistantMessage([fauxText("done")]),
 		]);
 		const runtime = await createNekoRuntime({
-			credentials: new MemoryCredentialStore(),
+			credentials: new InMemoryCredentialStore(),
 			storage: "memory",
 			model: { provider: "faux", modelId: "faux-1" },
 			providers: [faux.provider],

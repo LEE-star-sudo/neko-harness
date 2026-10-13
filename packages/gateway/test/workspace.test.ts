@@ -1,7 +1,6 @@
 import { expect, it } from "bun:test";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT as ctx } from "@earendil-works/chord/context";
 import { connectNekoGateway } from "../src/index.ts";
 import { cleanup, makeGateway, testAddress, waitFor } from "./helpers.ts";
 
@@ -12,7 +11,7 @@ it("shares workspace metadata over Unix/WS and touches only distinct activations
 	try {
 		const b = join(await realpath(target.dir), "project-b");
 		await mkdir(b);
-		const created = await unix.management.create({ cwd: b }, ctx);
+		const created = await unix.management.create({ cwd: b });
 		expect(created.workspaceRoot).toBe(b);
 		await waitFor(
 			() => ws.directory.state.value?.sessions.some((s) => s.id === created.id) === true,
@@ -27,12 +26,12 @@ it("shares workspace metadata over Unix/WS and touches only distinct activations
 		const active = lastUsed();
 		const refreshed = await unix.attach(created.id);
 		expect(lastUsed()).toBe(active);
-		await refreshed.submit({ content: "hi" }, ctx);
+		await refreshed.submit({ content: "hi" });
 		await waitFor(() => lastUsed() > active, "input activity");
 		const accepted = lastUsed();
 		await waitFor(() => second.view.value?.items.some((i) => i.type === "assistant") === true, "answer");
 		expect(lastUsed()).toBe(accepted);
-		const fork = await ws.management.fork(created.id, ctx);
+		const fork = await ws.management.fork(created.id);
 		expect(fork.workspaceRoot).toBe(b);
 		expect(unix.directory.state.value!.sessions.find((s) => s.id === "1")!.workspaceRoot).not.toBe(b);
 	} finally {

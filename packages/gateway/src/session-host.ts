@@ -1,17 +1,22 @@
 import { open } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import {
+	type BehaviorOf,
+	ChordError,
 	type Context,
-	createRemoteServiceEndpoint,
-	RemoteServiceError,
-	RemoteServiceProvider,
-	replicatedState,
+	cell,
+	type Host,
+	hostPrincipal,
+	type LocalContract,
+	listener,
+	local,
+	opaque,
+	resource,
 } from "@earendil-works/chord";
-import type { RoutedSessionAttachment, RoutedSessionHandle } from "@earendil-works/pi-server";
+import { withAbortSignal } from "@earendil-works/chord/context";
+import type { EntryRecord } from "@earendil-works/pi-durable";
 import {
 	type ChatView,
-	CompactionDoc,
-	ImageMetadataDoc,
 	mergeUsage,
 	type NekoRuntime,
 	type NekoSession,
@@ -20,121 +25,174 @@ import {
 	totalUsage,
 } from "@neko-harness/core";
 import { workspaceTarget } from "@neko-harness/core/workspace-files";
-import { NekoChat } from "./contract.ts";
+import { Type } from "typebox";
+import { ChatViewSchema, type NekoAttachment, NekoChat } from "./contract.ts";
 import { IMAGE_CHUNK_BYTES, ImageUploads } from "./image-uploads.ts";
-
-/**
- * 打开一个会话的 RoutedSessionHandle（pi-server ServerHost.openSession 的工厂实现）。
- *
- * 每个会话维护一份 ChatView 投影复制状态（订阅 durable viewState，每次 commit 全量重投影，v1
- * 快照语义与 design D4 一致）；所有 attachment 共享该状态，各自持有独立 endpoint（订阅编码互不干扰）。
- * 生效模型/thinkingLevel 由投影直接从 pi.agent doc 读出：configure 是一次 commit，视图更新即推送新值，无竞态。
- */
-export async function openNekoSessionHandle(options: {
-	readonly runtime: NekoRuntime;
-	readonly session: NekoSession;
-	readonly modelLabel: string;
-	readonly onActivity: () => Promise<void>;
-	readonly context: Context;
-}): Promise<RoutedSessionHandle> {
-	const { runtime, session, modelLabel, onActivity, context } = options;
+export type AttachmentOwner = { active: NekoAttachment | null };
+const OwnerInput = Type.Object({});
+export const Owner: LocalContract<{
+	version: 1;
+	input: typeof OwnerInput;
+	members: { owner: ReturnType<typeof opaque<AttachmentOwner>> };
+}> = local("neko.attachment-owner", {
+	version: 1,
+	input: OwnerInput,
+	members: { owner: opaque<AttachmentOwner>("neko.owner@1") },
+});
+const Projection = local("neko.projection", {
+	version: 1,
+	input: Type.Object({ id: Type.String() }),
+	members: {
+		view: ChatViewSchema,
+		reader: opaque<Awaited<ReturnType<typeof openProjection>>>("neko.projection-reader@1"),
+	},
+});
+const emptyView: ChatView = {
+	model: "",
+	agent: { model: null, thinkingLevel: null },
+	cwd: "",
+	busy: false,
+	status: null,
+	usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+	items: [],
+	streaming: null,
+};
+/** The resource has one native view subscription for all attachments, released with its last hold. */
+async function openProjection(runtime: NekoRuntime, session: NekoSession, context: Context) {
 	const view = await session.viewState();
-	const history = new Map<number, import("@earendil-works/pi-durable").EntryRecord>();
+	const history = new Map<number, EntryRecord>();
 	let cursor: import("@earendil-works/pi-durable").Cursor | undefined;
 	do {
 		const page = await session.conversation.entries({ order: "ascending" }, 100, cursor, context);
 		for (const entry of page.items) history.set(entry.id, entry);
 		cursor = page.next;
 	} while (cursor);
-	let compactionDoc = await runtime.harness.snapshot(CompactionDoc, session.id, context);
-	let imageDoc = await runtime.harness.snapshot(ImageMetadataDoc, session.id, context);
-	let namingUsage = await runtime.namingUsage(session.id);
-	let disposed = false;
-	let revision = 0;
-	const project = () => {
-		for (const entry of view.value.entries) history.set(entry.id, entry);
-		return projectChatView(
-			{
-				...view.value,
-				entries: [...history.values()].sort((a, b) => a.id - b.id),
-				docs: {
-					...view.value.docs,
-					"app.neko.compaction": compactionDoc ?? { latest: null },
-					"app.neko.images": imageDoc ?? { images: {} },
-					"pi.usage": mergeUsage(
-						(view.value.docs["pi.usage"] ?? {
-							models: {},
-							tools: {},
-						}) as import("@earendil-works/pi-durable").UsageState,
-						namingUsage,
-					),
+	let changed: ((event: null) => void) | undefined;
+	const stop = view.subscribe(() => changed?.(null));
+	const stopMetadata = runtime.onDirectoryChange(() => changed?.(null));
+	return {
+		subscribe(fn: (event: null) => void) {
+			changed = fn;
+			fn(null);
+			return () => {
+				changed = undefined;
+			};
+		},
+		async project() {
+			for (const entry of view.value.entries) history.set(entry.id, entry);
+			const [naming, compaction] = await Promise.all([runtime.namingUsage(session.id), session.compactionRecord()]);
+			return projectChatView(
+				{
+					...view.value,
+					entries: [...history.values()].sort((a, b) => a.id - b.id),
+					docs: {
+						...view.value.docs,
+						"pi.usage": mergeUsage(
+							(view.value.docs["pi.usage"] ?? {
+								models: {},
+								tools: {},
+							}) as import("@earendil-works/pi-durable").UsageState,
+							naming,
+						),
+					},
 				},
-			},
-			modelLabel,
-			{ models: runtime.listModels(), contextEntries: view.value.entries },
-		);
-	};
-	const chatState = replicatedState<ChatView>(project());
-	const stopMetadata = runtime.onDirectoryChange(() => {
-		const current = ++revision;
-		void runtime
-			.namingUsage(session.id)
-			.then((usage) => {
-				if (!disposed && current === revision) {
-					namingUsage = usage;
-					chatState.replace(context, project());
-				}
-			})
-			.catch(() => {});
-	});
-	const unsubscribe = view.subscribe(() => {
-		for (const entry of view.value.entries) history.set(entry.id, entry);
-		chatState.replace(context, project());
-	});
-
-	let hostTail = Promise.resolve();
-	const stopHost = runtime.harness.subscribeCommits(({ changes }) => {
-		if (
-			!changes.some(
-				(c) =>
-					c.type === "document" &&
-					c.conversationId === session.id &&
-					(c.record.kind === "app.neko.compaction" || c.record.kind === "app.neko.images"),
-			)
-		)
-			return;
-		hostTail = hostTail
-			.catch(() => {})
-			.then(async () => {
-				const [a, b] = await Promise.all([
-					runtime.harness.snapshot(CompactionDoc, session.id, context),
-					runtime.harness.snapshot(ImageMetadataDoc, session.id, context),
-				]);
-				if (disposed) return;
-				compactionDoc = a;
-				imageDoc = b;
-				chatState.replace(context, project());
-			});
-	});
-	// 会话级 provider 由本句柄的所有 attachment 共享（等价 coding-agent worker 的 per-scope endpoint 模式）。
-	const safeUpload = <T>(action: () => T): T => {
-		try {
-			return action();
-		} catch (error) {
-			throw new RemoteServiceError(
-				"service_invalid_value",
-				error instanceof Error ? error.message : "Image upload failed",
+				"",
+				{ models: runtime.listModels(), contextEntries: view.value.entries, compaction },
 			);
-		}
+		},
+		async entry(id: number, ctx: Context) {
+			ctx.abortSignal?.throwIfAborted();
+			for (const entry of view.value.entries) history.set(entry.id, entry);
+			return history.get(id);
+		},
+		close() {
+			stop();
+			stopMetadata();
+			view.dispose();
+			history.clear();
+		},
 	};
-	const createProvider = () => {
-		const uploads = new ImageUploads();
-		const provider = new RemoteServiceProvider([{ service: NekoChat, mode: "singleton" }]);
-		provider.provide(NekoChat, {
-			view: chatState,
-			draftImage: async ({ id, offset }) => safeUpload(() => uploads.read(id, offset)),
+}
+export function serveSessions(host: Host, runtime: NekoRuntime, context: Context) {
+	host.serve(Owner, (_input, _principal, self) => {
+		const { owner } = self.resources({
+			owner: resource({
+				rev: 1,
+				open: () => ({ active: null }) as AttachmentOwner,
+				close: (value) => {
+					value.active = null;
+				},
+			}),
+		});
+		return { owner: self.expose(owner) };
+	});
+	host.serve(Projection, (input, _principal, self) => {
+		const { view } = self.state({ view: cell(ChatViewSchema, emptyView) });
+		const { projection } = self.resources({
+			projection: resource({
+				rev: 1,
+				async open({ signal }) {
+					const session = await runtime.getConversation(Number(input.id) as NekoSession["id"]);
+					if (!session) throw new ChordError("gone", "Session unavailable");
+					const opened = await openProjection(runtime, session, context);
+					try {
+						const initial = await opened.project();
+						await host.root((ctx) => view.replace(ctx, initial), { signal });
+						return opened;
+					} catch (error) {
+						opened.close();
+						throw error;
+					}
+				},
+				close: (value) => value.close(),
+			}),
+		});
+		self.listen({
+			view: listener(
+				projection,
+				(value) => value,
+				async (_event, ctx) => {
+					view.replace(ctx, await projection.value.project());
+				},
+			),
+		});
+		return { view, reader: self.expose(projection) };
+	});
+	host.serve(NekoChat, (input, principal, self) => {
+		const owner = self.get(Owner, {}, { principal });
+		const shared = self.get(Projection, { id: input.sessionId }, { principal: hostPrincipal });
+		const { uploads, projection } = self.resources({
+			uploads: resource({ rev: 1, open: () => new ImageUploads(), close: (value) => value.close() }),
+			projection: resource({
+				rev: 1,
+				deps: [owner],
+				async open() {
+					if (
+						owner.owner?.active?.attachmentId !== input.attachmentId ||
+						owner.owner.active.sessionId !== input.sessionId
+					)
+						throw new ChordError("forbidden", "Attachment does not belong to this connection");
+					const session = await runtime.getConversation(Number(input.sessionId) as NekoSession["id"]);
+					if (!session) throw new ChordError("gone", "Session unavailable");
+					return {
+						session,
+					};
+				},
+			}),
+		});
+		const safeUpload = <T>(action: () => T): T => {
+			try {
+				return action();
+			} catch (error) {
+				throw new ChordError("invalid", error instanceof Error ? error.message : "Image upload failed");
+			}
+		};
+		const behavior: BehaviorOf<typeof NekoChat> = {
+			kind: "ready",
+			view: shared.view,
+			draftImage: async ({ id, offset }) => safeUpload(() => uploads.value.read(id, offset)),
 			importImage: async (path, ctx) => {
-				const target = await workspaceTarget(chatState.value!.cwd, path);
+				const target = await workspaceTarget(shared.view.value!.cwd, path);
 				const mimeType = (
 					{ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" } as Record<
 						string,
@@ -142,7 +200,7 @@ export async function openNekoSessionHandle(options: {
 					>
 				)[extname(target).toLowerCase()];
 				if (!mimeType) throw new Error("Only PNG, JPEG and WebP images are supported");
-				const agent = await runtime.getAgent(session.id);
+				const agent = await runtime.getAgent(projection.value.session.id);
 				const model = runtime
 					.listModels()
 					.find((m) => m.provider === agent.model?.provider && m.modelId === agent.model?.modelId);
@@ -152,28 +210,28 @@ export async function openNekoSessionHandle(options: {
 				try {
 					const info = await handle.stat();
 					if (!info.isFile()) throw new Error("Image must be a file");
-					ctx.abortSignal?.throwIfAborted();
-					id = uploads.begin({ name: basename(target), mimeType, size: info.size });
+					ctx.signal?.throwIfAborted();
+					id = uploads.value.begin({ name: basename(target), mimeType, size: info.size });
 					let offset = 0;
 					while (offset < info.size) {
-						ctx.abortSignal?.throwIfAborted();
+						ctx.signal?.throwIfAborted();
 						const buffer = Buffer.alloc(Math.min(IMAGE_CHUNK_BYTES, info.size - offset));
 						const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
 						if (!bytesRead) throw new Error("Image changed while reading");
-						uploads.append({ id, offset, data: buffer.subarray(0, bytesRead).toString("base64") });
+						uploads.value.append({ id, offset, data: buffer.subarray(0, bytesRead).toString("base64") });
 						offset += bytesRead;
 					}
 					const after = await handle.stat();
 					if (after.size !== info.size || after.mtimeMs !== info.mtimeMs)
 						throw new Error("Image changed while reading");
-					ctx.abortSignal?.throwIfAborted();
-					uploads.finish(id);
-					const raw = uploads.resolve([id])[0]!;
+					ctx.signal?.throwIfAborted();
+					uploads.value.finish(id);
+					const raw = uploads.value.resolve([id])[0]!;
 					await prepareImage(Buffer.from(raw.content.data, "base64"), mimeType, basename(target), model);
-					ctx.abortSignal?.throwIfAborted();
+					ctx.signal?.throwIfAborted();
 					return { id, name: basename(target) };
 				} catch (error) {
-					if (id) uploads.release(id);
+					if (id) uploads.value.release(id);
 					throw error;
 				} finally {
 					await handle.close();
@@ -181,33 +239,39 @@ export async function openNekoSessionHandle(options: {
 			},
 			compact: async ({ instructions }) => {
 				try {
-					await session.compact(instructions);
+					await projection.value.session.compact(instructions);
+					return null;
 				} catch (error) {
-					throw new RemoteServiceError(
-						"service_invalid_value",
-						error instanceof Error ? error.message : "Cannot compact",
-					);
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot compact");
 				}
 			},
-			beginImage: async (input) => safeUpload(() => uploads.begin(input)),
-			appendImage: async (input) => safeUpload(() => uploads.append(input)),
-			finishImage: async (id) => safeUpload(() => uploads.finish(id)),
-			releaseImage: async (id) => uploads.release(id),
-			getImage: async (input) => {
+			beginImage: async (input) => safeUpload(() => uploads.value.begin(input)),
+			appendImage: async (input) => {
+				safeUpload(() => uploads.value.append(input));
+				return null;
+			},
+			finishImage: async (id) => {
+				safeUpload(() => uploads.value.finish(id));
+				return null;
+			},
+			releaseImage: async (id) => {
+				uploads.value.release(id);
+				return null;
+			},
+			getImage: async (input, ctx) => {
 				if (
 					!Number.isSafeInteger(input.offset) ||
 					input.offset < 0 ||
 					!Number.isSafeInteger(input.contentIndex) ||
 					input.contentIndex < 0
 				)
-					throw new RemoteServiceError("service_invalid_value", "Invalid image range");
-				const entry = history.get(input.entryId);
+					throw new ChordError("invalid", "Invalid image range");
+				const entry = await shared.reader!.entry(input.entryId, withAbortSignal(ctx.signal, context));
 				const content = entry?.model?.[0]?.content;
 				const image = Array.isArray(content) ? content[input.contentIndex] : undefined;
-				if (image?.type !== "image")
-					throw new RemoteServiceError("service_invalid_value", "Image is not part of this conversation");
+				if (image?.type !== "image") throw new ChordError("invalid", "Image is not part of this conversation");
 				const bytes = Buffer.from(image.data, "base64");
-				if (input.offset > bytes.length) throw new RemoteServiceError("service_invalid_value", "Invalid image range");
+				if (input.offset > bytes.length) throw new ChordError("invalid", "Invalid image range");
 				return {
 					data: bytes.subarray(input.offset, input.offset + IMAGE_CHUNK_BYTES).toString("base64"),
 					total: bytes.length,
@@ -218,9 +282,12 @@ export async function openNekoSessionHandle(options: {
 				try {
 					const duplicate =
 						input.requestId &&
-						(await session.conversation.commit((tx) => tx.submissionByRequest(session.id, input.requestId!), context));
-					const images = duplicate ? [] : uploads.resolve(input.images ?? []);
-					await session.submit(
+						(await projection.value.session.conversation.commit(
+							(tx) => tx.submissionByRequest(projection.value.session.id, input.requestId!),
+							context,
+						));
+					const images = duplicate ? [] : uploads.value.resolve(input.images ?? []);
+					await projection.value.session.submit(
 						images.length ? [{ type: "text", text: input.content }, ...images.map((i) => i.content)] : input.content,
 						{
 							imageNames: images.map((i) => i.name),
@@ -228,24 +295,21 @@ export async function openNekoSessionHandle(options: {
 							...(input.whenBusy !== undefined ? { whenBusy: input.whenBusy } : {}),
 						},
 					);
-					for (const id of input.images ?? []) uploads.release(id);
+					for (const id of input.images ?? []) uploads.value.release(id);
 				} catch (error) {
 					if (error instanceof Error && error.message.startsWith("DEEPSEEK_KEY_REQUIRED:"))
-						throw new RemoteServiceError(
-							"service_invalid_value",
-							"DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.",
-						);
-					throw new RemoteServiceError(
-						"service_invalid_value",
-						error instanceof Error ? error.message : "Cannot submit message",
-					);
+						throw new ChordError("invalid", "DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.");
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot submit message");
 				}
-				await onActivity();
+				return null;
 			},
-			abort: () => session.abort(),
-			skills: () => runtime.listSkills(session.id),
+			abort: async () => {
+				await projection.value.session.abort();
+				return null;
+			},
+			skills: () => runtime.listSkills(projection.value.session.id),
 			usage: async () => {
-				const usage = totalUsage(await session.usage());
+				const usage = totalUsage(await projection.value.session.usage());
 				return {
 					input: usage.input,
 					output: usage.output,
@@ -255,54 +319,34 @@ export async function openNekoSessionHandle(options: {
 				};
 			},
 			configure: async (change) => {
-				const applied = await runtime.configureConversation(session.id, change);
+				const applied = await runtime.configureConversation(projection.value.session.id, change);
 				if (!applied) {
 					// 句柄仍在路由中但会话已被归档/删除（竞态窗口）：给前端一个可判读的远程错误。
-					throw new RemoteServiceError(
-						"service_invalid_value",
-						`Session ${String(session.id)} is unavailable or archived`,
-					);
+					throw new ChordError("invalid", `Session ${String(projection.value.session.id)} is unavailable or archived`);
 				}
+				return null;
 			},
-		});
-
-		return { provider, uploads };
-	};
-	const endpoints = new Map<ReturnType<typeof createRemoteServiceEndpoint>, () => void>();
-	return {
-		attachClient() {
-			const { provider, uploads } = createProvider();
-			const endpoint = createRemoteServiceEndpoint(provider);
-			endpoints.set(endpoint, () => {
-				endpoint.dispose();
-				uploads.close();
-				provider.dispose();
-			});
-			let released = false;
-			const attachment: RoutedSessionAttachment = {
-				invokeService(call, publish, invokeContext) {
-					if (released) return Promise.reject(new Error("Session attachment is released"));
-					return endpoint.invoke(call, publish, invokeContext);
-				},
-				release() {
-					if (released) return;
-					released = true;
-					endpoint.dispose();
-					uploads.close();
-					provider.dispose();
-					endpoints.delete(endpoint);
-				},
+		};
+		// Every call checks the principal's current generation and archival, including stale retained handles.
+		const guard = async () => {
+			if (owner.owner?.active?.attachmentId !== input.attachmentId || owner.owner.active.sessionId !== input.sessionId)
+				throw new ChordError("gone", "Attachment is no longer active");
+			if (!(await runtime.getConversation(Number(input.sessionId) as NekoSession["id"])))
+				throw new ChordError("gone", "Session unavailable or archived");
+		};
+		for (const name of Object.keys(
+			NekoChat.def.variants.ready.methods,
+		) as (keyof typeof NekoChat.def.variants.ready.methods)[]) {
+			const method = behavior[name] as (arg: never, ctx: import("@earendil-works/chord").Ctx) => unknown;
+			(behavior as unknown as Record<string, unknown>)[name] = async (
+				arg: never,
+				ctx: import("@earendil-works/chord").Ctx,
+			) => {
+				await guard();
+				ctx.signal.throwIfAborted();
+				return method(arg, ctx);
 			};
-			return attachment;
-		},
-		async close() {
-			for (const dispose of endpoints.values()) dispose();
-			endpoints.clear();
-			stopHost();
-			unsubscribe();
-			disposed = true;
-			stopMetadata();
-			view.dispose();
-		},
-	};
+		}
+		return behavior;
+	});
 }

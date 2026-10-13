@@ -2,8 +2,7 @@
 // 目录随创建/归档实时推送给所有已连接前端（Unix socket 与 WebSocket 两端都要收到）。
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { ServerError } from "@earendil-works/pi-client";
+import { ChordError } from "@earendil-works/chord";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
 import { cleanup, makeGateway, type TestGateway, testAddress, waitFor } from "./helpers.ts";
@@ -37,15 +36,15 @@ describe("session directory", () => {
 
 			const seenByUnix: Array<{ revision: number; ids: string[] }> = [];
 			const seenByWs: Array<{ revision: number; ids: string[] }> = [];
-			unix.directory.state.subscribe((value) =>
-				seenByUnix.push({ revision: value.revision, ids: value.sessions.map((s) => s.id) }),
+			unix.directory.state.subscribe(
+				(value) => value && seenByUnix.push({ revision: value.revision, ids: value.sessions.map((s) => s.id) }),
 			);
-			ws.directory.state.subscribe((value) =>
-				seenByWs.push({ revision: value.revision, ids: value.sessions.map((s) => s.id) }),
+			ws.directory.state.subscribe(
+				(value) => value && seenByWs.push({ revision: value.revision, ids: value.sessions.map((s) => s.id) }),
 			);
 
 			// 新会话广播：两端都收到 revision 递增后的目录。
-			const created = await unix.management.create({}, BACKGROUND_CONTEXT);
+			const created = await unix.management.create({});
 			await waitFor(
 				() => seenByUnix.some((entry) => entry.revision >= 2 && entry.ids.includes(created.id)),
 				"unix 收到新会话广播",
@@ -58,7 +57,7 @@ describe("session directory", () => {
 
 			// 归档同样广播：两端都收到 revision 再次递增、且该会话消失的目录。
 			const revisionAfterCreate = unix.directory.state.value?.revision ?? 0;
-			await unix.management.archive(created.id, BACKGROUND_CONTEXT);
+			await unix.management.archive(created.id);
 			await waitFor(
 				() => seenByUnix.some((entry) => entry.revision > revisionAfterCreate && !entry.ids.includes(created.id)),
 				"unix 收到归档广播",
@@ -70,7 +69,7 @@ describe("session directory", () => {
 			);
 
 			// 归档后 attach 未知会话 → 明确的 not-found 错误。
-			await expect(unix.management.attach(created.id, BACKGROUND_CONTEXT)).rejects.toBeInstanceOf(ServerError);
+			await expect(unix.management.attach(created.id)).rejects.toBeInstanceOf(ChordError);
 		} finally {
 			await unix.close();
 			await ws.close();
@@ -105,7 +104,7 @@ it("broadcasts background title and final-message time without requiring an atta
 				}),
 		]);
 		const chat = await unix.attach("1");
-		await chat.submit({ content: "Name this session", requestId: "naming" }, BACKGROUND_CONTEXT);
+		await chat.submit({ content: "Name this session", requestId: "naming" });
 		await waitFor(() => !!finish, "provider running");
 		await waitFor(() => ws.directory.state.value!.sessions[0]!.lastMessageAt !== null, "input metadata");
 		const sent = ws.directory.state.value!.sessions[0]!.lastMessageAt!;

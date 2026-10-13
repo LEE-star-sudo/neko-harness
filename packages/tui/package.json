@@ -18,11 +18,11 @@
 		"build": "bun --bun run tsc -p tsconfig.build.json"
 	},
 	"dependencies": {
-		"@earendil-works/pi-ai": "1.1.0",
-		"@earendil-works/pi-durable": "1.1.0",
-		"@earendil-works/pi-protocol": "1.1.0",
-		"@earendil-works/pi-tui": "1.1.0",
+		"@earendil-works/pi-ai": "1.2.0",
+		"@earendil-works/pi-durable": "1.2.0",
+		"@earendil-works/pi-tui": "1.2.0",
 		"@neko-harness/core": "workspace:*",
-		"@neko-harness/gateway": "workspace:*"
+		"@neko-harness/gateway": "workspace:*",
+		"@earendil-works/chord": "1.2.0"
 	}
 }

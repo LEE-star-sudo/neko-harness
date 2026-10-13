@@ -2,7 +2,7 @@
 
 ## 项目
 
-neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord 1.1.0，全部精确锁版本）的 agent harness monorepo。Bun 1.4.2。设计决策见 `openspec/changes/archive/2026-10-11-bootstrap-neko-harness/design.md`。
+neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord / pi-env / pi-tui 1.2.0，全部精确锁版本）的 agent harness monorepo。Bun 1.4.2。设计决策见 `openspec/changes/archive/2026-10-11-bootstrap-neko-harness/design.md`。
 
 ## 常用命令
 
@@ -36,11 +36,11 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 系统提示词由 core 的 `neko-prompt` 扩展按五节组装：`preamble` / `rules` / `project_context` / `skills` / `cwd`（`packages/core/src/prompt/`）。
 - 项目指令注入两级 AGENTS.md：`~/.agents/AGENTS.md` 与 `<workspace>/AGENTS.md`；不向上遍历、不识别其他文件名。
 - Skills 目录：`~/.agents/skills/<name>/SKILL.md` 与 `<workspace>/.agents/skills/<name>/SKILL.md`（YAML frontmatter，同名项目级优先）；提示词只注入元数据，正文由模型用 read 工具自取。新用户输入提交时准备资源快照，只有该输入进入 transcript 后才激活；无新输入 placement 的工具轮复用活动快照。排队、被拒绝或撤回的输入不提前影响当前 run；快照按会话隔离，各节共享一次构建。进程重启后按当前磁盘资源重建。
-- 显式调用：`/skill:<name> [args]` 在 core 准入层展开为 `<skill>` 用户消息（未知技能透传）；被调用技能的元数据与正文同次读取，不常驻保存全部技能正文。同批多输入的系统资源以最后一个输入快照为准，已展开正文保持原样。前端经 `chat.skills()` 实时取列表做补全，查询不改变活动快照，不本地展开。
+- 显式调用：`/skill:<name> [args]` 在 core 准入层展开为 `<skill>` 用户消息（未知技能透传）；被调用技能的元数据与正文同次读取，不常驻保存全部技能正文。同批多输入的系统资源以最后一个输入快照为准，已展开正文保持原样。前端经 `chat.skills(null)` 实时取列表做补全，查询不改变活动快照，不本地展开。
 
-## pi-durable 使用要点（与 README 出入时以 `reference/pi/packages/durable/src` 为准）
+## Pi 1.2 使用要点（以已安装发布包的类型与行为为准）
 
-- 每个异步调用都要 Chord `Context`；core 里默认 `BACKGROUND_CONTEXT`。
+- durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord handle 方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root。
 - 存储：`openNodeSqliteStorage(path)`（自动建父目录）或 `MemoryStorage`；一个存储同时只被一个 Harness 打开。
 - 会话：`harness.root(context, { agent })` → `conversation.submit({ type: "input", content }, context)` → `submission.wait(context)`；同 `requestId` 重复提交幂等（含重开后）。
 - 前端渲染数据源：`conversation.viewState(context)` / `conversation.watch(context)` / `watchEvents(harness, id, context)`。
@@ -48,4 +48,7 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 会话目录：宿主侧无 `scanConversations`，用 `harness.commit(tx => tx.scanConversations({}, n, undefined), context)`；无删除 API（core 用 `app.neko.conversation` 文档做软删除）。
 - 会话级配置：`conversation.configure({ model, thinkingLevel }, context)` 单次提交生效，从下一次请求起使用；`conversation.agent(context)` 返回解析后的生效值（thinkingLevel 一定有值）。
 - 扩展热替换：`registry.install(同名扩展)` 原地替换；已开始执行的工具调用沿原实现跑完，下一个 task phase/请求/调用才解析新代码（会话只存扩展名，重启后装回同名扩展即恢复）。
-- 已安装 1.1.0 与 reference 源码（更新）有差异，以 node_modules 类型为准：`ToolExecutionResult` 字段是 `content`（源码已改名 `output`）；`SessionFailed`/`StorageRequestError` 在 1.1.0 运行时未导出（errors 模块只有 `ReadAfterWrite`/`StorageRejected`/`ConversationBusy`）；ConversationId 是数字 brand（ROOT = 1），未知 id 的 `harness.conversation()` 返回 undefined，但对未知 id 做 `snapshot` 会抛 TypeError。
+- 工具结果使用 `output`（模型）、`structuredOutput`（程序）与 `details`（UI，随工具消息持久化）；消息自身仍用 `content`。输入的 `entry: { kind, data }` 与内容原子持久化，排队期间位于 InboxDoc。
+- 存储致命错误终止 Harness，`closed`/watch `session_failed` 通知结束；独立无效读取 StorageRequestError 只失败该请求，在 commit 中仍终止运行时。不重试 StorageRejected。
+- 原生 read 统一文字/图片，上游 Photon 处理器负责工具读图；附件仍严格校验。listFiles 来自 pi-env LocalExecutionEnv，共享按需 Connection，关闭时释放；@ 补全不依赖 fd，缓存与刷新边界见升级 design D11。
+- 以已安装的 1.2.0 类型为准，reference main 可含未发布修复。ConversationId 是数字 brand（ROOT = 1），未知 id 的 harness.conversation() 返回 undefined。

@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { downloadImage, uploadImage } from "@neko-harness/core/image-transfer";
 import sharp from "sharp";
@@ -40,14 +39,14 @@ it.skipIf(IS_WINDOWS)(
 			const upload = await uploadImage(
 				{ name: "blue.png", mimeType: "image/png", bytes },
 				{
-					begin: (i) => ac.beginImage(i, context),
-					append: (i) => ac.appendImage(i, context),
-					finish: (i) => ac.finishImage(i, context),
-					release: (i) => ac.releaseImage(i, context),
+					begin: (i) => ac.beginImage(i),
+					append: (i) => ac.appendImage(i),
+					finish: (i) => ac.finishImage(i),
+					release: (i) => ac.releaseImage(i),
 				},
 			);
-			await expect(bc.finishImage(upload, context)).rejects.toThrow();
-			await ac.submit({ content: "", images: [upload], requestId: "one-image" }, context);
+			await expect(bc.finishImage(upload)).rejects.toThrow();
+			await ac.submit({ content: "", images: [upload], requestId: "one-image" });
 			await waitFor(() => !!bc.view.value?.items.some((i) => i.type === "user" && i.images?.length), "image view");
 			const item = bc.view.value!.items.find((i) => i.type === "user")!;
 			if (item.type !== "user") throw new Error("missing user");
@@ -55,28 +54,28 @@ it.skipIf(IS_WINDOWS)(
 			expect(JSON.stringify(bc.view.value)).not.toContain(bytes.toString("base64"));
 			const image = item.images![0]!;
 			const downloaded = await downloadImage((offset) =>
-				bc.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }, context),
+				bc.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }),
 			);
 			expect((await sharp(downloaded.bytes).metadata()).width).toBe(800);
-			await ac.submit({ content: "", images: [upload], requestId: "one-image" }, context);
+			await ac.submit({ content: "", images: [upload], requestId: "one-image" });
 			expect(bc.view.value!.items.filter((i) => i.type === "user")).toHaveLength(1);
-			await Promise.all([ac.compact({}, context), bc.compact({}, context)]);
+			await Promise.all([ac.compact({}), bc.compact({})]);
 			await waitFor(() => bc.view.value?.compaction?.latest?.phase === "nothing", "no-op compaction");
-			await expect(bc.getImage({ entryId: 999999, contentIndex: 0, offset: 0 }, context)).rejects.toThrow();
+			await expect(bc.getImage({ entryId: 999999, contentIndex: 0, offset: 0 })).rejects.toThrow();
 			const fork = await gateway.runtime.forkConversation(gateway.runtime.root.id);
 			const forkChat = await b.attach(String(fork.id));
 			expect(
 				(
 					await downloadImage((offset) =>
-						forkChat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }, context),
+						forkChat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }),
 					)
 				).bytes,
 			).toEqual(downloaded.bytes);
-			await expect(bc.beginImage({ name: "late.png", mimeType: "image/png", size: 1 }, context)).rejects.toThrow();
+			await expect(bc.beginImage({ name: "late.png", mimeType: "image/png", size: 1 })).rejects.toThrow();
 			const empty = await gateway.runtime.createConversation();
 			const emptyChat = await b.attach(String(empty.id));
 			await expect(
-				emptyChat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset: 0 }, context),
+				emptyChat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset: 0 }),
 			).rejects.toThrow("not part");
 		} finally {
 			await a.close();

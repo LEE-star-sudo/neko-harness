@@ -1,5 +1,5 @@
 import type { ChatItem, ChatView, StreamingView } from "@neko-harness/core";
-import { parseSkillInvocation } from "@neko-harness/core/skill-invocation";
+import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
 import { useEffect, useRef, useState } from "react";
 import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
@@ -36,10 +36,17 @@ function WelcomeCat() {
 	);
 }
 
-function UserRow({ text, images }: { text: string; images?: import("@neko-harness/core").ChatImage[] }) {
+function UserRow({
+	text,
+	images,
+	skill: invocation,
+}: {
+	text: string;
+	images?: import("@neko-harness/core").ChatImage[];
+	skill?: SkillInvocation;
+}) {
 	// /skill: 展开块渲染为折叠卡片；参数仍以用户气泡显示，未命中时原样渲染。
-	const invocation = parseSkillInvocation(text);
-	if (invocation !== null) {
+	if (invocation !== undefined) {
 		return (
 			<div className="chat-row anim-user flex justify-end">
 				<div className="chat-bubble flex min-w-0 flex-col items-stretch gap-1.5">
@@ -188,7 +195,7 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 					{items.map((item) => {
 						switch (item.type) {
 							case "user":
-								return <UserRow key={item.key} text={item.text} images={item.images} />;
+								return <UserRow key={item.key} text={item.text} images={item.images} skill={item.skill} />;
 							case "assistant":
 								return <AssistantRow key={item.key} item={item} />;
 							case "tool":

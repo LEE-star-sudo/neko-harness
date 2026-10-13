@@ -1,5 +1,5 @@
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 // core 会话管理 API：列出 / 创建 / 按 id 获取 / 归档（软删除），
 // 以及按会话 id 订阅 viewState/watch/events/usage。
 
@@ -12,7 +12,7 @@ async function makeRuntime() {
 	const faux = fauxProvider();
 	faux.setResponses([fauxAssistantMessage([fauxText("pong")])]);
 	return createNekoRuntime({
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		storage: "memory",
 		model: { provider: "faux", modelId: "faux-1" },
 		providers: [faux.provider],

@@ -3,7 +3,6 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createServer } from "node:net";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
@@ -39,21 +38,23 @@ describe("disconnect semantics", () => {
 		const stable = await connectNekoGateway(testAddress(target));
 		const dying = await connectNekoGateway({ transport: "ws", url: target.wsUrl, serverId: target.serverId });
 		try {
-			const created = await stable.management.create({}, BACKGROUND_CONTEXT);
+			const created = await stable.management.create({});
 			const stableChat = await stable.attach(created.id);
 			const dyingChat = await dying.attach(created.id);
 
 			const seenByStable: ChatView[] = [];
-			stableChat.view.subscribe((value) => seenByStable.push(value));
+			stableChat.view.subscribe((value) => {
+				if (value) seenByStable.push(value);
+			});
 
 			// 已受理调用：dying 提交后立即断开，回答仍应结算并推给 stable。
-			await dyingChat.submit({ content: "ping" }, BACKGROUND_CONTEXT);
+			await dyingChat.submit({ content: "ping" });
 			await dying.close();
 			await waitFor(() => sawAssistantText(seenByStable, "pong"), "断连后会话仍完成回答并推给另一端");
 
 			// 会话不受影响：stable 可以继续提交并得到回答。
 			target.faux.appendResponses([fauxAssistantMessage([fauxText("pong")])]);
-			await stableChat.submit({ content: "again" }, BACKGROUND_CONTEXT);
+			await stableChat.submit({ content: "again" });
 			await waitFor(() => sawFollowUp(seenByStable, "again", "pong"), "剩余前端可继续提交");
 
 			// 网关整体无恙：新客户端可连接并看到目录。
@@ -72,10 +73,10 @@ describe("disconnect semantics", () => {
 		const first = await connectNekoGateway(testAddress(target));
 		let sessionId: string;
 		try {
-			const created = await first.management.create({}, BACKGROUND_CONTEXT);
+			const created = await first.management.create({});
 			sessionId = created.id;
 			const chat = await first.attach(created.id);
-			await chat.submit({ content: "ping" }, BACKGROUND_CONTEXT);
+			await chat.submit({ content: "ping" });
 			await waitFor(
 				() => chat.view.value?.items.some((item) => item.type === "assistant" && item.text.includes("pong")) ?? false,
 				"首轮回答完成",
@@ -98,7 +99,7 @@ describe("disconnect semantics", () => {
 });
 
 describe("stale socket takeover", () => {
-	// 裸 Unix socket 语义为 pi-server POSIX 专用，Windows 无 Unix 传输。
+	// 裸 Unix socket 语义为 网关 POSIX 专用，Windows 无 Unix 传输。
 	it.skipIf(IS_WINDOWS)(
 		"adopts a stale socket file left by a dead process",
 		async () => {

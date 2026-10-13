@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -53,8 +53,13 @@ try {
 		JSON.stringify({ private: true, dependencies: { "neko-harness": archive } }),
 	);
 	await run([process.execPath, "install", "--production", "--ignore-scripts"], temp);
+	const bin = join(temp, "bin");
+	await mkdir(bin);
+	if (process.platform === "win32") await cp(process.execPath, join(bin, "bun.exe"));
+	else await symlink(process.execPath, join(bin, "bun"));
+	await cp(join(root, "scripts/package-sdk-smoke.mjs"), join(temp, "package-sdk-smoke.mjs"));
 	const cli = join(temp, "node_modules", ".bin", "neko");
-	const env = { ...process.env, HOME: join(temp, "home"), DEEPSEEK_API_KEY: "", TAVILY_API_KEY: "" };
+	const env = { ...process.env, HOME: join(temp, "home"), DEEPSEEK_API_KEY: "", TAVILY_API_KEY: "", PATH: bin };
 	await mkdir(env.HOME, { recursive: true });
 	if ((await run([cli, "--version"], temp, env)).trim() !== manifest.version) throw new Error("Version mismatch");
 	for (const command of ["tui", "web", "serve"]) {
@@ -70,6 +75,7 @@ try {
 		temp,
 		env,
 	);
+	console.log((await run([process.execPath, "package-sdk-smoke.mjs"], temp, env)).trim());
 	const port = await new Promise<number>((resolvePort, reject) => {
 		const server = createServer();
 		server.once("error", reject);

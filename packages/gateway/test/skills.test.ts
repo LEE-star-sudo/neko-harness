@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
 import { fauxProvider } from "../../../test/faux.ts";
@@ -54,17 +53,19 @@ describe("skills over the gateway", () => {
 		try {
 			const client = await connectNekoGateway(testAddress(gateway));
 			try {
-				const created = await client.management.create({}, BACKGROUND_CONTEXT);
+				const created = await client.management.create({});
 				const chat = await client.attach(created.id);
 
-				const skills = await chat.skills(BACKGROUND_CONTEXT);
+				const skills = await chat.skills(null);
 				const byName = new Map(skills.map((s) => [s.name, s]));
 				expect(byName.get("global")?.description).toBe("Global skill");
 				expect(byName.get("local")?.location).toBe(join(workspace, ".agents", "skills", "local", "SKILL.md"));
 
 				const seen: ChatView[] = [];
-				chat.view.subscribe((value) => seen.push(value));
-				await chat.submit({ content: "/skill:local do it" }, BACKGROUND_CONTEXT);
+				chat.view.subscribe((value) => {
+					if (value) seen.push(value);
+				});
+				await chat.submit({ content: "/skill:local do it" });
 				await new Promise((resolve) => setTimeout(resolve, 500));
 				const userTexts = seen.flatMap((v) => v.items.filter((i) => i.type === "user").map((i) => i.text));
 				const expanded = userTexts.find((t) => t.includes('<skill name="local"'));

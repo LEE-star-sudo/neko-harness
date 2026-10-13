@@ -40,7 +40,7 @@ function gatedTool(name: string, replay?: "safe") {
 			// Block like a long-running effect: ends only when the harness closes (abort)
 			// or the test releases the recovery run.
 			await Promise.race([aborts(context), released]);
-			return { content: [{ type: "text", text: `${name} done` }] };
+			return { output: [{ type: "text", text: `${name} done` }] };
 		},
 	});
 }

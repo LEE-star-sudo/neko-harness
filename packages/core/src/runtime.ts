@@ -24,31 +24,32 @@ import {
 	defineDoc,
 	type Extension,
 	Harness,
+	LiveDoc as importLiveDoc,
 	MemoryStorage,
 	type Submission,
 	UsageDoc,
 	type UsageState,
 	watchEvents,
 } from "@earendil-works/pi-durable";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
+import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { CompactionManager } from "./compaction.ts";
+import { createCodingTools } from "@earendil-works/pi-durable/tools";
+import { type CompactionRecord, readCompaction } from "./compaction.ts";
 import {
 	type CredentialProviderId,
 	type CredentialStatus,
 	credentialProvider,
 	FileCredentialStore,
-	MemoryCredentialStore,
+	InMemoryCredentialStore,
 } from "./credentials.ts";
-import { ImageMetadataDoc, imageKey, trackImageMetadata } from "./image-metadata.ts";
+import { ImageDetails } from "./image-metadata.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
+import { type InputData, NekoInput } from "./input.ts";
 import { expandSkillCommand } from "./prompt/invoke.ts";
 import { createNekoPrompt } from "./prompt/prompt.ts";
 import { createResourceLoader, scanSkillsByLevel } from "./prompt/resources.ts";
 import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
-import { ImageTools } from "./read-image.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import { createWebSearchTools } from "./web-search.ts";
 import {
@@ -58,6 +59,7 @@ import {
 	normalizeWorkspace,
 	savedWorkspace,
 } from "./workspace.ts";
+import { WorkspaceFiles } from "./workspace-files.ts";
 
 /** The built-in DeepSeek chat model used when the caller does not choose one. */
 export const DEFAULT_MODEL = { provider: "deepseek", modelId: "deepseek-flash" } as const;
@@ -73,6 +75,7 @@ export type NekoModelRef = {
 export type NekoRuntimeOptions = {
 	/** Chord context for every runtime call; default `BACKGROUND_CONTEXT` (never cancels). */
 	readonly context?: Context;
+	readonly onReport?: (error: unknown) => void;
 	/** "sqlite" persists to disk (default); "memory" keeps everything in process, for tests. */
 	readonly storage?: "sqlite" | "memory";
 	/** SQLite file path; default `~/.neko/neko.sqlite`. */
@@ -128,6 +131,7 @@ export type NekoSession = {
 	/** Withdraw queued inputs and abort the current run. */
 	abort(): Promise<void>;
 	compact(instructions?: string): Promise<void>;
+	compactionRecord(): Promise<CompactionRecord | null>;
 };
 
 /** Directory entry of `listConversations()`. */
@@ -223,6 +227,8 @@ const ActivityDoc = defineDoc<{ lastUsedAt: number }>({
 
 /** A running neko-harness runtime: one open storage and its conversations, root plus created ones. */
 export type NekoRuntime = {
+	readonly workspaceFiles: WorkspaceFiles;
+	readonly closed: Harness["closed"];
 	/** Chord context bound to every runtime call. */
 	readonly context: Context;
 	/** The underlying pi-durable Harness, for callers that need more. */
@@ -291,7 +297,7 @@ export type NekoRuntime = {
 /**
  * Open the neko-harness runtime: SQLite storage, the built-in DeepSeek provider
  * (Chat Completions via pi-ai), and the CodingTools extension (read/write/edit/bash
- * on a NodeExecutionEnv).
+ * on a LocalExecutionEnv).
  */
 export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promise<NekoRuntime> {
 	const context = options.context ?? BACKGROUND_CONTEXT;
@@ -302,7 +308,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const credentials =
 		options.credentials ??
 		(options.storage === "memory" && !options.credentialsPath
-			? new MemoryCredentialStore()
+			? new InMemoryCredentialStore()
 			: new FileCredentialStore(options.credentialsPath));
 	const runtimeKeys = new Map<CredentialProviderId, string>();
 	const deepseekKey = options.apiKey?.trim();
@@ -329,14 +335,15 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		return clampThinkingLevel(info, level);
 	};
 
+	const workspaceFiles = new WorkspaceFiles();
 	const storage =
 		options.storage === "memory"
 			? new MemoryStorage()
 			: await openNodeSqliteStorage(options.storagePath ?? DEFAULT_STORAGE_PATH);
 
 	const registry = createRegistry();
-	registry.install(CodingTools);
-	registry.install(ImageTools);
+	registry.install(createCodingTools({ images: await createNodePhotonImages() }));
+	registry.install(ImageDetails);
 	registry.install(
 		createWebSearchTools(async () => {
 			const saved = await effectiveCredentials.read("tavily");
@@ -356,16 +363,11 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		{
 			models,
 			registry,
+			onReport: options.onReport,
 			conversationCreated: async (tx, record) => {
 				(await tx.doc(SessionMetadataDoc, record.id)).createdAt = Date.now();
 			},
-			env: ({ cwd }) =>
-				new NodeExecutionEnv({
-					cwd: executionWorkspace(cwd),
-					// Windows 原生程序（如 py）的管道输出按系统 ANSI 代码页（GBK）编码，而上游解码
-					// 写死 UTF-8 会乱码；先让 Python 走 UTF-8 模式规避，其余程序待上游支持代码页解码。
-					...(process.platform === "win32" ? { shellEnv: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" } } : {}),
-				}),
+			env: ({ cwd }) => workspaceFiles.env(executionWorkspace(cwd)),
 		},
 		context,
 	);
@@ -393,6 +395,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			}
 		}
 	} catch (error) {
+		await workspaceFiles.close();
 		await harness.close(context);
 		throw error;
 	}
@@ -427,14 +430,20 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		}, context);
 	};
 	if (existing.length === 0) await touchConversation(conversation.id);
-	const metadata = new SessionMetadataManager(harness, storage, models, context);
+	const metadata = new SessionMetadataManager(harness, storage, context, registry, options.onReport);
 	if (existing.length === 0) await metadata.initialize(conversation.id);
 	for (const record of existing)
 		if (!(await harness.snapshot(ArchivedDoc, record.id, context))?.archived) await metadata.restore(record.id);
-	const imageMetadata = trackImageMetadata(harness, storage, context);
-	for (const record of existing) await imageMetadata.reconcile(record.id);
-	const compactions = new CompactionManager(harness, context, storage);
-	for (const record of existing) await compactions.restore(record.id);
+	let closing: Promise<void> | undefined;
+	const cleanup = () => {
+		if (!closing)
+			closing = (async () => {
+				await workspaceFiles.close();
+				await metadata.close();
+			})();
+		return closing;
+	};
+	void harness.closed.then(cleanup).catch((error) => options.onReport?.(error));
 	harness.resume();
 
 	// Serialize admission and configuration; preprocessing must use the admitted model.
@@ -459,6 +468,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			const duplicate =
 				submitOptions?.requestId !== undefined &&
 				(await storage.submissionByRequest(target.id, submitOptions.requestId, context));
+			const data: InputData = { at: Date.now(), prompt: "", images: [] };
 			let invocationName: string | undefined;
 			if (!duplicate && typeof content === "string" && content.startsWith("/skill:")) {
 				const end = content.indexOf(" ");
@@ -466,10 +476,18 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			}
 			const prepared = duplicate ? undefined : await loadResources(workspace, invocationName);
 			if (prepared && invocationName !== undefined && typeof content === "string") {
-				content = await expandSkillCommand(content, prepared.skills, async (path) => {
-					if (prepared.invocation?.filePath !== path) throw new Error("Missing prepared skill content");
-					return prepared.invocation.content;
-				});
+				content = await expandSkillCommand(
+					content,
+					prepared.skills,
+					async (path) => {
+						if (prepared.invocation?.filePath !== path) throw new Error("Missing prepared skill content");
+						return prepared.invocation.content;
+					},
+					undefined,
+					(skill) => {
+						data.skill = skill;
+					},
+				);
 			}
 			if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
 				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
@@ -480,41 +498,24 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			}
 
 			const requestId = submitOptions?.requestId ?? crypto.randomUUID();
+			data.prompt = imagePrompt(content);
 			if (!duplicate && Array.isArray(content)) {
-				const infos: {
-					key: string;
-					contentIndex: number;
-					name: string;
-					mimeType: string;
-					width: number;
-					height: number;
-					bytes: number;
-				}[] = [];
 				let index = 0;
-				for (const [contentIndex, block] of content.entries())
-					if (block.type === "image") {
-						const data = Buffer.from(block.data, "base64");
-						const { default: sharp } = await import("sharp");
-						const info = await sharp(data).metadata();
-						infos.push({
-							key: imageKey(block.data),
-							contentIndex,
-							name: (submitOptions?.imageNames?.[index++] ?? "Image").replace(/\p{Cc}/gu, "").slice(0, 200),
-							mimeType: block.mimeType,
-							width: info.width!,
-							height: info.height!,
-							bytes: data.length,
-						});
-					}
-				if (infos.length)
-					await target.commit(async (tx) => {
-						const doc = await tx.doc(ImageMetadataDoc, target.id);
-						doc.pending ??= {};
-						doc.pending[requestId] = infos.map(({ key: _key, ...info }) => info);
-						for (const { key, contentIndex: _index, ...info } of infos) doc.images[key] ??= info;
-					}, context);
+				for (const [contentIndex, block] of content.entries()) {
+					if (block.type !== "image") continue;
+					const bytes = Buffer.from(block.data, "base64");
+					const { default: sharp } = await import("sharp");
+					const info = await sharp(bytes).metadata();
+					data.images.push({
+						contentIndex,
+						name: (submitOptions?.imageNames?.[index++] ?? "Image").replace(/\p{Cc}/gu, "").slice(0, 200),
+						mimeType: block.mimeType,
+						width: info.width!,
+						height: info.height!,
+						bytes: bytes.length,
+					});
+				}
 			}
-			await metadata.prepare(target.id, requestId, imagePrompt(content));
 			if (prepared) resourceSnapshots.stage(target.id, requestId, workspace, prepared);
 			let result: Submission;
 			try {
@@ -522,6 +523,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 					{
 						type: "input",
 						content,
+						entry: { kind: NekoInput.kind, data },
 						requestId,
 						...(submitOptions?.whenBusy !== undefined ? { whenBusy: submitOptions.whenBusy } : {}),
 					},
@@ -529,14 +531,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				);
 			} catch (error) {
 				resourceSnapshots.discard(target.id, requestId);
-				await metadata.discard(target.id, requestId);
-				await target.commit(async (tx) => {
-					const doc = await tx.doc(ImageMetadataDoc, target.id);
-					if (doc.pending) delete doc.pending[requestId];
-				}, context);
 				throw error;
 			}
-			await imageMetadata.reconcile(target.id);
 			await touchConversation(target.id);
 			await metadata.reconcile(target.id);
 			return result;
@@ -587,11 +583,22 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				(await harness.snapshot(SessionMetadataDoc, target.id, context))?.namingUsage ?? { models: {}, tools: {} },
 			);
 		},
+		compactionRecord() {
+			return readCompaction(harness, storage, target.id, context);
+		},
 		async compact(instructions) {
 			const agent = await target.agent(context);
 			if (agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek")))
 				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.");
-			await compactions.compact(target, instructions);
+			await admit(target.id, async () => {
+				const live = await harness.snapshot(importLiveDoc, target.id, context);
+				if (
+					live?.compactions?.length ||
+					(await readCompaction(harness, storage, target.id, context))?.phase === "waiting-to-apply"
+				)
+					return;
+				await target.compact(instructions?.trim() || undefined, context);
+			});
 		},
 		abort() {
 			return target.abort(context);
@@ -679,6 +686,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return makeSession(child);
 		},
 		harness,
+		closed: harness.closed,
+		workspaceFiles,
 		conversation,
 		root: rootSession,
 		submit: rootSession.submit,
@@ -861,9 +870,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			registry.install(extension);
 		},
 		async close() {
-			await compactions.close();
-			await imageMetadata.close();
-			await metadata.close();
+			await cleanup();
 			return harness.close(context);
 		},
 	};

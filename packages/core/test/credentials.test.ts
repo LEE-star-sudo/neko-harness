@@ -2,7 +2,7 @@ import { afterEach, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileCredentialStore, MemoryCredentialStore } from "../src/credentials.ts";
+import { FileCredentialStore, InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/runtime.ts";
 
 const paths: string[] = [];
@@ -69,7 +69,7 @@ it("does not mutate the environment for explicit runtime keys", async () => {
 	const before = process.env.DEEPSEEK_API_KEY;
 	const runtime = await createNekoRuntime({
 		storage: "memory",
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		apiKey: "test-override",
 	});
 	try {
@@ -165,7 +165,7 @@ it("applies the tavily runtime override without persisting or touching the envir
 	const before = process.env.TAVILY_API_KEY;
 	const runtime = await createNekoRuntime({
 		storage: "memory",
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		tavilyApiKey: "test-tavily-override",
 	});
 	try {

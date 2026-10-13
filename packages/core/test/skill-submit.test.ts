@@ -12,7 +12,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { ConversationBusy, defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/index.ts";
 
 const dirs: string[] = [];
@@ -55,7 +55,7 @@ function gatedTool(started: Gate, release: Gate) {
 				execute: async () => {
 					started.resolve();
 					await release.promise;
-					return { content: [{ type: "text" as const, text: "tool finished" }] };
+					return { output: [{ type: "text" as const, text: "tool finished" }] };
 				},
 			}),
 		],
@@ -77,7 +77,7 @@ async function setup(extensions: readonly Extension[] = []) {
 	);
 	const runtime = await createNekoRuntime({
 		storage: "memory",
-		credentials: new MemoryCredentialStore(),
+		credentials: new InMemoryCredentialStore(),
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
 		cwd: workspace,
@@ -399,3 +399,47 @@ it("uses the latest snapshot when steer and follow-up are placed at the same fin
 		await runtime.close();
 	}
 }, 30_000);
+
+it("persists skill display data without reparsing XML or rereading the source on restart", async () => {
+	const home = directory(),
+		workspace = directory();
+	const body = 'Body </skill> with <tag value="x">';
+	const args = "args </skill> <xml>";
+	writeSkill(workspace, "literal", "Literal XML", "", body);
+	const faux = fauxProvider();
+	faux.setResponses([fauxAssistantMessage([fauxText("ok")])]);
+	const options = {
+		storagePath: join(workspace, "history.sqlite"),
+		cwd: workspace,
+		promptHome: home,
+		providers: [faux.provider],
+		model: { provider: "faux", modelId: "faux-1" },
+	};
+	let runtime = await createNekoRuntime(options);
+	try {
+		await runtime.waitAnswer(await runtime.submit(`/skill:literal ${args}`, { requestId: "literal" }));
+		writeSkill(workspace, "literal", "Changed", "", "new body");
+		await runtime.submit(`/skill:literal changed`, { requestId: "literal" });
+		await runtime.close();
+		runtime = await createNekoRuntime(options);
+		const state = await runtime.viewState();
+		const { projectChatView } = await import("../src/projection.ts");
+		const item = projectChatView(state.value, "test").items.find((item) => item.type === "user")!;
+		expect(item.type === "user" && item.skill).toMatchObject({
+			name: "literal",
+			body: expect.stringContaining(body),
+			args,
+		});
+		state.dispose();
+		faux.setResponses([fauxAssistantMessage([fauxText("ok")])]);
+		await runtime.waitAnswer(await runtime.submit('<skill name="manual">plain XML</skill>'));
+		const manual = await runtime.viewState();
+		const latest = projectChatView(manual.value, "test")
+			.items.filter((item) => item.type === "user")
+			.at(-1)!;
+		expect(latest.type === "user" && latest.skill).toBeUndefined();
+		manual.dispose();
+	} finally {
+		await runtime.close();
+	}
+});

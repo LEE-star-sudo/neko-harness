@@ -96,7 +96,7 @@ async function tavilyPost(
 }
 function toolError(error: unknown) {
 	return {
-		content: [
+		output: [
 			{ type: "text" as const, text: error instanceof TavilyError ? error.message : "Web tool failed. Please retry." },
 		],
 		isError: true,
@@ -111,7 +111,7 @@ function rows(data: Record<string, unknown>, field: string): Record<string, unkn
 	return value;
 }
 function content(text: string) {
-	return { content: [{ type: "text" as const, text }] };
+	return { output: [{ type: "text" as const, text }] };
 }
 function urlKey(value: unknown): string {
 	const text = String(value);

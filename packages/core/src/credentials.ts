@@ -102,33 +102,4 @@ export class FileCredentialStore implements CredentialStore {
 	}
 }
 
-export class MemoryCredentialStore implements CredentialStore {
-	#values = new Map<string, Credential>();
-	#tail = Promise.resolve();
-	async read(id: string) {
-		return structuredClone(this.#values.get(id));
-	}
-	async list() {
-		return [...this.#values].map(([providerId, value]) => ({ providerId, type: value.type }));
-	}
-	#serialize<T>(fn: () => Promise<T>) {
-		const result = this.#tail.then(fn);
-		this.#tail = result.then(
-			() => {},
-			() => {},
-		);
-		return result;
-	}
-	modify(id: string, fn: (value: Credential | undefined) => Promise<Credential | undefined>) {
-		return this.#serialize(async () => {
-			const value = await fn(await this.read(id));
-			if (value !== undefined) this.#values.set(id, structuredClone(value));
-			return this.read(id);
-		});
-	}
-	delete(id: string) {
-		return this.#serialize(async () => {
-			this.#values.delete(id);
-		});
-	}
-}
+export { InMemoryCredentialStore } from "@earendil-works/pi-ai";

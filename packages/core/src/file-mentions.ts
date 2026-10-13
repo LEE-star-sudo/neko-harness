@@ -1,6 +1,6 @@
 /** Browser-safe path references; selecting a reference never reads file content. */
 export type FileCandidate = { name: string; path: string; kind: "file" | "directory" };
-export type FileCandidates = { entries: FileCandidate[]; limited: boolean };
+export type FileCandidates = { entries: FileCandidate[]; limited: boolean; incomplete: boolean };
 export type Mention = { start: number; end: number; query: string };
 export function mentionAt(text: string, cursor: number): Mention | null {
 	const before = text.slice(0, cursor);

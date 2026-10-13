@@ -15,14 +15,9 @@ neko --version
 
 如果找不到 `neko` 命令，请将 Bun 的全局可执行目录（通常是 `~/.bun/bin`）加入 `PATH`。
 
-`@` 文件与目录补全需要额外安装 `fd`：
-
-```bash
-# macOS（Homebrew）
-brew install fd
-# Ubuntu / Debian
-sudo apt-get install fd-find
-```
+`@` 文件与目录补全使用随包提供的 Pi 1.2 本地文件发现组件，无需安装 fd/fdfind。
+候选遵守 Git 工作树的忽略规则；非 Git 目录不应用 `.gitignore`，均不读取 `.ignore`/`.fdignore`。包含未被忽略的隐藏项并排除 `.git`。
+网关共享有界目录缓存，文件变化使缓存失效，最长 30 秒后按需刷新；结果不完整时可指定子目录缩小范围。发现组件异常时可以重试查询，普通消息仍可发送。
 
 ## 开始使用
 

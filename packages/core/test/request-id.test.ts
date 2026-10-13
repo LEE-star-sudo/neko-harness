@@ -6,7 +6,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
-import { createNekoRuntime, MemoryCredentialStore, type NekoRuntimeOptions } from "../src/index.ts";
+import { createNekoRuntime, InMemoryCredentialStore, type NekoRuntimeOptions } from "../src/index.ts";
 
 let directory = "";
 afterAll(async () => {
@@ -21,7 +21,7 @@ describe("requestId idempotency (2.3)", () => {
 			const faux = fauxProvider();
 			faux.setResponses([fauxAssistantMessage([fauxText("ok")])]);
 			return {
-				credentials: new MemoryCredentialStore(),
+				credentials: new InMemoryCredentialStore(),
 				storagePath,
 				model: { provider: "faux", modelId: "faux-1" },
 				providers: [faux.provider],
@@ -36,7 +36,7 @@ describe("requestId idempotency (2.3)", () => {
 		expect(answer).toEqual({ status: "done", text: "ok" });
 		// Admitted once: one user entry in the transcript.
 		const page = await runtimeA.conversation.entries({}, 10, undefined, runtimeA.context);
-		expect(page.items.filter((entry) => entry.kind === "pi.user").length).toBe(1);
+		expect(page.items.filter((entry) => entry.kind === "app.neko.input").length).toBe(1);
 		await runtimeA.close();
 
 		// After reopen, the same requestId finds the same submission.
@@ -45,7 +45,7 @@ describe("requestId idempotency (2.3)", () => {
 			const reacquired = await runtimeB.submit("Hello", { requestId: "greeting-1" });
 			expect(reacquired.id).toBe(first.id);
 			const pageAfter = await runtimeB.conversation.entries({}, 10, undefined, runtimeB.context);
-			expect(pageAfter.items.filter((entry) => entry.kind === "pi.user").length).toBe(1);
+			expect(pageAfter.items.filter((entry) => entry.kind === "app.neko.input").length).toBe(1);
 		} finally {
 			await runtimeB.close();
 		}

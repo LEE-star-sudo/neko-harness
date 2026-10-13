@@ -4,7 +4,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { connectNekoGateway } from "@neko-harness/gateway";
 import { connectToGateway } from "../../tui/src/gateway.ts";
 import { ensureNekoGateway } from "../../web/src/gateway-spawn.ts";
@@ -48,7 +47,7 @@ describe("Bun gateway startup", () => {
 			const reused = await connectToGateway(options);
 			expect(reused.spawned).toBe(false);
 			await reused.close();
-			expect((await owner.client.listModels()).length).toBeGreaterThan(0);
+			expect((await owner.client.models.list(null)).length).toBeGreaterThan(0);
 		} finally {
 			await owner.close();
 		}
@@ -83,7 +82,7 @@ describe("Bun gateway startup", () => {
 			try {
 				const chat = await client.attach("1");
 				expect(chat.view.value?.model).toBe("deepseek/deepseek-v4-pro");
-				created = (await client.management.create({}, BACKGROUND_CONTEXT)).id;
+				created = (await client.management.create({})).id;
 			} finally {
 				await client.close();
 			}

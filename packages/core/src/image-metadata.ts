@@ -1,54 +1,41 @@
-import { createHash } from "node:crypto";
-import type { Context } from "@earendil-works/chord";
-import { type ConversationId, defineDoc, type Harness, type Storage } from "@earendil-works/pi-durable";
+import { defineExtension, hook, ToolTask } from "@earendil-works/pi-durable";
+import sharp from "sharp";
 import type { ImageInfo } from "./images.ts";
-export const ImageMetadataDoc = defineDoc<{
-	images: Record<string, ImageInfo>;
-	pending: Record<string, (ImageInfo & { contentIndex: number })[]>;
-}>({
-	kind: "app.neko.images",
-	version: 1,
-	scope: "conversation",
-	history: "rewindable",
-	fork: "asOf",
-	initial: () => ({ images: {}, pending: {} }),
-});
-export function imageKey(data: string): string {
-	return createHash("sha256").update(data).digest("hex");
-}
 
-/** Bind names to immutable entry positions, including inputs queued behind a running answer. */
-export function trackImageMetadata(harness: Harness, storage: Storage, context: Context) {
-	let tail = Promise.resolve();
-	const reconcile = async (id: ConversationId) => {
-		const state = await harness.snapshot(ImageMetadataDoc, id, context);
-		for (const requestId of Object.keys(state?.pending ?? {})) {
-			const submission = await storage.submissionByRequest(id, requestId, context);
-			if (submission?.type !== "input" || submission.status === "queued") continue;
-			await harness.commit(async (tx) => {
-				const doc = await tx.doc(ImageMetadataDoc, id);
-				const infos = doc.pending?.[requestId];
-				if (!infos) return;
-				if (submission.entry !== undefined)
-					for (const { contentIndex, ...info } of infos) doc.images[`entry:${submission.entry}:${contentIndex}`] = info;
-				delete doc.pending[requestId];
-			}, context);
-		}
-	};
-	const stop = harness.subscribeCommits(({ changes }) => {
-		const ids = new Set(
-			changes.flatMap((c) => (c.type === "submission" && c.value.type === "input" ? [c.value.conversationId] : [])),
-		);
-		if (ids.size)
-			queueMicrotask(() => {
-				for (const id of ids) tail = tail.catch(() => {}).then(() => reconcile(id));
-			});
-	});
-	return {
-		reconcile,
-		async close() {
-			stop();
-			await tail.catch(() => {});
-		},
-	};
-}
+export type ImageMetadata = ImageInfo & { contentIndex: number };
+
+/** Enrich UI details; the SDK persists them atomically with the actual tool result. */
+export const ImageDetails = defineExtension({
+	name: "neko-image-details",
+	hooks: [
+		hook(ToolTask, {
+			async afterTool(call, result) {
+				if (call.name !== "read" || result.isError) return;
+				const images: ImageMetadata[] = [];
+				for (const [contentIndex, block] of (result.output ?? []).entries()) {
+					if (block.type !== "image") continue;
+					const data = Buffer.from(block.data, "base64");
+					const info = await sharp(data).metadata();
+					images.push({
+						contentIndex,
+						name: String(call.arguments.path ?? "Image"),
+						mimeType: block.mimeType,
+						width: info.width!,
+						height: info.height!,
+						bytes: data.length,
+					});
+				}
+				if (!images.length) return;
+				return {
+					...result,
+					details: {
+						...(typeof result.details === "object" && result.details !== null && !Array.isArray(result.details)
+							? result.details
+							: { upstream: result.details ?? null }),
+						neko: { images },
+					},
+				};
+			},
+		}),
+	],
+});

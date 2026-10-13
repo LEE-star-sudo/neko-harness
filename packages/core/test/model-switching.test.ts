@@ -1,5 +1,5 @@
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 // spec: model-providers「会话级切换模型」——某会话切换模型后其下一次请求用新模型，其他会话不受影响。
 
 import { describe, expect, it } from "bun:test";
@@ -17,7 +17,7 @@ describe("per-conversation model switching", () => {
 		const faux = fauxProvider({ models: [{ id: "faux-1" }, { id: "faux-2", reasoning: true }] });
 		faux.setResponses([recordRequest, recordRequest, recordRequest, recordRequest]);
 		const runtime = await createNekoRuntime({
-			credentials: new MemoryCredentialStore(),
+			credentials: new InMemoryCredentialStore(),
 			storage: "memory",
 			model: { provider: "faux", modelId: "faux-1" },
 			providers: [faux.provider],

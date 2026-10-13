@@ -1,14 +1,16 @@
 import { Container, Markdown, Text } from "@earendil-works/pi-tui";
-import { parseSkillInvocation } from "@neko-harness/core/skill-invocation";
+import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
 import { getMarkdownTheme, theme } from "../theme.ts";
 
 /** 用户消息：蓝色气泡（整行背景），Markdown 渲染；/skill: 展开块折叠为单行标记。 */
 export class UserMessageComponent extends Container {
 	#text: string;
+	#skill?: SkillInvocation;
 
-	constructor(text: string) {
+	constructor(text: string, skill?: SkillInvocation) {
 		super();
 		this.#text = text;
+		this.#skill = skill;
 		this.#rebuild();
 	}
 
@@ -19,8 +21,8 @@ export class UserMessageComponent extends Container {
 
 	#rebuild(): void {
 		this.clear();
-		const invocation = parseSkillInvocation(this.#text);
-		if (invocation !== null) {
+		const invocation = this.#skill;
+		if (invocation !== undefined) {
 			// 技能正文不铺开：单行技能标记 + 参数预览 + dim 来源行；正文始终在本地文件中可读。
 			const args = invocation.args.replace(/\s+/g, " ").trim();
 			const preview = args.length > 100 ? `${args.slice(0, 99)}…` : args;

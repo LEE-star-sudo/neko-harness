@@ -1,11 +1,11 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { isServerId } from "@earendil-works/pi-protocol";
 import { DEFAULT_STORAGE_PATH, loadNekoConfig, type NekoModelRef } from "@neko-harness/core";
 import {
 	connectNekoGateway,
 	gatewayCommand,
+	isServerId,
 	type NekoGatewayClient,
 	readGatewayPortFile,
 	removeGatewayPortFile,
@@ -86,7 +86,7 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 				const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
 				return { client, socketPath, serverId, spawned: false, close: () => client.close() };
 			} catch {
-				// socket 已死（占用进程消失等）：spawn 新网关，pi-server 会识别并接管 stale socket。
+				// socket 已死（占用进程消失等）：spawn 新网关，网关会识别并接管 stale socket。
 			}
 		}
 	}

@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ChatItem, ChatView } from "@neko-harness/core";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
@@ -23,9 +22,11 @@ afterEach(async () => {
 	await cleanup(target);
 });
 
-function collect(view: { subscribe(listener: (value: ChatView) => void): () => void }): ChatView[] {
+function collect(view: { subscribe(listener: (value: ChatView | undefined) => void): () => void }): ChatView[] {
 	const values: ChatView[] = [];
-	view.subscribe((value) => values.push(value));
+	view.subscribe((value) => {
+		if (value) values.push(value);
+	});
 	return values;
 }
 
@@ -52,15 +53,15 @@ describe("submit whenBusy", () => {
 		try {
 			const chat = await client.attach("1");
 			const seen = collect(chat.view);
-			await chat.submit({ content: "a" }, BACKGROUND_CONTEXT);
+			await chat.submit({ content: "a" });
 			// 工具轮已开始（工具条目出现）但 bash 仍在等闸门：此刻会话忙碌。
 			await waitFor(
 				() => seen.some((view) => view.items.some((item) => item.type === "tool" && item.name === "bash")),
 				"bash 工具开始运行",
 			);
 
-			await chat.submit({ content: "s", whenBusy: "steer" }, BACKGROUND_CONTEXT);
-			await chat.submit({ content: "f", whenBusy: "followUp" }, BACKGROUND_CONTEXT);
+			await chat.submit({ content: "s", whenBusy: "steer" });
+			await chat.submit({ content: "f", whenBusy: "followUp" });
 			await writeFile(gateFile, "go");
 
 			await waitFor(() => {
@@ -104,14 +105,14 @@ describe("fork", () => {
 		try {
 			const chat = await client.attach("1");
 			const seen = collect(chat.view);
-			await chat.submit({ content: "hello" }, BACKGROUND_CONTEXT);
+			await chat.submit({ content: "hello" });
 			await waitFor(
 				() => seen.some((view) => view.items.some((item) => item.type === "assistant" && item.text.includes("pong"))),
 				"父会话收到回答",
 			);
 
 			// fork 当前会话：目录新增，新会话带父会话历史。
-			const forked = await client.management.fork("1", BACKGROUND_CONTEXT);
+			const forked = await client.management.fork("1");
 			expect(forked.id).not.toBe("1");
 			const directory = client.directory.state.value?.sessions.map((session) => session.id) ?? [];
 			expect(directory).toContain("1");
@@ -124,7 +125,7 @@ describe("fork", () => {
 			expect(forkItems.some((item) => item.type === "assistant" && item.text.includes("pong"))).toBe(true);
 
 			// 分叉后各自独立演进：fork 提交新输入并收到第二个回答。
-			await forkChat.submit({ content: "again" }, BACKGROUND_CONTEXT);
+			await forkChat.submit({ content: "again" });
 			await waitFor(
 				() => (forkSeen[forkSeen.length - 1]?.items.length ?? 0) >= forkItems.length + 2,
 				"fork 会话收到新回答",
@@ -143,8 +144,8 @@ describe("fork", () => {
 	it("fork of an empty session falls back to create", async () => {
 		const client: NekoGatewayClient = await connectNekoGateway(testAddress(target));
 		try {
-			const empty = await client.management.create({}, BACKGROUND_CONTEXT);
-			const forked = await client.management.fork(empty.id, BACKGROUND_CONTEXT);
+			const empty = await client.management.create({});
+			const forked = await client.management.fork(empty.id);
 			expect(forked.id).not.toBe(empty.id);
 			const chat = await client.attach(forked.id);
 			expect(chat.view.value?.items).toEqual([]);

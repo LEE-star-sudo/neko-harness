@@ -11,15 +11,16 @@ export function useFileMentions(
 	choose: (item: FileCandidate, token: Mention) => void,
 ) {
 	const [token, setToken] = useState<Mention | null>(null);
-	const [result, setResult] = useState<FileCandidates>({ entries: [], limited: false });
+	const [result, setResult] = useState<FileCandidates>({ entries: [], limited: false, incomplete: false });
 	const [message, setMessage] = useState("");
 	const [selected, setSelected] = useState(0);
+	const [failed, setFailed] = useState(false);
 	const request = useRef(0);
 	const id = useId();
 	const close = () => {
 		request.current++;
 		setToken(null);
-		setResult({ entries: [], limited: false });
+		setResult({ entries: [], limited: false, incomplete: false });
 		setSelected(0);
 	};
 	const refresh = () => {
@@ -29,8 +30,9 @@ export function useFileMentions(
 		if (!next) return close();
 		if (token && next.start === token.start && next.end === token.end && next.query === token.query) return;
 		request.current++;
-		setResult({ entries: [], limited: false });
+		setResult({ entries: [], limited: false, incomplete: false });
 		setMessage("正在查找文件…");
+		setFailed(false);
 		setToken(next);
 		setSelected(0);
 	};
@@ -48,12 +50,20 @@ export function useFileMentions(
 					if (controller.signal.aborted || version !== request.current) return;
 					setResult(value);
 					setMessage(
-						value.entries.length ? (value.limited ? "结果较多，请继续输入路径缩小范围" : "") : "没有匹配的文件或目录",
+						value.incomplete
+							? "文件索引未完整，请输入子目录缩小范围"
+							: value.entries.length
+								? value.limited
+									? "结果较多，请继续输入路径缩小范围"
+									: ""
+								: "没有匹配的文件或目录",
 					);
 				})
 				.catch((error) => {
-					if (!controller.signal.aborted && version === request.current)
-						setMessage(error instanceof Error ? error.message : "查询失败，请重试");
+					if (!controller.signal.aborted && version === request.current) {
+						setFailed(true);
+						setMessage(error instanceof Error ? `查询失败：${error.message}` : "查询失败，请重试");
+					}
 				});
 		}, 120);
 		return () => {
@@ -104,6 +114,16 @@ export function useFileMentions(
 					description: item.path,
 				}))}
 				message={message}
+				onRetry={
+					failed
+						? () => {
+								request.current++;
+								setFailed(false);
+								setMessage("正在查找文件…");
+								setToken((current) => (current ? { ...current } : null));
+							}
+						: undefined
+				}
 			/>
 		) : null;
 	return {

@@ -1,5 +1,5 @@
 import { fauxProvider } from "../../../test/faux.ts";
-import { MemoryCredentialStore } from "../src/credentials.ts";
+import { InMemoryCredentialStore } from "../src/credentials.ts";
 // spec: agent-runtime「热替换扩展」——同名扩展重新 install 后：
 // 已开始执行的工具调用在原实现下完成，新发起的调用使用新实现。
 // 参考 reference/pi/packages/durable/test/examples/31-reload-and-restart.ts。
@@ -20,7 +20,7 @@ function loadVersioned(version: string, gate: Promise<void>, started: () => void
 				execute: async (): Promise<ToolExecutionResult> => {
 					started();
 					await gate;
-					return { content: [{ type: "text", text: version }] };
+					return { output: [{ type: "text", text: version }] };
 				},
 			}),
 		],
@@ -46,7 +46,7 @@ describe("extension hot reload", () => {
 			fauxAssistantMessage([fauxText("Done 2")]),
 		]);
 		const runtime = await createNekoRuntime({
-			credentials: new MemoryCredentialStore(),
+			credentials: new InMemoryCredentialStore(),
 			storage: "memory",
 			model: { provider: "faux", modelId: "faux-1" },
 			providers: [faux.provider],
