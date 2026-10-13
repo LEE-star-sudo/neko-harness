@@ -1,9 +1,12 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, resolve, sep } from "node:path";
+import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_STORAGE_PATH, normalizeWorkspace } from "@neko-harness/core";
+import { installedVersion } from "@neko-harness/core/application-updates";
+import { ApplicationProtocolError, RUNNING_VERSION } from "@neko-harness/core/application-version";
+import { connectNekoGateway, readGatewayPortFile } from "@neko-harness/gateway";
 import { ensureNekoGateway, type GatewayEnsureOptions, type GatewayHandle } from "./gateway-spawn.ts";
 
 /**
@@ -19,6 +22,7 @@ export type NekoWebOptions = {
 	/** 静态资源目录；默认 <packages/web>/dist/client（Vite 产物）。 */
 	readonly staticDir?: string;
 	/** 网关选项（默认 ~/.neko/neko.sqlite 数据目录）。 */
+	readonly versionOptions?: { runningVersion?: string; manifest?: string };
 	readonly gateway?: Omit<GatewayEnsureOptions, "storagePath"> & { readonly storagePath?: string };
 };
 
@@ -57,7 +61,13 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 	});
 
 	const server: Server = createServer((request, response) => {
-		void handleHttp(request, response, { staticDir, gateway, workspaceRoot }).catch((error: unknown) => {
+		void handleHttp(request, response, {
+			staticDir,
+			gateway,
+			workspaceRoot,
+			storagePath: options.gateway?.storagePath ?? DEFAULT_STORAGE_PATH,
+			versionOptions: options.versionOptions,
+		}).catch((error: unknown) => {
 			if (!response.headersSent) response.writeHead(500);
 			response.end(error instanceof Error ? error.message : String(error));
 		});
@@ -87,14 +97,43 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 async function handleHttp(
 	request: IncomingMessage,
 	response: ServerResponse,
-	info: { staticDir: string; gateway: GatewayHandle; workspaceRoot: string },
+	info: {
+		staticDir: string;
+		gateway: GatewayHandle;
+		workspaceRoot: string;
+		storagePath: string;
+		versionOptions?: { runningVersion?: string; manifest?: string };
+	},
 ): Promise<void> {
 	const url = new URL(request.url ?? "/", "http://localhost");
 	if (url.pathname === "/api/info") {
-		response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+		const wsUrl =
+			process.platform === "win32"
+				? await readGatewayPortFile(dirname(info.storagePath), info.gateway.serverId)
+				: info.gateway.wsUrl;
+		if (!wsUrl) {
+			response.writeHead(503, { "cache-control": "no-store" });
+			response.end("Gateway unavailable");
+			return;
+		}
+		let protocolCompatible = true;
+		try {
+			const probe = await connectNekoGateway(
+				{ transport: "ws", url: wsUrl, serverId: info.gateway.serverId },
+				AbortSignal.timeout(5000),
+			);
+			await probe.close();
+		} catch (error) {
+			if (error instanceof ApplicationProtocolError) protocolCompatible = false;
+			else throw error;
+		}
+		response.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
 		response.end(
 			JSON.stringify({
-				gatewayWs: info.gateway.wsUrl,
+				gatewayWs: wsUrl,
+				protocolCompatible,
+				webVersion: info.versionOptions?.runningVersion ?? RUNNING_VERSION,
+				installedVersion: await installedVersion(info.versionOptions?.manifest),
 				workspaceRoot: info.workspaceRoot,
 				serverId: info.gateway.serverId,
 				socketPath: info.gateway.socketPath,
@@ -143,6 +182,7 @@ async function serveStatic(
 	response.writeHead(200, {
 		"content-type": MIME[extname(file)] ?? "application/octet-stream",
 		"content-length": stats.size,
+		...(extname(file) === ".html" ? { "cache-control": "no-store" } : {}),
 	});
 	if (method === "HEAD") {
 		response.end();

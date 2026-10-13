@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 import { appActions } from "../lib/bootstrap";
 import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
 import { getState, storeActions, useNekoState } from "../lib/store";
+import { readUpgradeDraft, removeUpgradeDraft, saveUpgradeDraft } from "../lib/upgrade-draft";
 import { ComposerSuggestions } from "./composer-suggestions";
 import { useFileMentions } from "./file-mentions";
 import { ModelPicker } from "./model-picker";
@@ -15,6 +16,45 @@ type Attachment = { id: string; file: File; error?: string; processing?: boolean
 type Draft = { text: string; files: Attachment[]; requestId: string };
 const drafts = new Map<string, Draft>();
 const draftListeners = new Set<() => void>();
+const submitting = new Set<string>();
+export function reloadForUpgrade(): void {
+	const state = getState(),
+		session = state.currentSessionId,
+		key = session ?? `none:${state.workspaceRoot}`;
+	const draft = drafts.get(key);
+	if (submitting.size || state.operating) {
+		storeActions.notice({ level: "info", text: "发送中，请稍后刷新" });
+		return;
+	}
+	if ([...drafts.values()].some((d) => d.files.length)) {
+		storeActions.notice({ level: "info", text: "先发送或移除附件，再刷新" });
+		return;
+	}
+	if (!state.webInfo) {
+		storeActions.notice({ level: "error", text: "连接未就绪，请稍后重试" });
+		return;
+	}
+	// Preserve other sessions' drafts by asking the user to handle them first.
+	if ([...drafts.entries()].some(([id, d]) => id !== key && d.text.trim())) {
+		storeActions.notice({ level: "info", text: "其他会话有草稿，请先发送或清空" });
+		return;
+	}
+	try {
+		saveUpgradeDraft({
+			version: 1,
+			serverId: state.webInfo.serverId,
+			workspace: state.workspaceRoot,
+			session,
+			text: draft?.text ?? "",
+			requestId: draft?.requestId ?? crypto.randomUUID(),
+		});
+	} catch {
+		storeActions.notice({ level: "error", text: "草稿保存失败，请先复制文字" });
+		return;
+	}
+	window.location.reload();
+}
+
 const subscribeDrafts = (listener: () => void) => {
 	draftListeners.add(listener);
 	return () => {
@@ -56,6 +96,21 @@ function SessionComposer(props: Props & { sessionId: string }) {
 	const active = view?.compaction?.active ?? [];
 	if (!drafts.has(props.sessionId))
 		drafts.set(props.sessionId, { text: "", files: [], requestId: crypto.randomUUID() });
+	useEffect(() => {
+		const recovery = readUpgradeDraft(),
+			state = getState();
+		if (
+			recovery &&
+			recovery.serverId === state.webInfo?.serverId &&
+			recovery.workspace === workspaceRoot &&
+			(recovery.session ?? `none:${workspaceRoot}`) === props.sessionId
+		) {
+			drafts.set(props.sessionId, { text: recovery.text, files: [], requestId: recovery.requestId });
+			removeUpgradeDraft();
+			for (const listener of draftListeners) listener();
+		}
+	}, [props.sessionId, workspaceRoot]);
+
 	const draft = useSyncExternalStore(subscribeDrafts, () => drafts.get(props.sessionId)!);
 
 	const [pending, setPending] = useState(false);
@@ -250,6 +305,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		if (locked.current || props.disabled) return;
 		locked.current = true;
 		setPending(true);
+		submitting.add(props.sessionId);
 		setError("");
 		const before = current.current;
 		drafts.set(props.sessionId, before);
@@ -267,6 +323,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		} finally {
 			locked.current = false;
 			setPending(false);
+			submitting.delete(props.sessionId);
 		}
 	};
 	const submit = async () => {
@@ -297,6 +354,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		}
 		locked.current = true;
 		setPending(true);
+		submitting.add(props.sessionId);
 		setError("");
 		try {
 			const files: ImageFile[] = [];
@@ -331,6 +389,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		} finally {
 			locked.current = false;
 			setPending(false);
+			submitting.delete(props.sessionId);
 		}
 	};
 	const menuItems = commandSuggestions(draft.text, skills);

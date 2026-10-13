@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { NekoModelRef } from "@neko-harness/core";
+import { ApplicationProtocolError } from "@neko-harness/core/application-version";
 import {
 	connectNekoGateway,
 	gatewayCommand,
@@ -86,6 +87,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 						if (await probeWs(wsUrl, serverId, timeoutAt))
 							return makeHandle(serverId, undefined, wsUrl, child, nekoDir);
 					} catch (error) {
+						if (error instanceof ApplicationProtocolError) throw error;
 						lastError = error;
 					}
 				}
@@ -135,6 +137,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 					return makeHandle(serverId, socketPath, wsUrl, child, nekoDir);
 				lastError = new Error(`WebSocket ${wsUrl} 或 Unix socket ${socketPath} 未就绪或身份不匹配`);
 			} catch (error) {
+				if (error instanceof ApplicationProtocolError) throw error;
 				lastError = error;
 			}
 			await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())));
@@ -208,7 +211,8 @@ async function probeAddress(address: Parameters<typeof connectNekoGateway>[0], t
 			controller.abort();
 			await probe.close();
 		}
-	} catch {
+	} catch (error) {
+		if (error instanceof ApplicationProtocolError) throw error;
 		return false;
 	} finally {
 		clearTimeout(timer);

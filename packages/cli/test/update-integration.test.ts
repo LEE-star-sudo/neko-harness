@@ -1,0 +1,116 @@
+import { expect, it } from "bun:test";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { fauxProvider } from "../../../test/faux.ts";
+import { UpdateChecker } from "../../core/src/application-updates.ts";
+import { updateAction } from "../../core/src/application-version.ts";
+import { connectNekoGateway } from "../../gateway/src/client.ts";
+import { startGateway } from "../../gateway/src/gateway.ts";
+import { waitFor } from "../../gateway/test/helpers.ts";
+import { startWebServer } from "../../web/src/server.ts";
+import { updateCommand } from "../src/update.ts";
+
+it("upgrades an isolated installation, detects old live services, then a stale page", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "neko-update-flow-")),
+		root = join(dir, "global/node_modules/neko-harness"),
+		bin = join(dir, "bin"),
+		manifest = join(root, "package.json"),
+		entry = join(root, "dist/neko.js"),
+		storagePath = join(dir, "session.sqlite");
+	await mkdir(join(root, "dist"), { recursive: true });
+	await mkdir(bin);
+	await writeFile(join(dir, "global/package.json"), JSON.stringify({ dependencies: { "neko-harness": "0.2.5" } }));
+	await symlink(entry, join(bin, "neko"));
+	const install = async (version: string) => {
+		await writeFile(manifest, JSON.stringify({ name: "neko-harness", version }));
+		await writeFile(entry, `console.log(${JSON.stringify(version)})`);
+	};
+	await install("0.2.5");
+	await writeFile(join(dir, "index.html"), "<div id='root'></div>");
+	const faux = fauxProvider(),
+		fetchLatest = async () => Response.json({ name: "neko-harness", version: "0.2.6" });
+	const start = (runningVersion: string) =>
+		startGateway({
+			storage: "memory",
+			storagePath,
+			port: 0,
+			providers: [faux.provider],
+			model: { provider: "faux", modelId: "faux-1" },
+			updateIntervalMs: 20,
+			updates: { runningVersion, manifest, cachePath: join(dir, "cache.json"), fetch: fetchLatest },
+		});
+	let gateway = await start("0.2.5");
+	let web = await startWebServer({
+		port: 0,
+		staticDir: dir,
+		versionOptions: { runningVersion: "0.2.5", manifest },
+		gateway: { storagePath, serverId: gateway.serverId, socketPath: gateway.socketPath, port: gateway.port! },
+	});
+	let client = await connectNekoGateway({ transport: "ws", url: gateway.wsUrl!, serverId: gateway.serverId });
+	try {
+		await waitFor(() => client.application.info.value?.checkState === "ok", "latest available");
+		expect(updateAction({ gateway: client.application.info.value!, frontend: "0.2.5", installed: "0.2.5" })).toBe(
+			"install",
+		);
+		const result = await updateCommand({
+			runningVersion: "0.2.5",
+			entry,
+			checker: new UpdateChecker({
+				runningVersion: "0.2.5",
+				manifest,
+				cachePath: join(dir, "cli-cache"),
+				fetch: fetchLatest,
+			}),
+			run: async (args) => {
+				if (args[0] === "pm") return bin;
+				if (args[0] === "add") {
+					expect(args).toEqual(["add", "--global", "neko-harness@0.2.6"]);
+					await install("0.2.6");
+					return "";
+				}
+				return (await promisify(execFile)(process.execPath, args)).stdout.trim();
+			},
+		});
+		expect(result).toContain("已升级至 v0.2.6");
+		await waitFor(() => client.application.info.value?.installedVersion === "0.2.6", "installed changes observed");
+		const oldWeb = await (await fetch(`${web.url}/api/info`)).json();
+		expect(oldWeb.webVersion).toBe("0.2.5");
+		expect(oldWeb.installedVersion).toBe("0.2.6");
+		expect(
+			updateAction({
+				gateway: client.application.info.value!,
+				frontend: "0.2.5",
+				installed: "0.2.6",
+				web: { runningVersion: oldWeb.webVersion, installedVersion: oldWeb.installedVersion },
+			}),
+		).toBe("restart-service");
+		await client.close();
+		await web.close();
+		await gateway.close();
+		gateway = await start("0.2.6");
+		web = await startWebServer({
+			port: 0,
+			staticDir: dir,
+			versionOptions: { runningVersion: "0.2.6", manifest },
+			gateway: { storagePath, serverId: gateway.serverId, socketPath: gateway.socketPath, port: gateway.port! },
+		});
+		client = await connectNekoGateway({ transport: "ws", url: gateway.wsUrl!, serverId: gateway.serverId });
+		const input = {
+			gateway: client.application.info.value!,
+			frontend: "0.2.5",
+			installed: "0.2.6",
+			web: { runningVersion: "0.2.6", installedVersion: "0.2.6" },
+		};
+		expect(updateAction(input)).toBe("refresh-page");
+		expect(updateAction({ ...input, frontend: "0.2.6" })).toBe("none");
+		expect(faux.state.callCount).toBe(0);
+	} finally {
+		await client.close();
+		await web.close();
+		await gateway.close();
+		await rm(dir, { recursive: true, force: true });
+	}
+});

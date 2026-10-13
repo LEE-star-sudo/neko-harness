@@ -19,6 +19,7 @@ import type {
 	StreamingView,
 } from "@neko-harness/core";
 import { normalizeWorkspace } from "@neko-harness/core";
+import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import type { NekoChat } from "@neko-harness/gateway/contract";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -48,6 +49,7 @@ import {
 	type ThemePreference,
 	theme,
 } from "./theme/index.ts";
+import { openVersion, versionNotice } from "./version-ui.ts";
 import { recentlyVisited, sessionPickerItems } from "./workspace.ts";
 
 export type NekoTuiOptions = {
@@ -86,6 +88,9 @@ class NekoTuiApp {
 	readonly #ui: TuiAltScreen;
 	readonly #imageTranscript = new ImageTranscript(() => this.#transcript);
 	readonly #notices = new Container();
+	readonly #versionNotice = new Container();
+	#versionStop?: () => void;
+	#versionTimer?: ReturnType<typeof setInterval>;
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
 	readonly #login: LoginPanel;
@@ -292,6 +297,9 @@ class NekoTuiApp {
 		const content = new Container();
 		content.addChild(this.#imageTranscript);
 		this.#transcript = new ScrollView(content, { follow: "end", primary: true, overscroll: "chain" });
+		const notices = new Container();
+		notices.addChild(this.#notices);
+		notices.addChild(this.#versionNotice);
 		this.#ui.setLayoutRoot(
 			createAppLayout({
 				transcript: this.#transcript,
@@ -311,7 +319,7 @@ class NekoTuiApp {
 				},
 				editor: this.#editor,
 				footer: this.#footer,
-				notices: this.#notices,
+				notices,
 				busy: this.#busyLoader,
 				busyVisible: () => this.#busyText !== undefined,
 				panelOpen: () => this.#panel.open || this.#login.open,
@@ -323,6 +331,17 @@ class NekoTuiApp {
 			if (this.#sessionPanelTimer) this.#panel.update(this.sessionItems());
 			this.#ui.requestRender();
 		});
+		const refreshVersion = async () => {
+			const installed = await installedVersion();
+			if (this.#exitStarted) return;
+			const notice = versionNotice(this.#gateway.client.application.info.value ?? null, installed);
+			this.#versionNotice.clear();
+			if (notice) this.#versionNotice.addChild(new TruncatedText(formatNotice(notice, "info"), 1, 0));
+			this.#ui.requestRender();
+		};
+		this.#versionStop = this.#gateway.client.application.info.subscribe(() => void refreshVersion());
+		this.#versionTimer = setInterval(() => void refreshVersion(), 30000);
+		void refreshVersion();
 		await this.switchSession(initialSessionId);
 		this.#ui.start();
 		this.#ui.requestRender(true);
@@ -330,6 +349,8 @@ class NekoTuiApp {
 		void loadAllHighlightLanguages();
 		this.#startThemeDetection();
 		await this.#exited;
+		this.#versionStop?.();
+		clearInterval(this.#versionTimer);
 		this.#viewUnsubscribe?.();
 		this.#directoryUnsubscribe?.();
 		this.#toolSpinner.stop();
@@ -398,6 +419,20 @@ class NekoTuiApp {
 		}
 		if (trimmed === "/new") {
 			void this.#manage(() => this.createSession());
+			return;
+		}
+		if (trimmed === "/version") {
+			if (!this.#exitStarted && !this.#panel.open && !this.#login.open) {
+				void openVersion(
+					this.#panel,
+					async () => ({
+						state: this.#gateway.client.application.info.value ?? null,
+						installed: await installedVersion(),
+					}),
+					() => this.#gateway.client.application.check(null),
+				);
+				this.#ui.setFocus(this.#panel);
+			}
 			return;
 		}
 		if (trimmed === "/skills") {

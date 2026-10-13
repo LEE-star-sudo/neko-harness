@@ -1,6 +1,8 @@
 /** Shared browser-safe connection and first-snapshot orchestration. Native handles pass through unchanged. */
 import { type Ctx, createHost, type Host, type Link, type Readable } from "@earendil-works/chord";
+import { APPLICATION_PROTOCOL, ApplicationProtocolError } from "@neko-harness/core/application-version";
 import {
+	NekoApplicationInfo,
 	type NekoAttachment,
 	NekoChat,
 	NekoCredentials,
@@ -36,6 +38,7 @@ export function waitForValue<T>(state: Readable<T | undefined>, signal?: AbortSi
 	});
 }
 export type NekoGatewayConnection = {
+	readonly application: NekoApplicationInfo;
 	readonly host: Host;
 	readonly link: Link;
 	readonly directory: NekoSessionDirectory;
@@ -54,37 +57,69 @@ export type NekoGatewayConnection = {
 export function createGatewayConnection(link: Link, serverId: string): NekoGatewayConnection {
 	const host = createHost({ kind: "client", upstream: identifiedLink(link, serverId), onError: () => {} });
 	const get = <C extends Parameters<Host["get"]>[0]>(type: C) => host.get(type, {} as never, { at: serverId });
-	const directory = get(NekoSessionDirectory),
-		management = get(NekoSessionManagement),
-		models = get(NekoModels),
-		workspaces = get(NekoWorkspaces),
-		workspaceFiles = get(NekoWorkspaceFiles),
-		credentials = get(NekoCredentials),
-		skillMarket = get(NekoSkillMarket);
-	const keep = [
-		directory.state.subscribe(() => {}),
-		workspaces.state.subscribe(() => {}),
-		credentials.state.subscribe(() => {}),
-	];
+	const application = get(NekoApplicationInfo);
+	const keep: (() => void)[] = [application.info.subscribe(() => {})];
+	let business: ReturnType<typeof bindBusiness> | undefined;
+	let protocolChecked = false;
+	function bindBusiness() {
+		const directory = get(NekoSessionDirectory),
+			management = get(NekoSessionManagement),
+			models = get(NekoModels),
+			workspaces = get(NekoWorkspaces),
+			workspaceFiles = get(NekoWorkspaceFiles),
+			credentials = get(NekoCredentials),
+			skillMarket = get(NekoSkillMarket);
+		keep.push(
+			directory.state.subscribe(() => {}),
+			workspaces.state.subscribe(() => {}),
+			credentials.state.subscribe(() => {}),
+		);
+		return { directory, management, models, workspaces, workspaceFiles, credentials, skillMarket };
+	}
+	const services = () => {
+		if (!protocolChecked) throw new Error("Gateway protocol not checked");
+		if (!business) business = bindBusiness();
+		return business;
+	};
 	let chat: NekoChat | undefined;
 	let attachment: NekoAttachment | undefined;
 	let stopView: (() => void) | undefined;
 	let closed = false;
 	let closing: Promise<void> | undefined;
 	const connection: NekoGatewayConnection = {
+		application,
 		host,
 		link,
-		directory,
-		management,
-		models,
-		workspaces,
-		workspaceFiles,
-		credentials,
-		skillMarket,
+		get directory() {
+			return services().directory;
+		},
+		get management() {
+			return services().management;
+		},
+		get models() {
+			return services().models;
+		},
+		get workspaces() {
+			return services().workspaces;
+		},
+		get workspaceFiles() {
+			return services().workspaceFiles;
+		},
+		get credentials() {
+			return services().credentials;
+		},
+		get skillMarket() {
+			return services().skillMarket;
+		},
 		get attachment() {
 			return attachment;
 		},
 		async ready(signal) {
+			await deadline(application.ready, signal);
+			const info = await waitForValue(application.info, signal);
+			if (info.protocolVersion !== APPLICATION_PROTOCOL) throw new ApplicationProtocolError();
+			protocolChecked = true;
+			const { directory, management, models, workspaces, credentials, workspaceFiles, skillMarket } = services();
 			await deadline(
 				Promise.all([
 					directory.ready,
@@ -104,7 +139,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			]);
 		},
 		async attach(sessionId: string, ctx?: Ctx): Promise<NekoChat> {
-			const next = await management.attach(sessionId, ctx);
+			const next = await connection.management.attach(sessionId, ctx);
 			if (chat?.status === "live" && chat.view.value !== undefined && attachment?.attachmentId === next.attachmentId)
 				return chat;
 			stopView?.();
@@ -135,7 +170,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			chat?.release();
 			chat = undefined;
 			attachment = undefined;
-			if (!closed) await management.detach(null);
+			if (!closed) await connection.management.detach(null);
 		},
 		async close() {
 			if (closing) return closing;

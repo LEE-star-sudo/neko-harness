@@ -11,10 +11,14 @@ import {
 } from "@earendil-works/chord";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { CREDENTIAL_PROVIDERS, type NekoRuntime } from "@neko-harness/core";
+import { UpdateChecker, type UpdateCheckerOptions } from "@neko-harness/core/application-updates";
+import type { UpdateState } from "@neko-harness/core/application-version";
 import { Type } from "typebox";
 import {
+	ApplicationInfoSchema,
 	CredentialStateSchema,
 	DirectoryStateSchema,
+	NekoApplicationInfo,
 	type NekoCredentialState,
 	NekoCredentials,
 	type NekoMarketSkill,
@@ -47,8 +51,57 @@ export async function createNekoServerServices(options: {
 	context: Context;
 	marketUrl: string;
 	promptHome?: string;
+	updates?: UpdateCheckerOptions;
+	updateIntervalMs?: number;
 }) {
 	const { runtime, context, host } = options;
+	const updates = new UpdateChecker(options.updates);
+	await updates.local();
+	const updateListeners = new Set<(value: UpdateState) => void>();
+	let published = JSON.stringify(updates.state),
+		closed = false;
+	const publishUpdates = () => {
+		if (closed) return;
+		const next = JSON.stringify(updates.state);
+		if (next === published) return;
+		published = next;
+		for (const listener of updateListeners) listener(updates.state);
+	};
+	host.serve(NekoApplicationInfo, (_input, _principal, self) => {
+		const state = self.state({ info: cell(ApplicationInfoSchema, updates.state) });
+		self.listen({
+			updates: listener(
+				{
+					subscribe: (fn: (value: UpdateState) => void) => {
+						updateListeners.add(fn);
+						return () => updateListeners.delete(fn);
+					},
+				},
+				(value, ctx) => state.info.replace(ctx, value),
+			),
+		});
+		return {
+			kind: "ready",
+			info: state.info,
+			check: async () => {
+				await updates.check(true);
+				publishUpdates();
+				return updates.state;
+			},
+		};
+	});
+	const updateTimer = setInterval(() => {
+		void updates
+			.local()
+			.then(() => {
+				publishUpdates();
+				return updates.check();
+			})
+			.then(publishUpdates);
+	}, options.updateIntervalMs ?? 30000);
+	updateTimer.unref();
+	void updates.check().then(publishUpdates);
+
 	const market = createSkillMarketClient({
 		marketUrl: options.marketUrl,
 		...(options.promptHome !== undefined ? { home: options.promptHome } : {}),
@@ -265,6 +318,10 @@ export async function createNekoServerServices(options: {
 	await host.ready();
 	return {
 		async dispose() {
+			closed = true;
+			clearInterval(updateTimer);
+			updates.close();
+			updateListeners.clear();
 			await mutationTail;
 		},
 	};

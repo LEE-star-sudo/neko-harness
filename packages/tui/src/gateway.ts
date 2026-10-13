@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DEFAULT_STORAGE_PATH, loadNekoConfig, type NekoModelRef } from "@neko-harness/core";
+import { ApplicationProtocolError } from "@neko-harness/core/application-version";
 import {
 	connectNekoGateway,
 	gatewayCommand,
@@ -63,7 +64,8 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 				try {
 					const client = await connectNekoGateway({ transport: "ws", url: wsUrl, serverId: fileServerId });
 					return { client, socketPath: undefined, serverId: fileServerId, spawned: false, close: () => client.close() };
-				} catch {
+				} catch (error) {
+					if (error instanceof ApplicationProtocolError) throw error;
 					// stale 端口文件：落入 spawn 流程。
 				}
 			}
@@ -85,7 +87,8 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 			try {
 				const client = await connectNekoGateway({ transport: "unix", socketPath, serverId });
 				return { client, socketPath, serverId, spawned: false, close: () => client.close() };
-			} catch {
+			} catch (error) {
+				if (error instanceof ApplicationProtocolError) throw error;
 				// socket 已死（占用进程消失等）：spawn 新网关，网关会识别并接管 stale socket。
 			}
 		}
@@ -168,6 +171,7 @@ async function connectSpawned(
 					},
 				};
 			} catch (error) {
+				if (error instanceof ApplicationProtocolError) throw error;
 				lastError = error;
 				await sleep(CONNECT_RETRY_MS);
 			}
@@ -223,6 +227,7 @@ async function connectSpawned(
 				},
 			};
 		} catch (error) {
+			if (error instanceof ApplicationProtocolError) throw error;
 			lastError = error;
 			await sleep(CONNECT_RETRY_MS);
 		}

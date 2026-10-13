@@ -414,3 +414,19 @@ export type NekoMarketPreview = Static<typeof preview>;
 export type NekoMarketInstallResult = Static<typeof installResult>;
 export type NekoCreateSessionOptions = Parameters<NekoSessionManagement["create"]>[0];
 export type NekoSubmitInput = Parameters<NekoChat["submit"]>[0];
+
+/** Stable bootstrap contract: keep this available even when business protocol changes. */
+export const ApplicationInfoSchema = Type.Object({
+	runningVersion: str,
+	installedVersion: nullableString,
+	protocolVersion: Type.Integer({ minimum: 1 }),
+	latestVersion: nullableString,
+	checkedAt: Type.Union([integer, nil]),
+	checkState: Type.Enum(["unknown", "checking", "ok", "failed", "development"]),
+});
+export const NekoApplicationInfo = contract("neko.application-info", {
+	version: 1,
+	input: Type.Object({}),
+	variants: { ready: { state: { info: ApplicationInfoSchema }, methods: { check: rpc(nil, ApplicationInfoSchema) } } },
+});
+export type NekoApplicationInfo = Handle<typeof NekoApplicationInfo>;

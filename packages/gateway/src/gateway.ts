@@ -15,6 +15,7 @@ import {
 	type NekoModelRef,
 	type NekoRuntime,
 } from "@neko-harness/core";
+import type { UpdateCheckerOptions } from "@neko-harness/core/application-updates";
 import { isServerId } from "./identity.ts";
 import { removeGatewayPortFile, writeGatewayPortFile } from "./port-file.ts";
 import { createNekoServerServices } from "./server-services.ts";
@@ -48,6 +49,8 @@ export type NekoGatewayOptions = {
 	readonly socketPath?: string | null;
 	/** 逻辑服务器身份（pi 握手校验）；默认读取/生成 <数据目录>/gateway-server-id。 */
 	readonly serverId?: string;
+	readonly updates?: UpdateCheckerOptions;
+	readonly updateIntervalMs?: number;
 	readonly onError?: (error: Error) => void;
 };
 
@@ -120,6 +123,8 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			model,
 			marketUrl,
 			promptHome: options.promptHome,
+			updates: options.updates,
+			updateIntervalMs: options.updateIntervalMs,
 			onError: options.onError,
 		});
 	} catch (error) {
@@ -134,6 +139,8 @@ type BindOptions = {
 	readonly port: number | null;
 	readonly socketPath: string | null;
 	readonly serverId: string;
+	readonly updates?: UpdateCheckerOptions;
+	readonly updateIntervalMs?: number;
 	readonly nekoDir: string;
 	readonly model: NekoModelRef;
 	readonly marketUrl: string;
@@ -153,6 +160,8 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		runtime,
 		context,
 		marketUrl: options.marketUrl,
+		...(options.updates ? { updates: options.updates } : {}),
+		...(options.updateIntervalMs ? { updateIntervalMs: options.updateIntervalMs } : {}),
 		...(options.promptHome !== undefined ? { promptHome: options.promptHome } : {}),
 	});
 	let wsListener: WsListener | undefined;

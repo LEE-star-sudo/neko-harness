@@ -2,6 +2,7 @@
 import type { SlashCommand } from "@earendil-works/pi-tui";
 
 export const commands: SlashCommand[] = [
+	{ name: "version", description: "View versions and check for updates" },
 	{ name: "compact", description: "Compact context (/compact optional instructions)" },
 	{ name: "exit", description: "Exit neko TUI" },
 	{ name: "new", description: "Create a new session" },

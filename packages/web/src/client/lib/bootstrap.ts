@@ -1,9 +1,11 @@
 import type { NekoConversationChange, NekoModelRef, NekoSkillInfo } from "@neko-harness/core";
+import { ApplicationProtocolError } from "@neko-harness/core/application-version";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { NekoBrowseOptions } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
 import { storeActions } from "./store.ts";
+import { readUpgradeDraft } from "./upgrade-draft";
 
 /**
  * 应用启动接线：从 /api/info 拿 gateway WebSocket 地址 + serverId，
@@ -12,16 +14,37 @@ import { storeActions } from "./store.ts";
 
 export type GatewayInfo = {
 	gatewayWs: string;
+	protocolCompatible?: boolean;
+	webVersion: string;
+	installedVersion: string | null;
 	workspaceRoot: string;
 	serverId: string;
 	/** Unix socket 路径；Windows（无 Unix 传输）不存在。 */
 	socketPath?: string;
 };
 
+let infoGeneration = 0;
 export async function fetchGatewayInfo(): Promise<GatewayInfo> {
-	const response = await fetch("/api/info");
+	const generation = ++infoGeneration;
+	const response = await fetch("/api/info", { cache: "no-store", signal: AbortSignal.timeout(5000) });
 	if (!response.ok) throw new Error(`GET /api/info 失败（${response.status}）`);
-	return (await response.json()) as GatewayInfo;
+	const info = (await response.json()) as GatewayInfo;
+	if (info.protocolCompatible === false) throw new ApplicationProtocolError();
+	if (
+		typeof info.gatewayWs !== "string" ||
+		typeof info.serverId !== "string" ||
+		typeof info.webVersion !== "string" ||
+		typeof info.workspaceRoot !== "string" ||
+		(info.installedVersion !== null && typeof info.installedVersion !== "string")
+	)
+		throw new Error("无效的网关信息");
+	if (generation === infoGeneration)
+		storeActions.setWebInfo({
+			serverId: info.serverId,
+			webVersion: info.webVersion,
+			installedVersion: info.installedVersion,
+		});
+	return info;
 }
 
 let connection: GatewayConnection | undefined;
@@ -36,16 +59,24 @@ export function startNekoApp(): void {
 			storeActions.setPhase("error");
 			storeActions.notice({
 				level: "error",
-				text: `获取网关信息失败：${error instanceof Error ? error.message : String(error)}`,
+				text:
+					error instanceof ApplicationProtocolError
+						? "版本不兼容，请运行 neko update 后重新启动本地 neko。"
+						: `获取网关信息失败：${error instanceof Error ? error.message : String(error)}`,
 			});
 			return;
 		}
+		const recovery = readUpgradeDraft();
+		const restored = recovery?.serverId === info.serverId ? recovery : null;
 		connection = new GatewayConnection({
 			url: info.gatewayWs,
 			serverId: info.serverId,
-			workspaceRoot: info.workspaceRoot,
+			workspaceRoot: restored?.workspace ?? info.workspaceRoot,
+			preferredSession: restored?.session ?? undefined,
+			discover: fetchGatewayInfo,
 			events: {
 				onPhase: storeActions.setPhase,
+				onUpdates: storeActions.setUpdates,
 				onCredentials: storeActions.setCredentials,
 				onWorkspaces: (state) => storeActions.setWorkspaces(state.workspaces),
 				onWorkspace: storeActions.setWorkspace,
@@ -58,6 +89,21 @@ export function startNekoApp(): void {
 			},
 		});
 		await connection.start();
+		const refresh = () => {
+			if (document.visibilityState === "visible") void fetchGatewayInfo().catch(() => {});
+		};
+		const timer = setInterval(refresh, 30000);
+		document.addEventListener("visibilitychange", refresh);
+		window.addEventListener(
+			"pagehide",
+			() => {
+				clearInterval(timer);
+				document.removeEventListener("visibilitychange", refresh);
+			},
+			{ once: true },
+		);
+		if (restored?.text && connection.currentSessionId !== restored.session)
+			storeActions.notice({ level: "info", text: "原会话不可用，升级草稿保留在关于与更新中" });
 	})();
 }
 
@@ -66,6 +112,9 @@ function notReady(): void {
 }
 
 export const appActions = {
+	checkUpdates() {
+		return requireConnection().checkUpdates();
+	},
 	saveCredential(provider: CredentialProviderId, key: string) {
 		return requireConnection().saveCredential(provider, key);
 	},

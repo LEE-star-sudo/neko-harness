@@ -1,10 +1,13 @@
 #!/usr/bin/env bun
 
+import { RUNNING_VERSION } from "@neko-harness/core/application-version";
+
 const USAGE = `用法: neko <command> [options]
 
 命令:
   tui     启动终端交互界面（自动拉起 gateway）
   web     启动 Web UI 静态托管（自动拉起 gateway）
+  update  升级当前 Bun 全局安装
   serve   仅启动 gateway（WebSocket；POSIX 另有 Unix socket）
 
 各命令的选项透传，详见 neko <command> --help。
@@ -13,6 +16,25 @@ const USAGE = `用法: neko <command> [options]
 const [command, ...rest] = process.argv.slice(2);
 
 switch (command) {
+	case "update": {
+		if (rest.length) {
+			if (rest.length === 1 && (rest[0] === "--help" || rest[0] === "-h"))
+				console.log("用法: neko update\n升级当前 Bun 全局安装；完成后重新启动 neko。\n  -h, --help 显示帮助");
+			else {
+				console.error("用法: neko update");
+				process.exitCode = 1;
+			}
+			break;
+		}
+		try {
+			const { updateCommand } = await import("./update.ts");
+			console.log(await updateCommand({ runningVersion: RUNNING_VERSION }));
+		} catch (error) {
+			console.error(error instanceof Error ? error.message : "升级失败，请重试 neko update。");
+			process.exitCode = 1;
+		}
+		break;
+	}
 	case "tui":
 	case "web":
 	case "serve": {
@@ -25,7 +47,7 @@ switch (command) {
 	}
 	case "--version":
 	case "-v":
-		console.log(process.env.NEKO_RELEASE_VERSION ?? "development");
+		console.log(RUNNING_VERSION);
 		break;
 	case undefined:
 	case "-h":

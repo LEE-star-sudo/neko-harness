@@ -1,5 +1,6 @@
 export { connectNekoGateway, type NekoGatewayAddress, type NekoGatewayClient } from "./client.ts";
 export {
+	NekoApplicationInfo,
 	NekoChat,
 	type NekoCreateSessionOptions,
 	type NekoCredentialState,

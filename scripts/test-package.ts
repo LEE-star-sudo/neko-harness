@@ -3,6 +3,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import manifest from "../package.json";
+import { connectNekoGateway } from "../packages/gateway/src/client.ts";
 
 async function run(cmd: string[], cwd: string, env = process.env) {
 	const child = Bun.spawn(cmd, { cwd, env, stdout: "pipe", stderr: "pipe" });
@@ -62,7 +63,7 @@ try {
 	const env = { ...process.env, HOME: join(temp, "home"), DEEPSEEK_API_KEY: "", TAVILY_API_KEY: "", PATH: bin };
 	await mkdir(env.HOME, { recursive: true });
 	if ((await run([cli, "--version"], temp, env)).trim() !== manifest.version) throw new Error("Version mismatch");
-	for (const command of ["tui", "web", "serve"]) {
+	for (const command of ["tui", "web", "serve", "update"]) {
 		const help = await run([cli, command, "--help"], temp, env);
 		if (!help.includes("--help")) throw new Error(`Missing ${command} help`);
 	}
@@ -118,11 +119,41 @@ try {
 	const response = await fetch(url);
 	const html = await response.text();
 	if (!response.ok || !html.includes('id="root"')) throw new Error("Web HTML unavailable");
+	const infoResponse = await fetch(new URL("/api/info", url));
+	const info = (await infoResponse.json()) as {
+		webVersion: string;
+		installedVersion: string;
+		gatewayWs: string;
+		serverId: string;
+	};
+	if (
+		info.webVersion !== manifest.version ||
+		info.installedVersion !== manifest.version ||
+		infoResponse.headers.get("cache-control") !== "no-store"
+	)
+		throw new Error("Web version metadata mismatch");
+	const client = await connectNekoGateway({ transport: "ws", url: info.gatewayWs, serverId: info.serverId });
+	try {
+		if (
+			client.application.info.value?.runningVersion !== manifest.version ||
+			client.application.info.value?.installedVersion !== manifest.version
+		)
+			throw new Error("Gateway version mismatch");
+	} finally {
+		await client.close();
+	}
 	const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)];
 	if (assets.length < 2) throw new Error("Missing Web assets");
 	for (const asset of assets) {
-		if (!(await fetch(new URL(asset[1]!, url))).ok) throw new Error(`Missing asset ${asset[1]}`);
+		const assetResponse = await fetch(new URL(asset[1]!, url));
+		if (!assetResponse.ok) throw new Error(`Missing asset ${asset[1]}`);
+		if (asset[1]!.endsWith(".js") && !(await assetResponse.text()).includes(manifest.version))
+			throw new Error("Page version missing");
 	}
+	const updateResult = Bun.spawn([cli, "update"], { cwd: temp, env, stdout: "pipe", stderr: "pipe" });
+	const updateError = await new Response(updateResult.stderr as ReadableStream).text();
+	if ((await updateResult.exited) === 0 || !updateError.includes("不支持自升级"))
+		throw new Error("Local install update should refuse");
 	web.kill("SIGTERM");
 	const exit = await Promise.race([
 		web.exited,

@@ -1,4 +1,5 @@
 import type { ChatView, NekoConversationChange, NekoModelInfo, NekoSkillInfo } from "@neko-harness/core";
+import { ApplicationProtocolError, type UpdateState } from "@neko-harness/core/application-version";
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
@@ -23,9 +24,10 @@ import type {
 	NekoWorkspaces,
 } from "./contract.ts";
 
-export type ConnPhase = "connecting" | "ready" | "reconnecting";
+export type ConnPhase = "connecting" | "ready" | "reconnecting" | "error";
 export type GatewayEvents = {
 	onPhase(phase: ConnPhase): void;
+	onUpdates?(state: UpdateState | null): void;
 	onCredentials?(state: NekoCredentialState | null): void;
 	onError(text: string): void;
 	onDirectory(state: NekoDirectoryState): void;
@@ -41,6 +43,8 @@ export type GatewayConnectionOptions = {
 	readonly serverId: string;
 	readonly workspaceRoot: string;
 	readonly events: GatewayEvents;
+	readonly discover?: () => Promise<{ gatewayWs: string; serverId: string }>;
+	readonly preferredSession?: string;
 	readonly retryBaseMs?: number;
 	readonly retryMaxMs?: number;
 };
@@ -70,11 +74,13 @@ export class GatewayConnection {
 	#viewEpoch = 0;
 	#disposed = false;
 	#connected = false;
+	#incompatible = false;
 	#operating = false;
 	#initialized = false;
 	constructor(options: GatewayConnectionOptions) {
 		this.#options = options;
 		this.#workspace = options.workspaceRoot;
+		this.#currentSessionId = options.preferredSession;
 	}
 	get currentSessionId() {
 		return this.#currentSessionId;
@@ -103,11 +109,21 @@ export class GatewayConnection {
 			await this.#connect();
 		} catch (error) {
 			this.#error(error);
-			this.#scheduleReconnect();
+			if (error instanceof ApplicationProtocolError) {
+				this.#incompatible = true;
+				this.#options.events.onPhase("error");
+				await this.#teardown();
+			} else this.#scheduleReconnect();
 		}
 	}
 	#error(error: unknown) {
-		this.#options.events.onError(error instanceof Error ? error.message : String(error));
+		this.#options.events.onError(
+			error instanceof ApplicationProtocolError
+				? "版本不兼容，请运行 neko update 后重新启动本地 neko。"
+				: error instanceof Error
+					? error.message
+					: String(error),
+		);
 	}
 	#assert(epoch: number) {
 		if (this.#disposed || epoch !== this.#epoch) throw new Error("连接已变化，请重试");
@@ -314,16 +330,35 @@ export class GatewayConnection {
 	}
 	async #connect(): Promise<void> {
 		const epoch = ++this.#epoch;
-		const client = createGatewayConnection(
-			boundedWebSocketLink(new WebSocket(this.#options.url)),
-			this.#options.serverId,
-		);
+		const address = this.#options.discover
+			? await this.#options.discover()
+			: { gatewayWs: this.#options.url, serverId: this.#options.serverId };
+		this.#assert(epoch);
+		const client = createGatewayConnection(boundedWebSocketLink(new WebSocket(address.gatewayWs)), address.serverId);
 		this.#client = client;
 		client.link.onClose(() => {
 			if (client === this.#client) this.#scheduleReconnect();
 		});
-		await client.ready();
+		try {
+			await client.ready();
+		} catch (error) {
+			if (error instanceof ApplicationProtocolError) {
+				this.#incompatible = true;
+				if (this.#timer) {
+					clearTimeout(this.#timer);
+					this.#timer = undefined;
+				}
+				this.#options.events.onPhase("error");
+			}
+			throw error;
+		}
 		this.#assert(epoch);
+		this.#unsub.push(
+			client.application.info.subscribe((value) => {
+				if (epoch === this.#epoch) this.#options.events.onUpdates?.(value ?? null);
+			}),
+		);
+		this.#options.events.onUpdates?.(client.application.info.value ?? null);
 		this.#management = client.management;
 		this.#workspaces = client.workspaces;
 		this.#workspaceFiles = client.workspaceFiles;
@@ -373,12 +408,17 @@ export class GatewayConnection {
 			})
 			.catch(() => {});
 	}
+	async checkUpdates(): Promise<UpdateState> {
+		if (!this.#client) throw new Error("网关未连接");
+		return this.#client.application.check(null);
+	}
 	#scheduleReconnect(): void {
-		if (this.#disposed || this.#timer) return;
+		if (this.#disposed || this.#incompatible || this.#timer) return;
 		++this.#epoch;
 		this.#connected = false;
 		this.#dropView();
 		this.#options.events.onPhase("reconnecting");
+		this.#options.events.onUpdates?.(null);
 		const delay = Math.min((this.#options.retryBaseMs ?? 800) * ++this.#attempt, this.#options.retryMaxMs ?? 8000);
 		this.#timer = setTimeout(() => {
 			this.#timer = undefined;
@@ -388,7 +428,10 @@ export class GatewayConnection {
 				})
 				.catch((e) => {
 					this.#error(e);
-					this.#scheduleReconnect();
+					if (e instanceof ApplicationProtocolError) {
+						this.#options.events.onPhase("error");
+						void this.#teardown();
+					} else this.#scheduleReconnect();
 				});
 		}, delay);
 	}
