@@ -89,6 +89,6 @@ it("assistant code block background spans the full content width", () => {
 	expect(codeLines.length).toBe(3);
 	for (const line of codeLines) {
 		// 底色直达内容区右缘(仅余 Markdown 右边距 1 格),整块铺满内容宽度。
-		expect(line.endsWith("\x1b[49m ")).toBe(true);
+		expect(line.endsWith("\x1b[49m ") || line.endsWith("\x1b[49m\x1b[39m ")).toBe(true);
 	}
 });

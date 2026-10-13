@@ -1,5 +1,5 @@
 import { Box, Container, MouseRegion, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { theme } from "../theme/index.ts";
+import { getActiveThemeMode, theme } from "../theme/index.ts";
 
 /** 运行中工具的动画帧(braille);由 ToolSpinnerTicker 推进,无 ticker 时停在首帧。 */
 
@@ -70,6 +70,7 @@ function clipLines(text: string, maxLines: number): { visible: string; rest: num
  * 状态字形统一(design D6):`…` 待执行 / braille 动画 运行中 / `✓` 成功 / `✗` 失败。
  */
 export class ToolExecutionComponent extends Container {
+	#renderTheme = getActiveThemeMode();
 	#state: ToolCardState;
 	#expanded = false;
 	#box: Box;
@@ -83,6 +84,15 @@ export class ToolExecutionComponent extends Container {
 		this.#box.addChild(new MouseRegion(this.#text, (event: TuiMouseEvent) => this.#onClick(event)));
 		this.addChild(this.#box);
 		this.rebuild();
+	}
+
+	override render(width: number): string[] {
+		if (this.#renderTheme !== getActiveThemeMode()) {
+			this.#renderTheme = getActiveThemeMode();
+			this.rebuild();
+		}
+
+		return super.render(width);
 	}
 
 	get isRunning(): boolean {

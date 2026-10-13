@@ -1,5 +1,5 @@
 import { Container, Markdown, MouseRegion, Spacer, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { getMarkdownTheme, theme } from "../theme/index.ts";
+import { getActiveThemeMode, getMarkdownTheme, theme } from "../theme/index.ts";
 
 const THINKING_COLLAPSED_LABEL = "✧ Thinking… (click to expand)";
 
@@ -15,6 +15,7 @@ export type AssistantContent = {
  * note（中止/错误/截断提示）在内容后给出。
  */
 export class AssistantMessageComponent extends Container {
+	#renderTheme = getActiveThemeMode();
 	#lastContent: AssistantContent | undefined;
 	#isStreaming = false;
 	#thinkingExpanded = false;
@@ -27,6 +28,11 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	override render(width: number): string[] {
+		if (this.#renderTheme !== getActiveThemeMode()) {
+			this.#renderTheme = getActiveThemeMode();
+			this.#rebuild();
+		}
+
 		this.#renderWidth = width;
 		return super.render(width);
 	}

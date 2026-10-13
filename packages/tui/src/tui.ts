@@ -6,8 +6,7 @@ import {
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
-	Text,
-	TruncatedText,
+	type Text,
 	TuiAltScreen,
 } from "@earendil-works/pi-tui";
 import type {
@@ -29,10 +28,11 @@ import { HistoryImage, ImageTranscript } from "./components/history-image.ts";
 import { LoginPanel } from "./components/login.ts";
 import { formatNotice, type NoticeLevel } from "./components/notice.ts";
 import { PickerPanel } from "./components/picker.ts";
+import { ThemedText, ThemedTruncatedText } from "./components/themed-text.ts";
 import { type ToolCardState, ToolExecutionComponent, ToolSpinnerTicker } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { WelcomeScreen } from "./components/welcome.ts";
-import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
+import { detectColorFgBgMode, followTerminalTheme } from "./detect-theme.ts";
 import { fileCompletion } from "./file-completion.ts";
 import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
@@ -336,7 +336,7 @@ class NekoTuiApp {
 			if (this.#exitStarted) return;
 			const notice = versionNotice(this.#gateway.client.application.info.value ?? null, installed);
 			this.#versionNotice.clear();
-			if (notice) this.#versionNotice.addChild(new TruncatedText(formatNotice(notice, "info"), 1, 0));
+			if (notice) this.#versionNotice.addChild(new ThemedTruncatedText(() => formatNotice(notice, "info"), 1, 0));
 			this.#ui.requestRender();
 		};
 		this.#versionStop = this.#gateway.client.application.info.subscribe(() => void refreshVersion());
@@ -711,7 +711,7 @@ class NekoTuiApp {
 		const options: Array<{ value: ThemePreference; label: string; description: string }> = [
 			{ value: "auto", label: "Auto", description: "Follow the terminal background" },
 			{ value: "light", label: "Light · sakura-day", description: "Brand light theme" },
-			{ value: "dark", label: "Dark · sakura-night", description: "Brand dark theme" },
+			{ value: "dark", label: "Dark", description: "Cool dark theme" },
 		];
 		const ready = this.#panel.show(
 			"Theme",
@@ -798,7 +798,7 @@ class NekoTuiApp {
 			this.#ui.requestRender();
 		}, 5000);
 		this.#notices.clear();
-		this.#notices.addChild(new TruncatedText(formatNotice(text, level), 1, 0));
+		this.#notices.addChild(new ThemedTruncatedText(() => formatNotice(text, level), 1, 0));
 
 		this.#ui.requestRender();
 	}
@@ -962,7 +962,7 @@ class NekoTuiApp {
 			this.#items.set(item.key, { kind: "tool", component });
 			return;
 		}
-		const component = new Text(theme.dim(item.text), 1, 0);
+		const component = new ThemedText(item.text, theme.dim, 1, 0);
 		this.#imageTranscript.addItem(component);
 		this.#items.set(item.key, { kind: "system", component });
 	}
@@ -981,7 +981,7 @@ class NekoTuiApp {
 			return;
 		}
 		if (entry.kind === "system" && item.type === "system") {
-			entry.component.setText(theme.dim(item.text));
+			entry.component.setText(item.text);
 		}
 	}
 
@@ -1101,16 +1101,9 @@ class NekoTuiApp {
 	/** auto：首帧后异步查询终端背景（不阻塞启动），并跟随终端后续的主题变化通知。 */
 	#startThemeDetection(): void {
 		if (this.#themePreference !== "auto" || this.#terminalSchemeUnsubscribe !== undefined) return;
-		this.#ui.setTerminalColorSchemeNotifications(true);
-		this.#terminalSchemeUnsubscribe = this.#ui.onTerminalColorSchemeChange((scheme) => {
-			this.#applyThemeMode(scheme);
+		this.#terminalSchemeUnsubscribe = followTerminalTheme(this.#ui, (mode) => {
+			if (!this.#exitStarted && this.#themePreference === "auto") this.#applyThemeMode(mode);
 		});
-		void queryTerminalMode(this.#ui, (late) => {
-			this.#applyThemeMode(late);
-		}).then(
-			(mode) => this.#applyThemeMode(mode),
-			() => {},
-		);
 	}
 
 	#applyThemeMode(mode: ThemeMode): void {

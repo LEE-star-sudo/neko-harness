@@ -1,6 +1,6 @@
 /**
- * 品牌色板:与 Web(packages/web/src/client/styles.css)共享的 sakura/tianyi/ink
- * 色阶 hex 快照,以及明暗双主题的槽位配色表(design D1/D2)。组件不直接引用本文件,
+ * 主题色板:浅色与 Web(packages/web/src/client/styles.css)共享 sakura/tianyi/ink
+ * 色阶 hex 快照;深色独立使用冷灰蓝配色。组件不直接引用本文件,
  * 一律经 slots.ts 的语义槽位取色;调整配色只改这里。
  */
 
@@ -98,41 +98,41 @@ export type SlotStyle = {
 	readonly underline?: boolean;
 };
 
-/** 暗色 sakura-night(design D1 表;对比度验收后允许微调 hex,不动槽位结构)。 */
+/** Dark: Tokyo Night-derived colors, adjusted for readable TUI surfaces. See LICENSE. */
 export const DARK_PALETTE: Record<ThemeSlotName, SlotStyle> = {
-	panel: { bg: "#38313C" },
-	selection: { bg: "#523349", fg: "#FFFFFF", bold: true },
-	userBg: { bg: tianyi.s900 },
-	toolPendingBg: { bg: "#2C2733" },
-	toolSuccessBg: { bg: "#223128" },
-	toolErrorBg: { bg: "#382631" },
-	codeBg: { bg: "#222A38" },
-	accent: { fg: sakura.s300 },
-	model: { fg: tianyi.s300 },
-	muted: { fg: ink.s400 },
-	dim: { fg: ink.s500 },
-	thinking: { fg: "#93A1B5", italic: true },
-	ok: { fg: "#9DCB9A" },
-	warning: { fg: "#FFC79B" },
-	error: { fg: "#FF8FA3" },
-	userText: { fg: ink.s50 },
-	toolTitle: { fg: sakura.s200 },
-	toolOutput: { fg: ink.s400 },
-	codeFg: { fg: sakura.s200 },
-	border: { fg: ink.s600 },
-	borderMuted: { fg: ink.s700 },
-	diffAdded: { fg: "#9DCB9A" },
-	diffRemoved: { fg: "#FF8FA3" },
-	diffContext: { fg: ink.s500 },
-	syntaxComment: { fg: ink.s500, italic: true },
-	syntaxKeyword: { fg: sakura.s300, bold: true },
-	syntaxFunction: { fg: sakura.s200 },
-	syntaxVariable: { fg: ink.s100 },
-	syntaxString: { fg: tianyi.s200 },
-	syntaxNumber: { fg: tianyi.s300 },
-	syntaxType: { fg: tianyi.s300 },
-	syntaxOperator: { fg: ink.s300 },
-	syntaxPunctuation: { fg: ink.s400 },
+	panel: { bg: "#24283B", fg: "#C0CAF5" },
+	selection: { bg: "#343B58", fg: "#E1E7FF", bold: true },
+	userBg: { bg: "#292E42", fg: "#C0CAF5" },
+	toolPendingBg: { bg: "#222638", fg: "#C0CAF5" },
+	toolSuccessBg: { bg: "#232C32", fg: "#C0CAF5" },
+	toolErrorBg: { bg: "#302735", fg: "#C0CAF5" },
+	codeBg: { bg: "#1A1B26", fg: "#C0CAF5" },
+	accent: { fg: "#7AA2F7" },
+	model: { fg: "#7DCFFF" },
+	muted: { fg: "#A9B1D6" },
+	dim: { fg: "#9AA5CE" },
+	thinking: { fg: "#9AA5CE", italic: true },
+	ok: { fg: "#9ECE6A" },
+	warning: { fg: "#E0AF68" },
+	error: { fg: "#F7768E" },
+	userText: { fg: "#C0CAF5" },
+	toolTitle: { fg: "#7AA2F7" },
+	toolOutput: { fg: "#C0CAF5" },
+	codeFg: { fg: "#C0CAF5" },
+	border: { fg: "#737DA2" },
+	borderMuted: { fg: "#545E7C" },
+	diffAdded: { fg: "#9ECE6A" },
+	diffRemoved: { fg: "#F7768E" },
+	diffContext: { fg: "#9AA5CE" },
+	syntaxComment: { fg: "#8993B3", italic: true },
+	syntaxKeyword: { fg: "#BB9AF7", bold: true },
+	syntaxFunction: { fg: "#7AA2F7" },
+	syntaxVariable: { fg: "#C0CAF5" },
+	syntaxString: { fg: "#9ECE6A" },
+	syntaxNumber: { fg: "#FF9E64" },
+	syntaxType: { fg: "#7DCFFF" },
+	syntaxOperator: { fg: "#89DDFF" },
+	syntaxPunctuation: { fg: "#A9B1D6" },
 };
 
 /** 浅色 sakura-day(design D1 表;syntax 浅色档与 Web hljs 映射同色相,已实测 AA)。 */

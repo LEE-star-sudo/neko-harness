@@ -62,7 +62,10 @@ export function modeFromColors(colors: TerminalColors): ThemeMode | undefined {
  * 不应答的终端（含管道/CI）最多等待 `THEME_QUERY_TIMEOUT_MS`。
  * `onLateReply` 收到超时后才到的应答（如慢速链路），调用方可用它修正主题。
  */
-export async function queryTerminalMode(ui: TUI, onLateReply?: (mode: ThemeMode) => void): Promise<ThemeMode> {
+export async function queryTerminalMode(
+	ui: Pick<TUI, "queryTerminalColors">,
+	onLateReply?: (mode: ThemeMode) => void,
+): Promise<ThemeMode> {
 	let colors: TerminalColors;
 	try {
 		colors = await ui.queryTerminalColors({
@@ -76,4 +79,23 @@ export async function queryTerminalMode(ui: TUI, onLateReply?: (mode: ThemeMode)
 		colors = {};
 	}
 	return modeFromColors(colors) ?? detectColorFgBgMode() ?? "light";
+}
+
+/** Each subscription owns its replies. Stopping invalidates even pending/late queries. */
+export function followTerminalTheme(
+	ui: Pick<TUI, "queryTerminalColors" | "setTerminalColorSchemeNotifications" | "onTerminalColorSchemeChange">,
+	apply: (mode: ThemeMode) => void,
+): () => void {
+	let active = true;
+	const accept = (mode: ThemeMode) => {
+		if (active) apply(mode);
+	};
+	ui.setTerminalColorSchemeNotifications(true);
+	const unsubscribe = ui.onTerminalColorSchemeChange(accept);
+	void queryTerminalMode(ui, accept).then(accept, () => {});
+	return () => {
+		active = false;
+		unsubscribe();
+		ui.setTerminalColorSchemeNotifications(false);
+	};
 }

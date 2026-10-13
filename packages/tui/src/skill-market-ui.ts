@@ -6,7 +6,7 @@ import { ChordError } from "@earendil-works/chord";
 import { Markdown, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { NekoGatewayClient, NekoMarketSkill } from "@neko-harness/gateway";
 import type { PickerDetail, PickerItem, PickerPanel } from "./components/picker.ts";
-import { getMarkdownTheme, style, theme } from "./theme/index.ts";
+import { getActiveThemeMode, getMarkdownTheme, style, theme } from "./theme/index.ts";
 
 /** 键位提示：键名 accent 色、说明 dim 色，键位一眼可辨（验收反馈）。 */
 const hint = (...parts: readonly (readonly [string, string])[]): string =>
@@ -217,7 +217,8 @@ class SkillDetailView implements PickerDetail {
 }
 
 class SkillPreviewView implements PickerDetail {
-	#header: string[] | null = null;
+	#header: string | null = null;
+	#renderTheme = getActiveThemeMode();
 	#markdown: Markdown | null = null;
 	#error = "";
 	#offset = 0;
@@ -234,7 +235,7 @@ class SkillPreviewView implements PickerDetail {
 			.preview({ name })
 			.then((preview) => {
 				// SKILL.md 正文走 Markdown 渲染（标题/列表/代码块有样式），文件清单保持等宽。
-				this.#header = [`${theme.dim("files:")} ${preview.files.join("  ")}`, ""];
+				this.#header = preview.files.join("  ");
 				this.#markdown = new Markdown(preview.body, 0, 0, getMarkdownTheme());
 				this.#panel.changed();
 			})
@@ -254,7 +255,11 @@ class SkillPreviewView implements PickerDetail {
 	lines(width: number, height: number): readonly string[] {
 		if (this.#markdown === null || this.#header === null)
 			return [this.#error !== "" ? theme.error(`Error: ${this.#error}`) : theme.dim("Loading preview...")];
-		const flat = [...this.#header, ...this.#markdown.render(width)];
+		if (this.#renderTheme !== getActiveThemeMode()) {
+			this.#renderTheme = getActiveThemeMode();
+			this.#markdown.invalidate();
+		}
+		const flat = [`${theme.dim("files:")} ${this.#header}`, "", ...this.#markdown.render(width)];
 		const max = Math.max(0, flat.length - height);
 		this.#offset = Math.min(this.#offset, max);
 		return flat.slice(this.#offset, this.#offset + height);
