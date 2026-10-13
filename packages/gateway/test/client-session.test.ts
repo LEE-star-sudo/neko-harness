@@ -63,7 +63,8 @@ it("waits for delayed initial state and returns native handles through async bou
 		});
 		await Bun.sleep(10);
 		expect(ready).toBe(false);
-		expect(client.directory.state.value).toBeUndefined();
+		expect(client.application.info.value).toBeUndefined();
+		expect(() => client.directory).toThrow("Gateway protocol not checked");
 		link.flush();
 		await pending;
 		expect(client.directory.state.value?.sessions[0]?.id).toBe("1");
