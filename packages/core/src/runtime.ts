@@ -43,6 +43,7 @@ import {
 	InMemoryCredentialStore,
 } from "./credentials.ts";
 import { ImageDetails } from "./image-metadata.ts";
+import { addDefaultImagePrompt } from "./image-prompt.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
 import { expandSkillCommand } from "./prompt/invoke.ts";
@@ -499,6 +500,11 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 
 			const requestId = submitOptions?.requestId ?? crypto.randomUUID();
 			data.prompt = imagePrompt(content);
+			if (!duplicate) {
+				const input = addDefaultImagePrompt(content);
+				content = input.content;
+				if (input.defaultImagePrompt) data.defaultImagePrompt = input.defaultImagePrompt;
+			}
 			if (!duplicate && Array.isArray(content)) {
 				let index = 0;
 				for (const [contentIndex, block] of content.entries()) {

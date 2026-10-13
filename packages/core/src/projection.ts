@@ -2,8 +2,9 @@ import type { AssistantMessage, ModelThinkingLevel, Usage, UserMessage } from "@
 import type { ConversationView, LiveState, ToolDiagnostic, ToolSlot, UsageState } from "@earendil-works/pi-durable";
 import type { CompactionRecord } from "./compaction.ts";
 import type { ImageMetadata } from "./image-metadata.ts";
+import { type DefaultImagePrompt, savedDefaultImagePrompt } from "./image-prompt.ts";
 import type { ImageInfo } from "./images.ts";
-import type { InputData } from "./input.ts";
+import { type InputData, NekoInput } from "./input.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import type { SkillInvocation } from "./skill-invocation.ts";
 import { savedWorkspace } from "./workspace.ts";
@@ -58,7 +59,15 @@ export type ChatView = {
 /** 已提交条目投影；`key` 是稳定的 React key。 */
 export type ChatImage = ImageInfo & { entryId: number; contentIndex: number };
 export type ChatItem =
-	| { type: "user"; key: string; id: number; text: string; images?: ChatImage[]; skill?: SkillInvocation }
+	| {
+			type: "user";
+			key: string;
+			id: number;
+			text: string;
+			images?: ChatImage[];
+			skill?: SkillInvocation;
+			defaultImagePrompt?: DefaultImagePrompt;
+	  }
 	| {
 			type: "assistant";
 			key: string;
@@ -293,11 +302,19 @@ export function projectChatView(
 	for (const entry of view.entries) {
 		const message = entry.model?.[0];
 		if (message?.role === "user") {
+			const defaultImagePrompt =
+				entry.kind === NekoInput.kind
+					? savedDefaultImagePrompt(message.content, (entry.data as InputData | undefined)?.defaultImagePrompt)
+					: undefined;
 			items.push({
 				type: "user",
 				key: `e${entry.id}`,
 				id: entry.id,
-				text: userText(message.content),
+				text:
+					defaultImagePrompt && Array.isArray(message.content)
+						? userText(message.content.slice(1))
+						: userText(message.content),
+				...(defaultImagePrompt ? { defaultImagePrompt } : {}),
 				images: imageDescriptors(entry.id, message.content, (entry.data as InputData | undefined)?.images),
 				...((entry.data as InputData | undefined)?.skill ? { skill: (entry.data as InputData).skill! } : {}),
 			});

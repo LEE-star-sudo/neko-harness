@@ -1,4 +1,4 @@
-import type { ChatItem, ChatView, StreamingView } from "@neko-harness/core";
+import type { ChatItem, ChatView, DefaultImagePrompt, StreamingView } from "@neko-harness/core";
 import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
 import { useEffect, useRef, useState } from "react";
 import { ImageGallery } from "./image-gallery";
@@ -40,10 +40,12 @@ function UserRow({
 	text,
 	images,
 	skill: invocation,
+	defaultImagePrompt,
 }: {
 	text: string;
 	images?: import("@neko-harness/core").ChatImage[];
 	skill?: SkillInvocation;
+	defaultImagePrompt?: DefaultImagePrompt;
 }) {
 	// /skill: 展开块渲染为折叠卡片；参数仍以用户气泡显示，未命中时原样渲染。
 	if (invocation !== undefined) {
@@ -60,8 +62,18 @@ function UserRow({
 	}
 	return (
 		<div className="chat-row anim-user flex justify-end">
-			<div className="bubble-user chat-bubble px-4 py-2.5 whitespace-pre-wrap">
+			<div
+				className={`bubble-user chat-bubble px-4 py-2.5 whitespace-pre-wrap${defaultImagePrompt ? " [&>div]:mt-0" : ""}`}
+			>
 				{text}
+				{defaultImagePrompt && (
+					<details className="min-w-0 text-sm">
+						<summary className="cursor-pointer min-h-8 py-1 text-ink-500 focus-visible:outline-2 focus-visible:outline-sakura-500">
+							默认图片提示
+						</summary>
+						<p className="pt-2 whitespace-pre-wrap break-words">{defaultImagePrompt.text}</p>
+					</details>
+				)}
 				{images && <ImageGallery images={images} />}
 			</div>
 		</div>
@@ -195,7 +207,15 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 					{items.map((item) => {
 						switch (item.type) {
 							case "user":
-								return <UserRow key={item.key} text={item.text} images={item.images} skill={item.skill} />;
+								return (
+									<UserRow
+										key={item.key}
+										text={item.text}
+										images={item.images}
+										skill={item.skill}
+										defaultImagePrompt={item.defaultImagePrompt}
+									/>
+								);
 							case "assistant":
 								return <AssistantRow key={item.key} item={item} />;
 							case "tool":

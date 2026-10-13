@@ -7,6 +7,7 @@ import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { downloadImage, uploadImage } from "@neko-harness/core/image-transfer";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { DEFAULT_IMAGE_PROMPT } from "../../core/src/image-prompt.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { IS_WINDOWS, testAddress, testSocketPath, waitFor } from "./helpers.ts";
 
@@ -51,6 +52,22 @@ it.skipIf(IS_WINDOWS)(
 			const item = bc.view.value!.items.find((i) => i.type === "user")!;
 			if (item.type !== "user") throw new Error("missing user");
 			expect(item.images![0]!.name).toBe("blue.png");
+			expect(item.defaultImagePrompt).toEqual(DEFAULT_IMAGE_PROMPT);
+			expect(item.text).toBe("");
+			expect(ac.view.value?.items.find((i) => i.type === "user")).toEqual(item);
+			const reconnected = await connectNekoGateway({
+				transport: "ws",
+				url: gateway.wsUrl!,
+				serverId: gateway.serverId,
+			});
+			try {
+				const restored = await reconnected.attach(id);
+				expect(restored.view.value?.items.find((i) => i.type === "user")?.defaultImagePrompt).toEqual(
+					DEFAULT_IMAGE_PROMPT,
+				);
+			} finally {
+				await reconnected.close();
+			}
 			expect(JSON.stringify(bc.view.value)).not.toContain(bytes.toString("base64"));
 			const image = item.images![0]!;
 			const downloaded = await downloadImage((offset) =>
@@ -64,6 +81,9 @@ it.skipIf(IS_WINDOWS)(
 			await expect(bc.getImage({ entryId: 999999, contentIndex: 0, offset: 0 })).rejects.toThrow();
 			const fork = await gateway.runtime.forkConversation(gateway.runtime.root.id);
 			const forkChat = await b.attach(String(fork.id));
+			expect(forkChat.view.value?.items.find((i) => i.type === "user")?.defaultImagePrompt).toEqual(
+				DEFAULT_IMAGE_PROMPT,
+			);
 			expect(
 				(
 					await downloadImage((offset) =>

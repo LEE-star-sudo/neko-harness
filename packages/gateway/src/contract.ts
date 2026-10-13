@@ -111,6 +111,7 @@ export const ChatViewSchema = Type.Object({
 				text: str,
 				images: Type.Optional(Type.Array(image)),
 				skill: Type.Optional(skill),
+				defaultImagePrompt: Type.Optional(Type.Object({ version: Type.Integer({ minimum: 1 }), text: str })),
 			}),
 			Type.Object({
 				type: Type.Literal("assistant"),

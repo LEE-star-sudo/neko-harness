@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { DEFAULT_IMAGE_PROMPT } from "../src/image-prompt.ts";
 import { createNekoRuntime, projectChatView } from "../src/index.ts";
 import { SessionMetadataDoc } from "../src/session-metadata.ts";
 
@@ -48,6 +49,8 @@ it("persists image-only input, preserves content order, forks and reopens withou
 			const history = await session.conversation.entries({ order: "ascending" }, 100, undefined, runtime.context);
 			const users = history.items.filter((e) => e.model?.[0]?.role === "user");
 			expect(users).toHaveLength(2);
+			expect(users[0]!.model![0]!.content).toEqual([{ type: "text", text: DEFAULT_IMAGE_PROMPT.text }, image]);
+			expect((users[0]!.data as { defaultImagePrompt: unknown }).defaultImagePrompt).toEqual(DEFAULT_IMAGE_PROMPT);
 			expect(users[1]!.model![0]!.content).toEqual([
 				{ type: "text", text: "before" },
 				image,
@@ -176,6 +179,11 @@ it("keeps distinct filenames for identical image bytes and queued messages", asy
 			"first.png",
 			"second.png",
 		]);
+		for (const item of projected.items.filter((i) => i.type === "user")) {
+			expect(item.defaultImagePrompt).toEqual(DEFAULT_IMAGE_PROMPT);
+			expect(item.images?.[0]?.contentIndex).toBe(1);
+			expect(item.text).toBe("");
+		}
 	} finally {
 		release();
 		await runtime.close();

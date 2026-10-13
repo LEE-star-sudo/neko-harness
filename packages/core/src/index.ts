@@ -22,7 +22,7 @@ export {
 	FileCredentialStore,
 	InMemoryCredentialStore,
 } from "./credentials.ts";
-
+export type { DefaultImagePrompt } from "./image-prompt.ts";
 export { decodeImage, IMAGE_LIMITS, type ImageInfo, prepareImage, terminalImage } from "./images.ts";
 export {
 	type ChatImage,

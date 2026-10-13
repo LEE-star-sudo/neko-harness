@@ -903,7 +903,7 @@ class NekoTuiApp {
 
 	#appendItem(item: ChatItem): void {
 		if (item.type === "user") {
-			const component = new UserMessageComponent(item.text, item.skill);
+			const component = new UserMessageComponent(item.text, item.skill, item.defaultImagePrompt);
 			this.#imageTranscript.addItem(component);
 			this.#items.set(item.key, { kind: "user", component });
 			return;
