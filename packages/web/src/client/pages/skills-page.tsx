@@ -1,9 +1,9 @@
 import { ChordError } from "@earendil-works/chord";
+import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Markdown } from "../components/markdown";
 import { Icon } from "../components/primitives";
-import { SettingsShell } from "../components/settings-shell";
 import { appActions } from "../lib/bootstrap";
 import type { NekoMarketSkill } from "../lib/contract";
 import { useNekoState } from "../lib/store";
@@ -414,11 +414,18 @@ export function SkillsPage() {
 	const groups = useMemo(() => groupSkills(filtered, groupBy), [filtered, groupBy]);
 
 	return (
-		<SettingsShell active="market">
-			<div className="mx-auto w-full max-w-5xl px-5 pt-5 pb-2">
-				<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-					<h1 className="text-xl font-bold text-ink-900">技能市场</h1>
-					<div className="ml-auto flex flex-wrap items-center gap-2">
+		<div className="flex min-h-dvh flex-col bg-base">
+			<header className="sticky top-0 z-10 border-b border-sakura-100 bg-surface/90 px-4 py-3 backdrop-blur-md sm:px-6">
+				<div className="mx-auto flex w-full max-w-7xl flex-wrap items-center gap-3">
+					<Link
+						to="/"
+						className="focus-neko inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-sakura-700 hover:bg-sakura-50"
+					>
+						← 返回聊天
+					</Link>
+					<span className="text-ink-300">/</span>
+					<h1 className="text-base font-bold text-ink-900 sm:text-lg">技能市场</h1>
+					<div className="ml-auto flex flex-wrap items-center gap-2 sm:gap-3">
 						<div className="flex rounded-full border border-sakura-200 p-0.5 text-xs">
 							{(["category", "source"] as const).map((key) => (
 								<button
@@ -426,7 +433,7 @@ export function SkillsPage() {
 									type="button"
 									onClick={() => setGroupBy(key)}
 									className={`focus-neko rounded-full px-3 py-1 ${
-										groupBy === key ? "bg-sakura-100 font-semibold text-sakura-800" : "text-ink-500"
+										groupBy === key ? "bg-sakura-100 font-semibold text-sakura-800" : "text-ink-500 hover:text-ink-800"
 									}`}
 								>
 									{key === "category" ? "按分类" : "按来源"}
@@ -442,14 +449,15 @@ export function SkillsPage() {
 								value={query}
 								onChange={(event) => setQuery(event.target.value)}
 								placeholder="搜索技能…"
-								className="focus-neko w-44 rounded-full border border-sakura-200 bg-surface py-1.5 pl-8 pr-3 text-sm"
+								className="focus-neko w-36 rounded-full border border-sakura-200 bg-surface py-1.5 pl-8 pr-3 text-sm sm:w-56"
 							/>
 						</label>
+						<span className="text-xs text-ink-400">{phase === "ready" ? "已连接" : "连接中…"}</span>
 					</div>
 				</div>
-			</div>
+			</header>
 
-			<main className="mx-auto w-full max-w-5xl flex-1 px-5 pb-6">
+			<main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
 				{loading && (
 					<p className="py-16 text-center text-sm text-ink-500">
 						{phase === "ready" ? "加载市场目录…" : "等待网关连接…"}
@@ -480,7 +488,7 @@ export function SkillsPage() {
 							{group}
 							<span className="text-xs font-normal text-ink-400">{items.length}</span>
 						</h2>
-						<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+						<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
 							{items.map((skill) => (
 								<button
 									key={skill.name}
@@ -506,6 +514,6 @@ export function SkillsPage() {
 			</main>
 
 			{selected !== null && <SkillDrawer name={selected} onClose={() => setSelected(null)} onChanged={() => load()} />}
-		</SettingsShell>
+		</div>
 	);
 }

@@ -115,16 +115,15 @@ export function SettingsPage() {
 	const ready = phase === "ready" && credentials !== null;
 	return (
 		<SettingsShell active="credentials">
-			{/* 版式节奏对齐市场页：同款容器与标题行（标题居左、状态居右），卡片列限宽保持表单可读性。 */}
-			<div className="mx-auto w-full max-w-5xl px-5 pt-5 pb-2">
+			<div className="mx-auto w-full max-w-4xl px-5 pt-6 pb-3">
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
 					<h1 className="text-xl font-bold text-ink-900">密钥</h1>
 					<span className="ml-auto text-xs text-ink-500">{phase === "ready" ? "已连接" : "连接中…"}</span>
 				</div>
 				<p className="mt-1 text-sm text-ink-500">管理 API Key，保存值优先于环境变量，所有工作区共用。</p>
 			</div>
-			<main className="mx-auto w-full max-w-5xl px-5 pb-6">
-				<div className="flex max-w-2xl flex-col gap-4">
+			<main className="mx-auto w-full max-w-4xl px-5 pb-8">
+				<div className="flex flex-col gap-4">
 					{CREDENTIAL_PROVIDERS.map((spec) => (
 						<ProviderCredentialCard key={spec.id} spec={spec} status={credentials?.statuses[spec.id]} ready={ready} />
 					))}

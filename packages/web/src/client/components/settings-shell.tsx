@@ -2,16 +2,15 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Icon } from "./primitives";
 
-export type SettingsSection = "credentials" | "market" | "about";
+export type SettingsSection = "credentials" | "about";
 
-const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "store"; to: string }[] = [
+const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "info"; to: string }[] = [
 	{ key: "credentials", label: "密钥", icon: "key", to: "/settings" },
-	{ key: "market", label: "技能市场", icon: "store", to: "/skills" },
-	{ key: "about", label: "关于与更新", icon: "store", to: "/about" },
+	{ key: "about", label: "关于与更新", icon: "info", to: "/about" },
 ];
 
 /**
- * 设置区统一外壳：左侧栏菜单（密钥 / 技能市场，未来可加项）+ 右侧内容。
+ * 设置区统一外壳：左侧栏菜单（密钥 / 关于与更新，未来可扩展通用偏好）+ 右侧内容。
  * 移动端侧栏转为顶部横排，菜单项保持可点。
  */
 export function SettingsShell({ active, children }: { active: SettingsSection; children: ReactNode }) {

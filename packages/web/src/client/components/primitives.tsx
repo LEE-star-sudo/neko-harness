@@ -25,6 +25,7 @@ export function Icon({
 		| "spinner"
 		| "sparkles"
 		| "store"
+		| "info"
 		| "key"
 		| "download"
 		| "trash"
@@ -50,6 +51,7 @@ export function Icon({
 		clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 7v5l3 2",
 		spinner: "M21 12a9 9 0 1 1-9-9",
 		store: "M4 9.5 5.6 4.5h12.8L20 9.5M4 9.5V20h16V9.5M4 9.5h16M9.5 20v-5.5h5V20",
+		info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 12v4M12 8h.01",
 		key: "M12.7 11.3 21 3m-4.2 1.8 3 3M8 19a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
 		download: "M12 4v10m0 0-4-4m4 4 4-4M5 20h14",
 		trash: "M4.5 7h15M9.5 7V4.5h5V7m-7.5 0 .8 13h8.4l.8-13",

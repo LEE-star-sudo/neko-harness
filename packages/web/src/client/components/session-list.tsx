@@ -125,7 +125,23 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 				<span className="path-text" title={state.workspaceRoot}>
 					{state.workspaceRoot}
 				</span>
-				<Link to="/settings" className="chrome-row">
+				<Link
+					to="/skills"
+					className="chrome-row"
+					onClick={() => {
+						if (mobile) onClose();
+					}}
+				>
+					<Icon name="store" />
+					技能市场
+				</Link>
+				<Link
+					to="/settings"
+					className="chrome-row"
+					onClick={() => {
+						if (mobile) onClose();
+					}}
+				>
 					<Icon name="settings" />
 					设置
 				</Link>
