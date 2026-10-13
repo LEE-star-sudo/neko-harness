@@ -1,6 +1,6 @@
 import type { NekoModelRef } from "@neko-harness/core";
 
-export const GATEWAY_USAGE = `用法: main.ts [选项]
+export const GATEWAY_USAGE = `用法: neko serve [选项]
 
 选项:
   --host <ip>          WebSocket 监听地址（默认 127.0.0.1，仅本机）

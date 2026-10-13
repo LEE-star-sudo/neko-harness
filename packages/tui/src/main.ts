@@ -2,19 +2,19 @@
 import type { ThemePreference } from "./theme/index.ts";
 import { runTui } from "./tui.ts";
 
-const USAGE = `Usage: neko tui [options]
+const USAGE = `用法: neko tui [选项]
 
-Options:
-  --cwd <dir>          Workspace (default: launch directory; not an access sandbox)
-  --model <ref>        provider/modelId for a spawned gateway
-  --storage <path>     SQLite storage (default: ~/.neko/neko.sqlite)
-  --socket-path <path> Gateway Unix socket（POSIX；Windows 经端口文件发现 ws 地址）
-  --theme <mode>       light / dark / auto (overrides NEKO_THEME)
-  -h, --help           Show help
+选项:
+  --cwd <dir>          工作目录（默认启动目录；非访问沙箱）
+  --model <ref>        模型，格式 provider/modelId（用于拉起的网关）
+  --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
+  --socket-path <path> 网关 Unix socket 路径（仅 POSIX；Windows 经端口文件发现 ws 地址）
+  --theme <mode>       主题 light / dark / auto（覆盖 NEKO_THEME）
+  -h, --help           显示此帮助
 
-Resumes the most recently used session in this workspace, or creates one.
-A gateway is started when needed and stopped when its owning TUI exits.
-Configure DeepSeek with /login or DEEPSEEK_API_KEY.`;
+恢复当前工作目录最近使用的会话，不存在则创建。
+按需拉起网关，属主 TUI 退出时随之停止。
+可用 /login 或 DEEPSEEK_API_KEY 配置凭据。`;
 
 type CliOptions = {
 	cwd?: string;

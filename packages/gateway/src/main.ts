@@ -18,7 +18,7 @@ const gateway = await startGateway({
 console.log(`neko gateway 已启动（serverId: ${gateway.serverId}）`);
 if (gateway.socketPath !== undefined) console.log(`  Unix socket: ${gateway.socketPath}`);
 if (gateway.wsUrl !== undefined) console.log(`  WebSocket:   ${gateway.wsUrl}`);
-console.log("Ctrl-C 停止。");
+console.log("按 Ctrl+C 停止。");
 
 let stopping = false;
 const stop = (): void => {

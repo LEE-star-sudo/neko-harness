@@ -2,15 +2,19 @@
 
 import { RUNNING_VERSION } from "@neko-harness/core/application-version";
 
-const USAGE = `用法: neko <command> [options]
+const USAGE = `用法: neko <命令> [选项]
 
 命令:
-  tui     启动终端交互界面（自动拉起 gateway）
-  web     启动 Web UI 静态托管（自动拉起 gateway）
+  tui     启动终端交互界面（自动拉起网关）
+  web     启动 Web UI 静态托管（自动拉起网关）
+  serve   仅启动网关（WebSocket；POSIX 另有 Unix socket）
   update  升级当前 Bun 全局安装（Windows 显示手动升级命令）
-  serve   仅启动 gateway（WebSocket；POSIX 另有 Unix socket）
 
-各命令的选项透传，详见 neko <command> --help。
+选项:
+  -v, --version  显示版本号
+  -h, --help     显示此帮助
+
+各命令的选项详见 neko <命令> --help。
 可通过 TUI /login、Web 设置页或 DEEPSEEK_API_KEY / TAVILY_API_KEY 配置凭据。`;
 
 const [command, ...rest] = process.argv.slice(2);
@@ -20,7 +24,7 @@ switch (command) {
 		if (rest.length) {
 			if (rest.length === 1 && (rest[0] === "--help" || rest[0] === "-h"))
 				console.log(
-					"用法: neko update\n升级当前 Bun 全局安装；完成后重新启动 neko。\nWindows：先退出 neko，再运行 bun add --global neko-harness@latest。\n  -h, --help 显示帮助",
+					"用法: neko update\n\n升级当前 Bun 全局安装；完成后重新启动 neko。\nWindows：先退出 neko，再运行 bun add --global neko-harness@latest。\n\n选项:\n  -h, --help  显示此帮助",
 				);
 			else {
 				console.error("用法: neko update");
