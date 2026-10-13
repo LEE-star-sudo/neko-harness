@@ -1,11 +1,12 @@
 import { basename } from "node:path";
-import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, type TuiMouseEvent, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { formatTokens } from "../format.ts";
 import { labels } from "../labels.ts";
 import { theme } from "../theme/index.ts";
 
 export type FooterStats = {
 	readonly contextUsage?: { tokens: number | null; window: number; percent: number | null };
+	readonly subagentCount?: number;
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;
@@ -24,11 +25,24 @@ type StatusTone = "ok" | "accent" | "warning" | "error";
  */
 export class StatusFooter implements Component {
 	panelOpen = false;
+	onOpenAgents?: () => void;
 	#stats: FooterStats | undefined;
 	setStats(stats: FooterStats): void {
 		this.#stats = stats;
 	}
 	invalidate(): void {}
+	handleMouse(event: TuiMouseEvent) {
+		if (
+			!this.#stats?.subagentCount ||
+			this.panelOpen ||
+			event.y !== 1 ||
+			event.type !== "click" ||
+			event.button !== "left"
+		)
+			return;
+		this.onOpenAgents?.();
+		return { handled: true };
+	}
 
 	#tone(): StatusTone {
 		const s = this.#stats;
@@ -83,38 +97,37 @@ export class StatusFooter implements Component {
 		const first = ` ${left}${" ".repeat(gap)}${statusStyled}`;
 
 		// —— 副行:度量 + 键位(候选逐级退化)——
+		const agentHint = s.subagentCount ? (this.panelOpen ? "" : `→ Agents ${s.subagentCount}`) : "";
 		const hints = this.panelOpen
-			? labels.close
+			? ""
 			: s.canAbort && !s.busy
-				? "Esc: stop compaction"
+				? "Esc Stop"
 				: s.busy
 					? labels.busyHints
 					: labels.idleHints;
-		const compactHints = s.canAbort && !s.busy ? "Esc: stop" : s.busy ? labels.busyCompact : labels.idleCompact;
+		const compactHints = s.canAbort && !s.busy ? "Esc Stop" : s.busy ? labels.busyCompact : labels.idleCompact;
 		const context = s.contextUsage;
 		const contextText =
 			context && context.window > 0
 				? `Ctx ${context.percent === null ? "?" : `${context.percent.toFixed(1)}%`}/${formatTokens(context.window)}`
 				: "";
 		const usage = [contextText, s.usageText].filter(Boolean).join(" · ");
-		const cache = s.usageText.match(/Cache: \S+/)?.[0] ?? "";
-		const essentials = [contextText, cache].filter(Boolean).join(" · ");
+		const cost = s.usageText.match(/\$[\d.]+/)?.[0] ?? "";
+		const essentials = [contextText, cost].filter(Boolean).join(" · ");
 		const shortContext = contextText.split("/")[0] ?? "";
-		const shortEssentials = [shortContext, cache].filter(Boolean).join(" · ");
-		const minimalHints = this.panelOpen ? labels.close : s.canAbort || s.busy ? "Esc Stop" : "/ Cmds";
-		const joinHints = (metric: string, hint: string) => (metric ? `${metric} · ${hint}` : hint);
+		const shortEssentials = [shortContext, cost].filter(Boolean).join(" · ");
+		const minimalHints = this.panelOpen ? "" : s.canAbort || s.busy ? "Esc Stop" : "/help Keys";
+		const joinHints = (metric: string, hint: string) => [metric, agentHint, hint].filter(Boolean).join(" · ");
 		const candidates = this.panelOpen
-			? [joinHints(essentials, hints), joinHints(shortEssentials, hints), hints]
+			? [joinHints(essentials, hints), joinHints(shortEssentials, hints), joinHints("", hints)]
 			: [
-					joinHints(usage, hints),
 					joinHints(usage, compactHints),
-					joinHints(usage, minimalHints),
 					joinHints(essentials, compactHints),
 					joinHints(essentials, minimalHints),
 					joinHints(shortEssentials, minimalHints),
-					minimalHints,
+					joinHints("", minimalHints),
 				];
-		const second = candidates.find((line) => visibleWidth(line) <= space) ?? minimalHints;
+		const second = candidates.find((line) => visibleWidth(line) <= space) ?? (agentHint || minimalHints);
 		// Ctx 占比阈值配色:>90% error、>75% warning,否则随副行弱化。
 		// 分段着色,而非 dim 包裹后字符串替换(SGR [39m 会截断外层的 dim)。
 		const shownContext = second.includes(contextText) ? contextText : shortContext;

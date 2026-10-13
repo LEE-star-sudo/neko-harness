@@ -9,6 +9,11 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
 		},
+		"./transcript-items": {
+			"neko-source": "./src/transcript-items.ts",
+			"types": "./dist/transcript-items.d.ts",
+			"import": "./dist/transcript-items.js"
+		},
 		"./session-display": {
 			"neko-source": "./src/session-display.ts",
 			"types": "./dist/session-display.d.ts",

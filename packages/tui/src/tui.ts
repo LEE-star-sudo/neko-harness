@@ -36,10 +36,12 @@ import { detectColorFgBgMode, followTerminalTheme } from "./detect-theme.ts";
 import { fileCompletion } from "./file-completion.ts";
 import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
+import { HelpDetail } from "./help-ui.ts";
 import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
 import { openSkillMarket } from "./skill-market-ui.ts";
+import { SubagentDetail, subagentItems } from "./subagents-ui.ts";
 import {
 	getActiveThemeMode,
 	getEditorTheme,
@@ -111,6 +113,8 @@ class NekoTuiApp {
 	readonly #toolSpinner = new ToolSpinnerTicker(() => this.#onToolSpinnerTick());
 
 	#chat: NekoChat | undefined;
+	#agentsPanel = false;
+	#agentDetails = new Map<number, SubagentDetail>();
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
 	#directoryUnsubscribe: (() => void) | undefined;
@@ -148,17 +152,30 @@ class NekoTuiApp {
 		// 首帧前的临时主题：auto 先用 COLORFGBG（无则浅色），OSC 11 应答后再修正。
 		setActiveTheme(themePreference === "auto" ? (detectColorFgBgMode() ?? "light") : themePreference);
 		this.#ui = new TuiAltScreen(this.#terminal);
+		this.#footer.onOpenAgents = () => this.#showAgents();
 		this.#busyLoader = new Loader(this.#ui, theme.accent, theme.muted);
 		this.#editor = new BoundedEditor(this.#ui, getEditorTheme(), { paddingX: 1, autocompleteMaxVisible: 3 });
 		this.#panel = new PickerPanel(
 			() => this.#ui.requestRender(),
 			() => {
 				this.#thinkingModel = undefined;
+				this.#agentsPanel = false;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
 				this.#ui.setFocus(this.#editor);
 			},
 		);
+		// Pi consumes viewport paging before focused-component keys; route its public
+		// scrolling entry point to the visible detail (agents, skill previews or help).
+		const scrollMain = this.#ui.scrollBy.bind(this.#ui);
+		this.#ui.scrollBy = (lines) => {
+			if (this.#panel.open) {
+				// The hidden main ScrollView has no viewport; use the visible panel's page.
+				this.#panel.scrollDetail(Math.sign(lines) * Math.max(1, this.#panel.height - 3));
+				return;
+			}
+			scrollMain(lines);
+		};
 		this.#login = new LoginPanel({
 			changed: () => this.#ui.requestRender(),
 			closed: () => this.#ui.setFocus(this.#editor),
@@ -235,6 +252,15 @@ class NekoTuiApp {
 				return undefined;
 			}
 			if (this.#sessionOperation) return { consume: true };
+			if (
+				matchesKey(data, "right") &&
+				this.#lastView?.subagents?.length &&
+				this.#editor.getText() === "" &&
+				!this.#editor.isShowingAutocomplete()
+			) {
+				this.#showAgents();
+				return { consume: true };
+			}
 			if (matchesKey(data, process.platform === "win32" ? "alt+v" : "ctrl+v")) {
 				if (isClipboardShortcut(data)) void this.pasteClipboard();
 				return { consume: true };
@@ -315,6 +341,7 @@ class NekoTuiApp {
 						const active = this.#login.open ? this.#login : this.#panel;
 						return active.render(width);
 					},
+					handleMouse: (event) => (this.#login.open ? undefined : this.#panel.handleMouse(event)),
 					invalidate: () => {},
 				},
 				editor: this.#editor,
@@ -372,6 +399,22 @@ class NekoTuiApp {
 	submit(text: string): void {
 		const trimmed = text.trim();
 		if (trimmed === "") return;
+		if (trimmed === "/help") {
+			if (!this.#panel.open && !this.#login.open) {
+				void this.#panel.show(
+					"Help",
+					async () => [],
+					async () => {},
+				);
+				this.#panel.showDetail(new HelpDetail());
+				this.#ui.setFocus(this.#panel);
+			}
+			return;
+		}
+		if (trimmed === "/agents") {
+			this.#showAgents();
+			return;
+		}
 		const instructions = compactInstructions(trimmed);
 		if (instructions !== null) {
 			const chat = this.#chat;
@@ -571,6 +614,7 @@ class NekoTuiApp {
 	exit(): void {
 		if (this.#exitStarted) return;
 		this.#exitStarted = true;
+		for (const detail of this.#agentDetails.values()) detail.close();
 		this.#resolveExit();
 	}
 
@@ -581,6 +625,8 @@ class NekoTuiApp {
 		if (this.#sessionId) this.#texts.set(this.#sessionId, this.#editor.getText());
 		this.#viewUnsubscribe?.();
 		this.#viewUnsubscribe = undefined;
+		for (const detail of this.#agentDetails.values()) detail.close();
+		this.#agentDetails.clear();
 		const handle = await this.#gateway.client.attach(id);
 		this.#chat = handle;
 		this.#sessionId = id;
@@ -780,6 +826,28 @@ class NekoTuiApp {
 		}
 	}
 
+	#showAgents(taskId?: number): void {
+		if (this.#panel.open || this.#login.open) return;
+		this.#agentsPanel = true;
+		this.#panel.pointerSelection = true;
+		this.#panel.agentNavigation = true;
+		void this.#panel.show(
+			"Agents",
+			async () => subagentItems(this.#lastView?.subagents ?? []),
+			async (value) => this.#agentDetail(Number(value)),
+		);
+		this.#ui.setFocus(this.#panel);
+		if (taskId !== undefined) this.#panel.showDetail(this.#agentDetail(taskId));
+	}
+	#agentDetail(taskId: number) {
+		let detail = this.#agentDetails.get(taskId);
+		if (!detail) {
+			detail = new SubagentDetail(this.#gateway.client, taskId, this.#panel, () => this.#ui.requestRender());
+			this.#agentDetails.set(taskId, detail);
+		}
+		detail.entry = this.#lastView?.subagents?.find((entry) => entry.taskId === taskId);
+		return detail.open();
+	}
 	#closeOverlay(): void {
 		if (this.#panel.open) this.#panel.close();
 		if (this.#login.open) this.#login.close();
@@ -823,6 +891,11 @@ class NekoTuiApp {
 
 	applyView(view: ChatView): void {
 		this.#lastView = view;
+		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? []));
+		for (const entry of view.subagents ?? []) {
+			const detail = this.#agentDetails.get(entry.taskId);
+			if (detail) detail.entry = entry;
+		}
 		const imageModel = `${this.#sessionId}:${view.agent.model?.provider}/${view.agent.model?.modelId}`;
 		if (
 			this.#imageWarningModel !== imageModel &&
@@ -865,6 +938,10 @@ class NekoTuiApp {
 			this.addNotice("Model changed. Open /think to choose its supported levels.");
 		}
 		this.#syncItems(view);
+		for (const child of view.subagents ?? []) {
+			const card = this.#toolCards.get(child.callId);
+			if (card) card.onOpen = () => this.#showAgents(child.taskId);
+		}
 		this.#syncStreaming(view.streaming);
 		this.#syncBusy(view);
 		this.#syncFooter(view);
@@ -1019,7 +1096,10 @@ class NekoTuiApp {
 	}
 
 	#syncBusy(view: ChatView): void {
-		this.#busyText = view.busy ? (view.status ?? "Thinking...") : undefined;
+		const active =
+			view.subagents?.filter((d) => d.historyThrough === undefined && (d.status === "running" || d.status === "queued"))
+				.length ?? 0;
+		this.#busyText = active ? `Agents ${active} running` : view.busy ? (view.status ?? "Thinking...") : undefined;
 		if (this.#busyText !== undefined) {
 			this.#busyLoader.setMessage(this.#busyText);
 			this.#busyLoader.start();
@@ -1052,7 +1132,9 @@ class NekoTuiApp {
 	}
 
 	#syncFooter(view: ChatView): void {
+		const usage = view.taskUsage ?? view.usage;
 		this.#footer.setStats({
+			subagentCount: view.subagents?.length ?? 0,
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,
 			busy: this.#busyText,
@@ -1078,7 +1160,7 @@ class NekoTuiApp {
 							}[view.compaction.latest.phase]
 						: undefined,
 			contextUsage: view.contextUsage,
-			usageText: usageText(view.usage.input, view.usage.output, view.usage.cacheRead, view.usage.cost),
+			usageText: usageText(usage.input, usage.output, usage.cacheRead, usage.cost),
 			cwd: view.cwd,
 		});
 	}

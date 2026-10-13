@@ -18,7 +18,10 @@ afterEach(() => {
 });
 
 const input = (cwd: string, tools: string[]): PromptInput =>
-	({ agent: { cwd, tools: tools.map((name) => ({ name })) } }) as unknown as PromptInput;
+	({
+		agent: { cwd, tools: tools.map((name) => ({ name })) },
+		read: { snapshot: async () => ({ role: null, parentId: null }) },
+	}) as unknown as PromptInput;
 
 const renderAll = async (home: string, cwd: string, tools: string[]) => {
 	const load = createResourceLoader(home, undefined, { builtinDir: null });

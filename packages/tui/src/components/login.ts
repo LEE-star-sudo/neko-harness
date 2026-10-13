@@ -2,6 +2,7 @@ import { type Component, Input, isKeyRelease, matchesKey, truncateToWidth } from
 import { CREDENTIAL_PROVIDERS, type CredentialProviderId, credentialProvider } from "@neko-harness/core";
 import type { NekoCredentialState } from "@neko-harness/gateway";
 import { theme } from "../theme/index.ts";
+import { shortcutHints } from "./shortcut-hints.ts";
 
 /** Input is never rendered; replacing it also discards its undo/kill buffers. */
 export class LoginPanel implements Component {
@@ -129,10 +130,10 @@ export class LoginPanel implements Component {
 			spec.signupUrl,
 		];
 		const help = this.#busy
-			? "Saving...  Esc Close"
+			? shortcutHints(["Esc", "Close"])
 			: state?.savedConfigured
-				? "Enter Save  Ctrl+R Remove  Left/Right Switch  Esc Cancel"
-				: "Enter Save  Left/Right Switch  Esc Cancel";
+				? shortcutHints(["Enter", "Save"], ["Ctrl+R", "Remove"], ["Left/Right", "Switch"], ["Esc", "Cancel"])
+				: shortcutHints(["Enter", "Save"], ["Left/Right", "Switch"], ["Esc", "Cancel"]);
 		while (rows.length < this.height - 1) rows.push("");
 		return [...rows.slice(0, Math.max(0, this.height - 1)), help].map((line) =>
 			theme.panel(` ${truncateToWidth(line, Math.max(1, width - 2), "...", true)} `),

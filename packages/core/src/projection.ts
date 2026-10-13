@@ -7,6 +7,7 @@ import type { ImageInfo } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import type { SkillInvocation } from "./skill-invocation.ts";
+import type { Delegation } from "./subagents.ts";
 import { savedWorkspace } from "./workspace.ts";
 
 /**
@@ -28,6 +29,9 @@ export type UsageTotals = {
 
 /** 前端渲染所需的会话视图投影。 */
 export type ChatView = {
+	historyBefore?: number | null;
+	subagents?: Delegation[];
+	taskUsage?: UsageTotals;
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
 	contextUsage?: { tokens: number | null; window: number; percent: number | null };
 	compaction?: {
@@ -58,7 +62,7 @@ export type ChatView = {
 
 /** 已提交条目投影；`key` 是稳定的 React key。 */
 export type ChatImage = ImageInfo & { entryId: number; contentIndex: number };
-export type ChatItem =
+export type ChatItem = { order?: number } & (
 	| {
 			type: "user";
 			key: string;
@@ -101,7 +105,8 @@ export type ChatItem =
 			/** 补充说明（如"Not run: response interrupted."）；无则为 null。 */
 			note: string | null;
 	  }
-	| { type: "system"; key: string; id: number; text: string };
+	| { type: "system"; key: string; id: number; text: string }
+);
 
 /** 正在生成的一轮（live.generation.message + live.tools 的合并投影）。 */
 export type StreamingView = {
@@ -148,6 +153,14 @@ export function truncateMiddle(text: string, maxWidth: number): string {
 export function summarizeToolCall(name: string, args: unknown): ToolSummary {
 	const record = (args ?? {}) as Record<string, unknown>;
 	switch (name) {
+		case "subagent":
+			return { args: `${record.type}: ${record.title}`, detail: String(record.task ?? "") };
+		case "find_files":
+		case "search_text":
+			return {
+				args: truncateMiddle(`${record.path ?? "."} ${record.pattern ?? record.query ?? ""}`, 100),
+				detail: JSON.stringify(args, null, 2),
+			};
 		case "bash": {
 			const command = typeof record.command === "string" ? record.command : "";
 			const firstLine = command.split("\n", 1)[0] ?? "";

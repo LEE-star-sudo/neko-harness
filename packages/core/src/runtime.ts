@@ -34,6 +34,7 @@ import {
 import { createNodePhotonImages } from "@earendil-works/pi-durable/images/node";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createCodingTools } from "@earendil-works/pi-durable/tools";
+import { AgentFileSearch } from "./agent-file-search.ts";
 import { type CompactionRecord, readCompaction } from "./compaction.ts";
 import {
 	type CredentialProviderId,
@@ -46,12 +47,14 @@ import { ImageDetails } from "./image-metadata.ts";
 import { addDefaultImagePrompt } from "./image-prompt.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
+import { totalUsage } from "./projection.ts";
 import { expandSkillCommand } from "./prompt/invoke.ts";
 import { createNekoPrompt } from "./prompt/prompt.ts";
 import { createResourceLoader, scanSkillsByLevel } from "./prompt/resources.ts";
 import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
+import { createSubagentExtension, DelegationsDoc, refreshDelegations } from "./subagents.ts";
 import { createWebSearchTools } from "./web-search.ts";
 import {
 	accessibleWorkspace,
@@ -345,6 +348,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const registry = createRegistry();
 	registry.install(createCodingTools({ images: await createNodePhotonImages() }));
 	registry.install(ImageDetails);
+	registry.install(AgentFileSearch);
 	registry.install(
 		createWebSearchTools(async () => {
 			const saved = await effectiveCredentials.read("tavily");
@@ -357,6 +361,11 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		storage.submissionByRequest(id, requestId, context),
 	);
 	registry.install(createNekoPrompt(resourceSnapshots.current));
+	registry.install(
+		createSubagentExtension(async (id, requestId, cwd) => {
+			resourceSnapshots.stage(id, requestId, cwd, await loadResources(cwd));
+		}, resourceSnapshots.discard),
+	);
 	for (const extension of options.extensions ?? []) registry.install(extension);
 
 	const harness = await Harness.open(
@@ -434,7 +443,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const metadata = new SessionMetadataManager(harness, storage, context, registry, options.onReport);
 	if (existing.length === 0) await metadata.initialize(conversation.id);
 	for (const record of existing)
-		if (!(await harness.snapshot(ArchivedDoc, record.id, context))?.archived) await metadata.restore(record.id);
+		if (!record.owner && !(await harness.snapshot(ArchivedDoc, record.id, context))?.archived)
+			await metadata.restore(record.id);
 	let closing: Promise<void> | undefined;
 	const cleanup = () => {
 		if (!closing)
@@ -626,7 +636,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		const target = await harness.conversation(id, context);
 		if (target === undefined) return undefined;
 		const archived = (await harness.snapshot(ArchivedDoc, id, context))?.archived ?? false;
-		return archived ? undefined : makeSession(target);
+		const record = await harness.commit((tx) => tx.conversation(id), context);
+		return archived || record?.owner ? undefined : makeSession(target);
 	};
 
 	return {
@@ -661,28 +672,55 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			const newest = await source.conversation.entries({}, 1, undefined, context);
 			const at = newest.items[0]?.id;
 			const sourceMetadata = at === undefined ? undefined : await harness.snapshot(SessionMetadataDoc, id, context);
-			const child =
-				at === undefined
-					? await harness.createConversation(
-							{
-								ownership: { kind: "ownerless" },
-								agent: { model: agent.model, thinkingLevel: agent.thinkingLevel, cwd: savedWorkspace(agent.cwd) },
+			const childId = await harness.commit(async (tx) => {
+				const inherited: import("./subagents.ts").Delegation[] = [];
+				if (at !== undefined) {
+					const references = await refreshDelegations(tx, id);
+					const calls = new Set<string>();
+					let cursor: import("@earendil-works/pi-durable").Cursor | undefined;
+					do {
+						const page = await tx.scanEntries({ conversationId: id, maxEntryId: at }, 100, cursor);
+						for (const entry of page.items)
+							for (const message of entry.model ?? []) {
+								if (message.role === "assistant")
+									for (const block of message.content) {
+										if (block.type === "toolCall") calls.add(block.id);
+									}
+							}
+						cursor = page.next;
+					} while (cursor);
+					for (const reference of references) {
+						if (!calls.has(reference.callId)) continue;
+						const latest = await tx.scanEntries({ conversationId: reference.childId as ConversationId }, 1);
+						const usage = totalUsage(await tx.doc(UsageDoc, reference.childId as ConversationId));
+						inherited.push({
+							...reference,
+							historyThrough: reference.historyThrough ?? latest.items[0]?.id ?? 0,
+							historyUsage: reference.historyUsage ?? {
+								input: usage.input,
+								output: usage.output,
+								cacheRead: usage.cacheRead,
+								cacheWrite: usage.cacheWrite,
+								cost: usage.cost.total,
 							},
-							context,
-						)
-					: await source.conversation.fork(
-							at,
-							{
-								ownership: { kind: "ownerless" },
-								init: async (tx, childId) => {
-									const doc = await tx.doc(SessionMetadataDoc, childId);
-									doc.title = sourceMetadata!.title || sourceMetadata!.firstPromptPreview;
-									doc.firstPromptPreview = sourceMetadata!.firstPromptPreview;
-									doc.naming = "ready";
-								},
-							},
-							context,
-						);
+						});
+					}
+				}
+				// Pi transactions require table reads before the first table write.
+				const child =
+					at === undefined
+						? await tx.createConversation({ ownership: { kind: "ownerless" } })
+						: await tx.forkConversation(id, at, { ownership: { kind: "ownerless" } });
+				(await tx.doc(DelegationsDoc, child.id)).items = inherited;
+				if (sourceMetadata) {
+					const doc = await tx.doc(SessionMetadataDoc, child.id);
+					doc.title = sourceMetadata.title || sourceMetadata.firstPromptPreview;
+					doc.firstPromptPreview = sourceMetadata.firstPromptPreview;
+					doc.naming = "ready";
+				}
+				return child.id;
+			}, context);
+			const child = (await harness.conversation(childId, context))!;
 			await child.configure(
 				{ model: agent.model, thinkingLevel: agent.thinkingLevel, cwd: savedWorkspace(agent.cwd) },
 				context,
@@ -718,6 +756,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			const records = await scanConversations();
 			const infos: NekoConversationInfo[] = [];
 			for (const record of records) {
+				if (record.owner) continue;
 				const archived = (await harness.snapshot(ArchivedDoc, record.id, context))?.archived ?? false;
 				if (!archived) {
 					const target = await harness.conversation(record.id, context);
@@ -761,6 +800,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		getConversation,
 		async archiveConversation(id) {
+			await (await sessionFor(id)).abort();
 			await metadata.archive(id);
 			await harness.commit(async (tx) => {
 				(await tx.doc(ArchivedDoc, id)).archived = true;

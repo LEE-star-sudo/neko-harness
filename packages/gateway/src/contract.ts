@@ -68,7 +68,25 @@ const call = Type.Object({
 	phase,
 	output: nullableString,
 });
+export const DelegationSchema = Type.Object({
+	parentId: integer,
+	taskId: integer,
+	callId: str,
+	childId: integer,
+	role: Type.Enum(["explore", "plan", "coder"]),
+	title: str,
+	createdAt: num,
+	startedAt: Type.Union([num, nil]),
+	endedAt: Type.Union([num, nil]),
+	status: Type.Enum(["queued", "running", "completed", "failed", "cancelled"]),
+	report: nullableString,
+	historyThrough: Type.Optional(integer),
+	historyUsage: Type.Optional(usage),
+});
 export const ChatViewSchema = Type.Object({
+	historyBefore: Type.Optional(Type.Union([integer, nil])),
+	subagents: Type.Optional(Type.Array(DelegationSchema)),
+	taskUsage: Type.Optional(usage),
 	model: str,
 	agent: Type.Object({ model: Type.Union([model, nil]), thinkingLevel: Type.Union([thinking, nil]) }),
 	cwd: str,
@@ -106,6 +124,7 @@ export const ChatViewSchema = Type.Object({
 		Type.Union([
 			Type.Object({
 				type: Type.Literal("user"),
+				order: Type.Optional(num),
 				key: str,
 				id: integer,
 				text: str,
@@ -115,6 +134,7 @@ export const ChatViewSchema = Type.Object({
 			}),
 			Type.Object({
 				type: Type.Literal("assistant"),
+				order: Type.Optional(num),
 				key: str,
 				id: integer,
 				thinking: str,
@@ -125,6 +145,7 @@ export const ChatViewSchema = Type.Object({
 			}),
 			Type.Object({
 				type: Type.Literal("tool"),
+				order: Type.Optional(num),
 				key: str,
 				images: Type.Optional(Type.Array(image)),
 				callId: str,
@@ -138,7 +159,7 @@ export const ChatViewSchema = Type.Object({
 				durationMs: Type.Union([num, nil]),
 				note: nullableString,
 			}),
-			Type.Object({ type: Type.Literal("system"), key: str, id: integer, text: str }),
+			Type.Object({ type: Type.Literal("system"), order: Type.Optional(num), key: str, id: integer, text: str }),
 		]),
 	),
 	streaming: Type.Union([nil, Type.Object({ thinking: str, text: str, toolCalls: Type.Array(call) })]),
@@ -232,6 +253,29 @@ export const NekoModels = contract("neko.models", {
 	variants: { ready: { methods: { list: rpc(nil, Type.Array(modelInfo)) } } },
 });
 const imageChunk = Type.Object({ data: str, total: integer, mimeType: str });
+export const NekoSubagent = contract("neko.subagent", {
+	version: 1,
+	input: Type.Object({ sessionId: str, attachmentId: str, taskId: integer }),
+	variants: {
+		ready: {
+			state: { revision: integer },
+			methods: {
+				chunk: rpc(
+					Type.Object({
+						kind: Type.Enum(["view", "history"]),
+						before: Type.Optional(integer),
+						token: Type.Optional(integer),
+						offset: integer,
+					}),
+					Type.Object({ token: integer, data: str, next: Type.Union([integer, nil]) }),
+				),
+				getImage: rpc(Type.Object({ entryId: integer, contentIndex: integer, offset: integer }), imageChunk),
+				stop: rpc(nil, nil),
+			},
+		},
+	},
+});
+export type NekoSubagent = Handle<typeof NekoSubagent>;
 export const NekoChat = contract("neko.chat", {
 	version: 1,
 	input: chatInput,

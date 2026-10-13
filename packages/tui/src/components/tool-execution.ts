@@ -73,6 +73,7 @@ export class ToolExecutionComponent extends Container {
 	#renderTheme = getActiveThemeMode();
 	#state: ToolCardState;
 	#expanded = false;
+	onOpen: (() => void) | undefined;
 	#box: Box;
 	#text: Text;
 
@@ -106,7 +107,8 @@ export class ToolExecutionComponent extends Container {
 
 	#onClick(event: TuiMouseEvent): { handled: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;
-		this.setExpanded(!this.#expanded);
+		if (this.onOpen) this.onOpen();
+		else this.setExpanded(!this.#expanded);
 		return { handled: true };
 	}
 

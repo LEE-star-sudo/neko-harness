@@ -10,10 +10,12 @@ import {
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	NekoSkillMarket,
+	NekoSubagent,
 	NekoWorkspaceFiles,
 	NekoWorkspaces,
 } from "./contract.ts";
 import { identifiedLink } from "./link.ts";
+import { type SubagentClient, subagentClient } from "./subagent-client.ts";
 export function waitForValue<T>(state: Readable<T | undefined>, signal?: AbortSignal): Promise<T> {
 	return new Promise((resolve, reject) => {
 		let stop = () => {};
@@ -51,6 +53,7 @@ export type NekoGatewayConnection = {
 	readonly attachment: NekoAttachment | undefined;
 	ready(signal?: AbortSignal): Promise<void>;
 	attach(id: string, ctx?: Ctx): Promise<NekoChat>;
+	subagent(taskId: number): SubagentClient;
 	detach(): Promise<void>;
 	close(): Promise<void>;
 };
@@ -88,6 +91,11 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 	let closing: Promise<void> | undefined;
 	const connection: NekoGatewayConnection = {
 		application,
+		subagent(taskId) {
+			if (!attachment) throw new Error("No active session");
+			const input = { ...attachment, taskId };
+			return subagentClient(() => host.get(NekoSubagent, input, { at: serverId }));
+		},
 		host,
 		link,
 		get directory() {

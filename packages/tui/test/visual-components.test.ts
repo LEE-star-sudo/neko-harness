@@ -3,8 +3,10 @@ import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { AssistantMessageComponent } from "../src/components/assistant-message.ts";
 import { StatusFooter, usageText } from "../src/components/footer.ts";
 import { formatNotice } from "../src/components/notice.ts";
+import { shortcutHints } from "../src/components/shortcut-hints.ts";
 import { UserMessageComponent } from "../src/components/user-message.ts";
-import { theme } from "../src/theme/index.ts";
+import { labels } from "../src/labels.ts";
+import { setActiveTheme, theme } from "../src/theme/index.ts";
 
 const plain = (lines: string[]) => lines.map((line) => stripTerminalSequences(line).trimEnd());
 
@@ -90,5 +92,21 @@ it("assistant code block background spans the full content width", () => {
 	for (const line of codeLines) {
 		// 底色直达内容区右缘(仅余 Markdown 右边距 1 格),整块铺满内容宽度。
 		expect(line.endsWith("\x1b[49m ") || line.endsWith("\x1b[49m\x1b[39m ")).toBe(true);
+	}
+});
+
+it("uses shared title-case actions and uppercase letter keys across menu hints in both themes", () => {
+	try {
+		for (const mode of ["light", "dark"] as const) {
+			setActiveTheme(mode);
+			const skills = shortcutHints(["u", "User"], ["v", "Preview"], ["Esc", "Back"]);
+			expect(stripTerminalSequences(skills)).toBe("U User · V Preview · Esc Back");
+			expect(skills).toContain(theme.accent("U"));
+			expect(skills).toContain(theme.dim("Preview"));
+			expect(labels.select).toContain(theme.accent("Enter"));
+			expect(labels.close).toContain(theme.accent("Esc"));
+		}
+	} finally {
+		setActiveTheme("light");
 	}
 });

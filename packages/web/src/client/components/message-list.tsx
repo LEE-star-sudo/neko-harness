@@ -1,6 +1,6 @@
 import type { ChatItem, ChatView, DefaultImagePrompt, StreamingView } from "@neko-harness/core";
 import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
 import { SkillInvocationCard } from "./skill-card";
@@ -158,9 +158,24 @@ function StreamingRow({ streaming, busy }: { streaming: StreamingView; busy: boo
 }
 
 /** 消息列表：已提交条目 + 流式块；贴底跟随滚动，离开底部时出现"回到底部"。 */
-export function MessageList({ view, busy }: { view: ChatView | null; busy: boolean }) {
+export function MessageList({
+	view,
+	busy,
+	onSubagent,
+	emptyLabel,
+	onLoadEarlier,
+	tray,
+}: {
+	view: ChatView | null;
+	busy: boolean;
+	onSubagent?: (taskId: number) => void;
+	emptyLabel?: string;
+	onLoadEarlier?: () => Promise<void>;
+	tray?: ReactNode;
+}) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const stickRef = useRef(true);
+	const loadingEarlier = useRef(false);
 	const [showJump, setShowJump] = useState(false);
 
 	const items = view?.items ?? [];
@@ -185,25 +200,41 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD;
 		stickRef.current = nearBottom;
 		setShowJump(!nearBottom);
+		if (el.scrollTop <= 24 && onLoadEarlier && !loadingEarlier.current) {
+			loadingEarlier.current = true;
+			stickRef.current = false;
+			const top = el.scrollTop;
+			const height = el.scrollHeight;
+			void onLoadEarlier().finally(() => {
+				requestAnimationFrame(() => {
+					if (containerRef.current === el) el.scrollTop = top + el.scrollHeight - height;
+					loadingEarlier.current = false;
+				});
+			});
+		}
 	};
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div ref={containerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
 				<div className="chat-column flex flex-col gap-3 px-4 py-5">
-					{items.length === 0 && streaming === null && (
-						<div className="mt-[14vh] flex flex-col items-center gap-4 text-center">
-							<div className="welcome-cat">
-								<WelcomeCat />
+					{items.length === 0 &&
+						streaming === null &&
+						(emptyLabel ? (
+							<p className="p-4 text-sm text-ink-500">{emptyLabel}</p>
+						) : (
+							<div className="mt-[14vh] flex flex-col items-center gap-4 text-center">
+								<div className="welcome-cat">
+									<WelcomeCat />
+								</div>
+								<div className="text-4xl font-extrabold tracking-tight">
+									<span className="logo-gradient">neko</span>
+									<span className="text-tianyi-600">.</span>
+									<span className="logo-gradient">harness</span>
+								</div>
+								<p className="max-w-sm text-sm text-ink-600">输入消息开始吧 ✦</p>
 							</div>
-							<div className="text-4xl font-extrabold tracking-tight">
-								<span className="logo-gradient">neko</span>
-								<span className="text-tianyi-600">.</span>
-								<span className="logo-gradient">harness</span>
-							</div>
-							<p className="max-w-sm text-sm text-ink-600">输入消息开始吧 ✦</p>
-						</div>
-					)}
+						))}
 					{items.map((item) => {
 						switch (item.type) {
 							case "user":
@@ -218,8 +249,33 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 								);
 							case "assistant":
 								return <AssistantRow key={item.key} item={item} />;
-							case "tool":
-								return <ToolRow key={item.key} item={item} />;
+							case "tool": {
+								const child = view?.subagents?.find((d) => d.callId === item.callId);
+								return child && onSubagent ? (
+									<button
+										type="button"
+										key={item.key}
+										onClick={() => onSubagent(child.taskId)}
+										className="focus-neko rounded-2xl border border-sakura-200 bg-surface p-4 text-left"
+									>
+										<span className="text-tianyi-700">{child.role}</span> · {child.title}
+										<span className="block text-xs text-ink-500">
+											{child.status === "completed"
+												? "已完成"
+												: child.status === "cancelled"
+													? "已停止"
+													: child.status === "failed"
+														? "失败"
+														: child.status === "queued"
+															? "排队中"
+															: "运行中"}{" "}
+											· 查看完整过程
+										</span>
+									</button>
+								) : (
+									<ToolRow key={item.key} item={item} />
+								);
+							}
 							case "system":
 								return <SystemRow key={item.key} text={item.text} />;
 							default:
@@ -229,19 +285,22 @@ export function MessageList({ view, busy }: { view: ChatView | null; busy: boole
 					{streaming !== null && <StreamingRow streaming={streaming} busy={busy} />}
 				</div>
 			</div>
-			{showJump && (
-				<div className="discrete-in flex shrink-0 justify-center border-t border-sakura-100 bg-base/70 py-1.5">
-					<button
-						type="button"
-						onClick={() => {
-							stickRef.current = true;
-							setShowJump(false);
-							scrollToBottom(true);
-						}}
-						className="focus-neko rounded-full border border-sakura-300 bg-surface px-3.5 py-1 text-xs font-medium text-sakura-800 hover:bg-sakura-50"
-					>
-						回到底部 ↓
-					</button>
+			{(showJump || tray) && (
+				<div className="discrete-in flex shrink-0 items-center justify-center gap-2 border-t border-sakura-100 bg-base/70 py-1.5">
+					{tray}
+					{showJump && (
+						<button
+							type="button"
+							onClick={() => {
+								stickRef.current = true;
+								setShowJump(false);
+								scrollToBottom(true);
+							}}
+							className="focus-neko rounded-full border border-sakura-300 bg-surface px-3.5 py-1 text-xs font-medium text-sakura-800 hover:bg-sakura-50"
+						>
+							回到底部 ↓
+						</button>
+					)}
 				</div>
 			)}
 		</div>

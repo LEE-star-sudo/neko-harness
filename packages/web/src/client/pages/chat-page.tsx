@@ -1,8 +1,10 @@
+import type { Delegation } from "@neko-harness/core";
 import { useEffect, useState } from "react";
 import { Composer } from "../components/composer";
 import { MessageList } from "../components/message-list";
 import { folderName, useMobile } from "../components/primitives";
 import { SessionList } from "../components/session-list";
+import { SubagentPanel } from "../components/subagent-panel";
 import { TopBar } from "../components/top-bar";
 import { appActions, reportError } from "../lib/bootstrap";
 import { MOBILE_QUERY } from "../lib/layout";
@@ -11,6 +13,28 @@ import { useNekoState } from "../lib/store";
 export function ChatPage() {
 	const { view, phase, notice, operating, workspaceRoot, currentSessionId } = useNekoState();
 	const mobile = useMobile();
+	const [panels, setPanels] = useState<
+		Record<string, { open: boolean; selected: number | null; entries: Delegation[] }>
+	>({});
+	const agentEntries = view?.subagents;
+	useEffect(() => {
+		if (!currentSessionId || !agentEntries?.length) return;
+		setPanels((previous) => ({
+			...previous,
+			[currentSessionId]: {
+				open: previous[currentSessionId]?.open ?? true,
+				selected: previous[currentSessionId]?.selected ?? agentEntries[0]!.taskId,
+				entries: agentEntries,
+			},
+		}));
+	}, [agentEntries, currentSessionId]);
+	const selectAgent = (id: number) => {
+		if (!currentSessionId) return;
+		setPanels((previous) => ({
+			...previous,
+			[currentSessionId]: { open: true, selected: id, entries: agentEntries ?? [] },
+		}));
+	};
 	const [sidebarOpen, setSidebarOpen] = useState(() => !window.matchMedia(MOBILE_QUERY).matches);
 	useEffect(() => {
 		setSidebarOpen(!mobile);
@@ -54,11 +78,39 @@ export function ChatPage() {
 							</button>
 						</div>
 					) : (
-						<MessageList view={view} busy={busy} />
+						<MessageList
+							view={view}
+							busy={busy}
+							onSubagent={selectAgent}
+							tray={
+								(agentEntries?.length ?? 0) > 0 ? (
+									<button
+										type="button"
+										className="focus-neko rounded-full border border-sakura-300 bg-surface px-3.5 py-1 text-xs font-medium text-sakura-800 hover:bg-sakura-50"
+										onClick={() => selectAgent(panels[currentSessionId ?? ""]?.selected ?? agentEntries![0]!.taskId)}
+									>
+										子智能体 · {agentEntries!.length} 个任务
+										{agentEntries!.some((d) => d.historyThrough === undefined && d.status === "running")
+											? ` · ${agentEntries!.filter((d) => d.historyThrough === undefined && d.status === "running").length} 运行中`
+											: ""}
+									</button>
+								) : undefined
+							}
+						/>
 					)}
 					<Composer disabled={phase !== "ready" || operating} busy={busy} status={status} />
 				</main>
 			</div>
+			{Object.entries(panels).map(([sessionId, panel]) => (
+				<SubagentPanel
+					key={sessionId}
+					entries={sessionId === currentSessionId ? (agentEntries ?? panel.entries) : panel.entries}
+					selected={panel.selected}
+					open={sessionId === currentSessionId && panel.open}
+					onSelect={selectAgent}
+					onClose={() => setPanels((previous) => ({ ...previous, [sessionId]: { ...panel, open: false } }))}
+				/>
+			))}
 		</div>
 	);
 }

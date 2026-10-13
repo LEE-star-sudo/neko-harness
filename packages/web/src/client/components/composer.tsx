@@ -300,7 +300,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 					}[latest.phase]
 				: null;
 	const compactionFailed = !active.length && (!!view?.compaction?.failure || latest?.phase === "failed");
-	const usage = view?.usage ?? null;
+	const usage = view?.taskUsage ?? view?.usage ?? null;
 	const compact = async (instructions: string) => {
 		if (locked.current || props.disabled) return;
 		locked.current = true;
@@ -622,7 +622,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 								<button
 									type="button"
 									className="telemetry focus-neko shrink-0 rounded-full px-1.5 py-1 font-mono text-xs text-ink-500"
-									aria-label={`用量：输入 ${usage.input}，输出 ${usage.output}，缓存读 ${usage.cacheRead}，成本 ${formatCost(usage.cost)}`}
+									aria-label={`任务总用量：输入 ${usage.input}，输出 ${usage.output}，缓存读 ${usage.cacheRead}，成本 ${formatCost(usage.cost)}`}
 								>
 									↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
 									<span className="telemetry-detail" aria-hidden>

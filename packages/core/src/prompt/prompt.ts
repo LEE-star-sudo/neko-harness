@@ -1,4 +1,5 @@
 import { type ConversationId, defineExtension, type PromptInput, section } from "@earendil-works/pi-durable";
+import { ROLE_PROMPTS, SUBAGENT_DELIVERY, SubagentDoc } from "../subagents.ts";
 import type { PromptResources } from "./resources.ts";
 import { escapeXml, formatSkillsForPrompt } from "./skills.ts";
 
@@ -10,6 +11,15 @@ const PREAMBLE =
 
 /** Rules contributed per tool, in the spirit of pi's promptGuidelines. */
 const TOOL_GUIDELINES: Record<string, readonly string[]> = {
+	subagent: [
+		"Delegate only independent, sufficiently scoped work when isolation or parallelism helps. Handle simple tasks directly. Pass necessary context and user constraints; research-only requests must not become coding tasks. Verify and integrate reports. Do not modify files concurrently with a coder assigned those files.",
+	],
+	find_files: [
+		"Use find_files to discover files; query is a literal substring. Narrow the directory when results are partial.",
+	],
+	search_text: [
+		"Use search_text for literal text search and read for surrounding evidence. Partial results do not prove absence.",
+	],
 	read: ["Use read to examine files instead of cat or sed."],
 	write: ["Use write only for new files or complete rewrites."],
 	edit: [
@@ -53,11 +63,15 @@ export const createNekoPrompt = (
 	loadResources: (id: ConversationId, workspace: string) => Promise<PromptResources>,
 ) => {
 	const built = new WeakMap<PromptInput, Promise<Record<string, string | undefined>>>();
-	const build = async (input: PromptInput): Promise<Record<string, string | undefined>> => {
+	const build = async (
+		input: PromptInput,
+		context: import("@earendil-works/chord").Context,
+	): Promise<Record<string, string | undefined>> => {
 		const cwd = input.agent.cwd;
+		const role = (await input.read.snapshot(SubagentDoc, input.conversationId, context))?.role;
 		const resources = cwd ? await loadResources(input.conversationId, cwd) : { contextFiles: [], skills: [] };
 		const sections: Record<string, string | undefined> = {
-			preamble: PREAMBLE,
+			preamble: role ? ROLE_PROMPTS[role] + SUBAGENT_DELIVERY : PREAMBLE,
 			rules: buildRules(input.agent.tools.map((tool) => tool.name)),
 			project_context: renderProjectContext(resources.contextFiles),
 			skills: formatSkillsForPrompt(resources.skills) || undefined,
@@ -70,10 +84,10 @@ export const createNekoPrompt = (
 		sections: KEYS.map((key) =>
 			section(
 				key,
-				async (input) => {
+				async (input, context) => {
 					let pending = built.get(input);
 					if (!pending) {
-						pending = build(input);
+						pending = build(input, context);
 						built.set(input, pending);
 					}
 					const text = (await pending)[key];

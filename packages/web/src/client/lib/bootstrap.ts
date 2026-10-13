@@ -112,6 +112,9 @@ function notReady(): void {
 }
 
 export const appActions = {
+	subagent(taskId: number) {
+		return requireConnection().subagent(taskId);
+	},
 	checkUpdates() {
 		return requireConnection().checkUpdates();
 	},

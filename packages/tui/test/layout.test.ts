@@ -169,7 +169,7 @@ it("preserves image fallback, editor and compaction stop hints at all supported 
 			panelOpen: () => false,
 		});
 		const frame = renderLayoutFrame(root, width, height, () => {});
-		expect(frame.lines.map(stripTerminalSequences).join("\n")).toContain("Esc: stop");
+		expect(frame.lines.map(stripTerminalSequences).join("\n")).toContain("Esc Stop");
 		expect(frame.lines.every((l) => visibleWidth(l) <= width)).toBe(true);
 		expect(frame.lines.length).toBe(height);
 	}
@@ -189,7 +189,7 @@ it("keeps context occupancy visible ahead of cumulative usage at narrow widths",
 		for (const width of [40, 60, 80, 120]) {
 			const lines = f.render(width);
 			expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
-			expect(lines.map(stripTerminalSequences).join("\n")).toContain("Cache: 80k");
+			expect(lines.map(stripTerminalSequences).join("\n")).toContain("$0.1234");
 			expect(lines.map(stripTerminalSequences).join("\n")).toContain(
 				percent === null ? "Ctx ?/" : `Ctx ${percent.toFixed(1)}%/`,
 			);

@@ -1,11 +1,16 @@
 import type { ChatImage } from "@neko-harness/core";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
 import { Modal } from "./primitives";
 
+export const ImageReaderContext = createContext<
+	((entryId: number, contentIndex: number) => Promise<import("@neko-harness/core/image-transfer").ImageFile>) | null
+>(null);
+
 function HistoryImage({ image }: { image: ChatImage }) {
 	const { currentSessionId, phase } = useNekoState();
+	const reader = useContext(ImageReaderContext);
 	const [url, setUrl] = useState("");
 	const [error, setError] = useState("");
 	const [open, setOpen] = useState(false);
@@ -21,8 +26,11 @@ function HistoryImage({ image }: { image: ChatImage }) {
 		const observer = new IntersectionObserver((entries) => {
 			if (started || !entries.some((e) => e.isIntersecting) || phase !== "ready") return;
 			started = true;
-			void appActions
-				.image(image.entryId, image.contentIndex, currentSessionId)
+			void (
+				reader
+					? reader(image.entryId, image.contentIndex)
+					: appActions.image(image.entryId, image.contentIndex, currentSessionId)
+			)
 				.then((file) => {
 					if (disposed) return;
 					resource = URL.createObjectURL(new Blob([file.bytes as Uint8Array<ArrayBuffer>], { type: file.mimeType }));
@@ -39,7 +47,7 @@ function HistoryImage({ image }: { image: ChatImage }) {
 			observer.disconnect();
 			if (resource) URL.revokeObjectURL(resource);
 		};
-	}, [currentSessionId, phase, image.entryId, image.contentIndex, retry]);
+	}, [currentSessionId, phase, image.entryId, image.contentIndex, retry, reader]);
 	return (
 		<div ref={ref} className="max-w-full">
 			<button

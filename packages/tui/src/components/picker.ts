@@ -4,12 +4,14 @@ import {
 	isKeyRelease,
 	matchesKey,
 	type SelectItem,
+	type TuiMouseEvent,
 	truncateToWidth,
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { labels } from "../labels.ts";
 import { style, theme } from "../theme/index.ts";
+import { shortcutHints } from "./shortcut-hints.ts";
 
 export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string; header?: boolean };
 
@@ -18,6 +20,9 @@ export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string
  * Used by the skill market for skill details / preview / inline confirms.
  */
 export type PickerDetail = {
+	close?(): void;
+	backCloses?: boolean;
+	scroll?(delta: number): void;
 	/** Body lines for the current width/height budget. */
 	lines(width: number, height: number): readonly string[];
 	/** Footer hint shown while the view is open. */
@@ -28,9 +33,12 @@ export type PickerDetail = {
 
 /** A single searchable panel. Async generations cannot reopen a closed panel. */
 export class PickerPanel implements Component {
+	pointerSelection = false;
+	agentNavigation = false;
 	readonly search = new Input({ prompt: "❯ ", placeholder: "Type to filter" });
 	#items: readonly PickerItem[] = [];
 	#index = 0;
+	#pointerRows = new Map<number, number>();
 	#generation = 0;
 	#state: "closed" | "loading" | "ready" | "error" | "applying" = "closed";
 	#error = "";
@@ -95,7 +103,10 @@ export class PickerPanel implements Component {
 		this.changed();
 	}
 	close(): void {
+		this.pointerSelection = false;
+		this.agentNavigation = false;
 		++this.#generation;
+		for (const detail of this.#details) detail.close?.();
 		this.#details = [];
 		this.#state = "closed";
 		this.closed();
@@ -110,7 +121,7 @@ export class PickerPanel implements Component {
 	/** Pop the top detail view, back to the previous view or the list. */
 	popDetail(): void {
 		if (this.#details.length === 0) return;
-		this.#details.pop();
+		this.#details.pop()?.close?.();
 		this.changed();
 	}
 	get detailOpen(): boolean {
@@ -142,10 +153,17 @@ export class PickerPanel implements Component {
 	}
 	handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
+		if (this.agentNavigation && matchesKey(data, "left")) {
+			this.close();
+			return;
+		}
+		if (this.agentNavigation && !this.detailOpen && this.search.getValue() === "" && matchesKey(data, "right"))
+			data = "\r";
 		// 详情视图：Esc 弹回列表，其余键先交给视图。
 		if (this.#detail !== undefined) {
 			if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
-				this.popDetail();
+				if (this.#detail.backCloses) this.close();
+				else this.popDetail();
 			} else if (this.#detail.handleKey(data)) {
 				this.changed();
 			}
@@ -170,7 +188,10 @@ export class PickerPanel implements Component {
 			this.#state = "applying";
 			void this.#pick!(item.value).then(
 				(result) => {
-					if (generation !== this.#generation) return;
+					if (generation !== this.#generation) {
+						if (result && typeof result === "object") result.close?.();
+						return;
+					}
 					// pick 返回 PickerDetail 时进入详情视图而不是关闭（市场详情页）。
 					if (result !== undefined && typeof result === "object" && "lines" in result) {
 						this.#state = "ready";
@@ -193,22 +214,53 @@ export class PickerPanel implements Component {
 		}
 		this.changed();
 	}
+	scrollDetail(delta: number): boolean {
+		if (!this.#detail?.scroll) return false;
+		this.#detail.scroll(delta);
+		this.changed();
+		return true;
+	}
+	handleMouse(event: TuiMouseEvent) {
+		if (!this.open) return;
+		if (event.type === "click" && event.button === "left" && this.pointerSelection && !this.detailOpen) {
+			const index = this.#pointerRows.get(event.y);
+			if (index === undefined) return;
+			this.#index = index;
+			this.handleInput("\r");
+			return { handled: true };
+		}
+		if (event.type !== "wheel") return;
+		if (this.scrollDetail(event.wheelDelta ?? 0)) return { handled: true };
+		else if (this.pointerSelection && !this.detailOpen) this.#move((event.wheelDelta ?? 0) < 0 ? -1 : 1);
+		else return;
+		this.changed();
+		return { handled: true };
+	}
 	render(width: number): string[] {
+		this.#pointerRows.clear();
 		const height = Math.max(1, this.height);
 		const w = Math.max(1, width - 2);
 		const rows = [
-			`${theme.accent(style.bold(this.#title))}${this.#state === "ready" ? theme.muted(` (${this.#items.length})`) : ""}`,
+			`${theme.accent(style.bold(this.#title))}${this.#state === "ready" && !this.#detail?.backCloses ? theme.muted(` (${this.#items.length})`) : ""}`,
 		];
 		if (this.#detail !== undefined) {
-			const body = this.#detail.lines(w, Math.max(1, height - 2));
+			const hints = wrapTextWithAnsi(this.#detail.help, w).slice(0, Math.max(1, height - 2));
+			const body = this.#detail.lines(w, Math.max(1, height - 1 - hints.length));
 			rows.push(...body);
-			while (rows.length < height - 1) rows.push("");
+			while (rows.length < height - hints.length) rows.push("");
 			// 详情视图的 help 由视图自行配色（键位 accent、说明 dim），面板不再整体压暗。
-			if (height > 1) rows.push(this.#detail.help);
+			if (height > 1) rows.push(...hints);
 			return rows.slice(0, height).map((line) => theme.panel(` ${truncateToWidth(line, w, "...", true)} `));
 		}
 		if (height >= 4) rows.push(...this.search.render(w).slice(0, 1));
-		const help = this.#state === "error" ? labels.retry : this.#state === "ready" ? labels.select : labels.close;
+		const help =
+			this.#state === "error"
+				? labels.retry
+				: this.#state === "ready"
+					? this.agentNavigation
+						? shortcutHints(["↑↓", "Select"], ["→/Enter", "Open"], ["←", "Main"])
+						: labels.select
+					: labels.close;
 		const available = Math.max(1, height - rows.length - 1);
 		if (this.#state !== "ready")
 			rows.push(
@@ -238,14 +290,16 @@ export class PickerPanel implements Component {
 				const leftWidth = Math.max(1, w - 3 - visibleWidth(right));
 				const left = truncateToWidth(item.label, leftWidth, "...");
 				const label = right ? `${left}${" ".repeat(Math.max(1, leftWidth - visibleWidth(left) + 1))}${right}` : left;
-				rows.push(start + i === this.#index ? theme.selection(`❯ ${label}`) : `  ${label}`);
+				const rendered = start + i === this.#index ? theme.selection(`❯ ${label}`) : `  ${label}`;
+				if (this.pointerSelection) this.#pointerRows.set(rows.length, start + i);
+				rows.push(rendered);
 			}
 			if (items.length === 0) rows.push(labels.noResults);
 			while (rows.length < height - 1 - details.length) rows.push("");
 			rows.push(...details.map((line) => theme.dim(line)));
 		}
 		while (rows.length < height - 1) rows.push("");
-		if (height > 1) rows.push(theme.dim(help));
+		if (height > 1) rows.push(help);
 		return rows.slice(0, height).map((line) => theme.panel(` ${truncateToWidth(line, w, "...", true)} `));
 	}
 }

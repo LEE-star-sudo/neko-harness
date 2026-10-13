@@ -1,7 +1,10 @@
 /** Product language is English; conversation and tool payloads are never translated. */
+
 import type { SlashCommand } from "@earendil-works/pi-tui";
+import { shortcutHints } from "./components/shortcut-hints.ts";
 
 export const commands: SlashCommand[] = [
+	{ name: "help", description: "Show keyboard shortcuts and commands" },
 	{ name: "version", description: "View versions and check for updates" },
 	{ name: "compact", description: "Compact context (/compact optional instructions)" },
 	{ name: "exit", description: "Exit neko TUI" },
@@ -9,6 +12,7 @@ export const commands: SlashCommand[] = [
 	{ name: "sessions", description: "Switch or create a session" },
 	{ name: "login", description: "Configure DeepSeek API key" },
 	{ name: "model", description: "Choose a model" },
+	{ name: "agents", description: "View agent tasks and activity" },
 	{ name: "theme", description: "Choose color theme (auto/light/dark)" },
 	{ name: "think", description: "Set thinking level (/think high)" },
 	{ name: "fork", description: "Fork this session" },
@@ -21,11 +25,17 @@ export const labels = {
 	loading: "Loading...",
 	applying: "Applying...",
 	noResults: "No results",
-	close: "Esc Close",
-	retry: "Enter Retry  Esc Close",
-	select: "Up/Down Select  Enter Apply  Esc Close",
-	idleHints: "Enter Send  Ctrl+S Sessions  / Commands  Esc Esc Clear  Ctrl+C Exit",
-	busyHints: "Enter Steer  Alt+Enter Queue  Esc Stop  Ctrl+C Stop",
-	idleCompact: "Enter Send  / Commands",
-	busyCompact: "Enter Steer  Esc Stop",
+	get close() {
+		return shortcutHints(["Esc", "Close"]);
+	},
+	get retry() {
+		return shortcutHints(["Enter", "Retry"], ["Esc", "Close"]);
+	},
+	get select() {
+		return shortcutHints(["↑↓", "Select"], ["Enter", "Open"], ["Esc", "Close"]);
+	},
+	idleHints: "Enter Send · /help Keys",
+	busyHints: "Enter Steer · Esc Stop",
+	idleCompact: "Enter Send · /help Keys",
+	busyCompact: "Enter Steer · Esc Stop",
 };

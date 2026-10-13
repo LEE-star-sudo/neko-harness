@@ -8,7 +8,7 @@ import { newer, RUNNING_VERSION, stableVersion, type UpdateState, updateAction }
 const state: UpdateState = {
 	runningVersion: "1.0.0",
 	installedVersion: "1.0.0",
-	protocolVersion: 1,
+	protocolVersion: 2,
 	latestVersion: "1.1.0",
 	checkedAt: 1,
 	checkState: "ok",
@@ -48,7 +48,7 @@ it("distinguishes install, running services, page and unknown versions", () => {
 			gateway: { ...state, runningVersion: "1.1.0", installedVersion: "1.1.0" },
 		}),
 	).toBe("none");
-	expect(updateAction({ ...base, gateway: { ...state, protocolVersion: 2 } })).toBe("incompatible");
+	expect(updateAction({ ...base, gateway: { ...state, protocolVersion: 3 } })).toBe("incompatible");
 	expect(updateAction({ gateway: null, frontend: "development", installed: null })).toBe("none");
 });
 it("checks cached registry independently of changed installed files, coalesces and handles failure", async () => {

@@ -54,6 +54,10 @@ export function workspaceSessions(sessions: readonly NekoSessionSummary[], path:
 
 /** Single attachment, serialized navigation, and generation-guarded snapshots. */
 export class GatewayConnection {
+	subagent(taskId: number) {
+		if (!this.ready || !this.#client) throw new Error("会话未就绪");
+		return this.#client.subagent(taskId);
+	}
 	readonly #options: GatewayConnectionOptions;
 	#client: NekoGatewayConnection | undefined;
 	#management: NekoSessionManagement | undefined;

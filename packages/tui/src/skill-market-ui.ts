@@ -6,11 +6,8 @@ import { ChordError } from "@earendil-works/chord";
 import { Markdown, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { NekoGatewayClient, NekoMarketSkill } from "@neko-harness/gateway";
 import type { PickerDetail, PickerItem, PickerPanel } from "./components/picker.ts";
+import { shortcutHints as hint } from "./components/shortcut-hints.ts";
 import { getActiveThemeMode, getMarkdownTheme, style, theme } from "./theme/index.ts";
-
-/** 键位提示：键名 accent 色、说明 dim 色，键位一眼可辨（验收反馈）。 */
-const hint = (...parts: readonly (readonly [string, string])[]): string =>
-	parts.map(([key, label]) => `${theme.accent(key)} ${theme.dim(label)}`).join(theme.dim("  ·  "));
 
 const formatSize = (bytes: number): string =>
 	bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)}MB` : `${Math.max(1, Math.round(bytes / 1024))}KB`;
@@ -77,8 +74,8 @@ class SkillDetailView implements PickerDetail {
 		const skill = this.#skill;
 		const builtinOnly = skill?.installed.builtin === true && !skill.installed.user && !skill.installed.project;
 		return builtinOnly
-			? hint(["v", "Preview"], ["Esc", "Back"]) + theme.dim("  (builtin ships with neko)")
-			: hint(["u", "Install user"], ["p", "Install project"], ["d", "Uninstall"], ["v", "Preview"], ["Esc", "Back"]);
+			? hint(["v", "Preview"], ["Esc", "Back"])
+			: hint(["u", "Install user"], ["p", "Install project"], ["d", "Remove"], ["v", "Preview"], ["Esc", "Back"]);
 	}
 
 	private async refresh(): Promise<void> {
@@ -216,17 +213,19 @@ class SkillDetailView implements PickerDetail {
 	}
 }
 
-class SkillPreviewView implements PickerDetail {
+export class SkillPreviewView implements PickerDetail {
 	#header: string | null = null;
 	#renderTheme = getActiveThemeMode();
 	#markdown: Markdown | null = null;
 	#error = "";
 	#offset = 0;
+	#maxOffset = 0;
+	#pageSize = 1;
 
 	readonly #panel: PickerPanel;
 
 	get help(): string {
-		return hint(["Up/Down", "Scroll"], ["Esc", "Back"]);
+		return hint(["↑↓/Wheel", "Scroll"], ["PgUp/PgDn", "Page"], ["Esc", "Back"]);
 	}
 
 	constructor(name: string, client: NekoGatewayClient, panel: PickerPanel) {
@@ -245,9 +244,14 @@ class SkillPreviewView implements PickerDetail {
 			});
 	}
 
+	scroll(delta: number): void {
+		this.#offset = Math.max(0, Math.min(this.#maxOffset, this.#offset + delta));
+	}
 	handleKey(data: string): boolean {
-		if (matchesKey(data, "up")) this.#offset = Math.max(0, this.#offset - 1);
-		else if (matchesKey(data, "down")) this.#offset += 1;
+		if (matchesKey(data, "up")) this.scroll(-1);
+		else if (matchesKey(data, "down")) this.scroll(1);
+		else if (matchesKey(data, "pageUp")) this.scroll(-this.#pageSize);
+		else if (matchesKey(data, "pageDown")) this.scroll(this.#pageSize);
 		else return false;
 		return true;
 	}
@@ -260,8 +264,9 @@ class SkillPreviewView implements PickerDetail {
 			this.#markdown.invalidate();
 		}
 		const flat = [`${theme.dim("files:")} ${this.#header}`, "", ...this.#markdown.render(width)];
-		const max = Math.max(0, flat.length - height);
-		this.#offset = Math.min(this.#offset, max);
+		this.#pageSize = Math.max(1, height - 1);
+		this.#maxOffset = Math.max(0, flat.length - height);
+		this.#offset = Math.min(this.#offset, this.#maxOffset);
 		return flat.slice(this.#offset, this.#offset + height);
 	}
 }

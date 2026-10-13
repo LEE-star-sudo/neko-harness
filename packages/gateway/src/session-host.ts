@@ -14,9 +14,10 @@ import {
 	resource,
 } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
-import type { EntryRecord } from "@earendil-works/pi-durable";
+import { type ConversationId, type EntryRecord, UsageDoc } from "@earendil-works/pi-durable";
 import {
 	type ChatView,
+	listDelegations,
 	mergeUsage,
 	type NekoRuntime,
 	type NekoSession,
@@ -28,6 +29,7 @@ import { workspaceTarget } from "@neko-harness/core/workspace-files";
 import { Type } from "typebox";
 import { ChatViewSchema, type NekoAttachment, NekoChat } from "./contract.ts";
 import { IMAGE_CHUNK_BYTES, ImageUploads } from "./image-uploads.ts";
+import { installSubagentHost } from "./subagent-host.ts";
 export type AttachmentOwner = { active: NekoAttachment | null };
 const OwnerInput = Type.Object({});
 export const Owner: LocalContract<{
@@ -70,6 +72,20 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 	let changed: ((event: null) => void) | undefined;
 	const stop = view.subscribe(() => changed?.(null));
 	const stopMetadata = runtime.onDirectoryChange(() => changed?.(null));
+	let childIds = new Set<number>();
+	const stopChildren = runtime.harness.subscribeCommits(({ changes }) => {
+		if (
+			changes.some(
+				(change) =>
+					change.type === "document" &&
+					((change.record.kind === "app.neko.delegations" && change.conversationId === session.id) ||
+						(change.record.kind === "pi.usage" &&
+							change.conversationId !== undefined &&
+							childIds.has(change.conversationId))),
+			)
+		)
+			changed?.(null);
+	});
 	return {
 		subscribe(fn: (event: null) => void) {
 			changed = fn;
@@ -81,7 +97,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 		async project() {
 			for (const entry of view.value.entries) history.set(entry.id, entry);
 			const [naming, compaction] = await Promise.all([runtime.namingUsage(session.id), session.compactionRecord()]);
-			return projectChatView(
+			const projected = projectChatView(
 				{
 					...view.value,
 					entries: [...history.values()].sort((a, b) => a.id - b.id),
@@ -99,6 +115,29 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 				"",
 				{ models: runtime.listModels(), contextEntries: view.value.entries, compaction },
 			);
+			const subagents = await listDelegations(runtime.harness, session.id, context);
+			childIds = new Set(subagents.filter((entry) => entry.historyThrough === undefined).map((entry) => entry.childId));
+			let aggregate = await session.usage();
+			for (const child of subagents.filter((entry) => entry.historyThrough === undefined))
+				aggregate = mergeUsage(
+					aggregate,
+					(await runtime.harness.snapshot(UsageDoc, child.childId as ConversationId, context)) ?? {
+						models: {},
+						tools: {},
+					},
+				);
+			const u = totalUsage(aggregate);
+			return {
+				...projected,
+				subagents: subagents.map((entry) => ({ ...entry, report: entry.report?.slice(0, 512) ?? null })),
+				taskUsage: {
+					input: u.input,
+					output: u.output,
+					cacheRead: u.cacheRead,
+					cacheWrite: u.cacheWrite,
+					cost: u.cost.total,
+				},
+			};
 		},
 		async entry(id: number, ctx: Context) {
 			ctx.abortSignal?.throwIfAborted();
@@ -108,12 +147,14 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 		close() {
 			stop();
 			stopMetadata();
+			stopChildren();
 			view.dispose();
 			history.clear();
 		},
 	};
 }
 export function serveSessions(host: Host, runtime: NekoRuntime, context: Context) {
+	installSubagentHost(host, runtime, context);
 	host.serve(Owner, (_input, _principal, self) => {
 		const { owner } = self.resources({
 			owner: resource({
