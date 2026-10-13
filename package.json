@@ -24,7 +24,7 @@
 	},
 	"packageManager": "bun@1.4.2",
 	"trustedDependencies": [],
-	"version": "0.2.4",
+	"version": "0.2.5",
 	"description": "A local AI coding assistant with terminal and web interfaces, powered by Pi and Bun.",
 	"license": "MIT",
 	"repository": {
