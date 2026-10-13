@@ -12,8 +12,8 @@ import {
 } from "@neko-harness/gateway";
 
 /**
- * 确保一个 neko gateway 在运行：POSIX 先探活 Unix socket（pi 握手 + 服务绑定），
- * 不通则 spawn gateway 子进程（Bun 源码或构建产物入口）并轮询探活直到就绪；
+ * 确保一个 neko gateway 在运行：POSIX 先探活 Unix socket，再验证浏览器所需的 WS 地址与身份，
+ * Unix 不通则 spawn gateway 子进程（Bun 源码或构建产物入口）并轮询两种传输直到就绪；
  * socket 文件存在但无响应时直接 spawn——网关的 Unix listener 会识别并接管
  * stale socket。Windows 无 Unix socket：经端口文件（<storageDir>/<serverId>.port）
  * 发现 ws 地址并探活，失败则 spawn ws-only 网关。
@@ -51,15 +51,18 @@ export type GatewayHandle = {
 
 const SERVER_ID_FILENAME = "gateway-server-id";
 const PROBE_INTERVAL_MS = 400;
+const PROBE_TIMEOUT_MS = 5_000;
 
 export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<GatewayHandle> {
+	const timeoutMs = options.spawnTimeoutMs ?? 30_000;
+	const timeoutAt = Date.now() + timeoutMs;
 	const nekoDir = dirname(options.storagePath);
 	const serverId = options.serverId ?? (await loadOrCreateServerId(nekoDir));
 
 	if (process.platform === "win32") {
 		// Windows：端口文件发现 + ws 探活；过期文件/连接失败按无活跃网关处理。
 		const discovered = await readGatewayPortFile(nekoDir, serverId);
-		if (discovered !== undefined && (await probeWs(discovered, serverId))) {
+		if (discovered !== undefined && (await probeWs(discovered, serverId, timeoutAt))) {
 			return makeHandle(serverId, undefined, discovered, null, nekoDir);
 		}
 		const child = spawnGatewayProcess(options, null, serverId);
@@ -69,7 +72,6 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 			spawnError = error;
 		});
 		try {
-			const timeoutAt = Date.now() + (options.spawnTimeoutMs ?? 30_000);
 			let lastError: unknown = new Error("gateway 未就绪");
 			while (Date.now() < timeoutAt) {
 				if (spawnError !== undefined) throw spawnError;
@@ -81,12 +83,13 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 				const wsUrl = await readGatewayPortFile(nekoDir, serverId);
 				if (wsUrl !== undefined) {
 					try {
-						if (await probeWs(wsUrl, serverId)) return makeHandle(serverId, undefined, wsUrl, child, nekoDir);
+						if (await probeWs(wsUrl, serverId, timeoutAt))
+							return makeHandle(serverId, undefined, wsUrl, child, nekoDir);
 					} catch (error) {
 						lastError = error;
 					}
 				}
-				await sleep(PROBE_INTERVAL_MS);
+				await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())));
 			}
 			throw new Error(
 				`等待 neko gateway 就绪超时（${options.spawnTimeoutMs ?? 30_000}ms）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
@@ -100,9 +103,15 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 	const socketPath = options.socketPath ?? join(nekoDir, `${serverId}.sock`);
 	const host = options.host ?? "127.0.0.1";
 	const port = options.port ?? 8321;
+	const wsUrl = `ws://${host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${port}`;
 
-	if (await probeGateway(socketPath, serverId)) {
-		return makeHandle(serverId, socketPath, `ws://${host}:${port}`, null, nekoDir);
+	if (await probeGateway(socketPath, serverId, timeoutAt)) {
+		if (!(await probeWs(wsUrl, serverId, timeoutAt))) {
+			throw new Error(
+				`已有 gateway（serverId: ${serverId}，Unix socket: ${socketPath}），但 WebSocket ${wsUrl} 不可用或身份不匹配。请检查 --gateway-port 及 WS 地址配置是否匹配已有网关；若未启用 WS，请正常退出原网关并重新启动双传输 gateway。`,
+			);
+		}
+		return makeHandle(serverId, socketPath, wsUrl, null, nekoDir);
 	}
 
 	const child = spawnGatewayProcess(options, socketPath, serverId);
@@ -112,7 +121,6 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 		spawnError = error;
 	});
 	try {
-		const timeoutAt = Date.now() + (options.spawnTimeoutMs ?? 30_000);
 		// 让子进程有机会打印启动错误再报错。
 		let lastError: unknown = new Error("gateway 未就绪");
 		while (Date.now() < timeoutAt) {
@@ -123,12 +131,13 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 				);
 			}
 			try {
-				if (await probeGateway(socketPath, serverId))
-					return makeHandle(serverId, socketPath, `ws://${host}:${port}`, child, nekoDir);
+				if ((await probeGateway(socketPath, serverId, timeoutAt)) && (await probeWs(wsUrl, serverId, timeoutAt)))
+					return makeHandle(serverId, socketPath, wsUrl, child, nekoDir);
+				lastError = new Error(`WebSocket ${wsUrl} 或 Unix socket ${socketPath} 未就绪或身份不匹配`);
 			} catch (error) {
 				lastError = error;
 			}
-			await sleep(PROBE_INTERVAL_MS);
+			await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())));
 		}
 		throw new Error(
 			`等待 neko gateway 就绪超时（${options.spawnTimeoutMs ?? 30_000}ms）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
@@ -174,24 +183,36 @@ function pipeChildLogs(child: ChildProcess, onLog: ((line: string) => void) | un
 }
 
 /** 探活：在 Unix socket 上完成 pi 握手 + 服务目录绑定即认为网关存活且身份匹配。 */
-async function probeGateway(socketPath: string, serverId: string): Promise<boolean> {
-	try {
-		const probe = await connectNekoGateway({ transport: "unix", socketPath, serverId });
-		await probe.close();
-		return true;
-	} catch {
-		return false;
-	}
+async function probeGateway(socketPath: string, serverId: string, timeoutAt: number): Promise<boolean> {
+	return probeAddress({ transport: "unix", socketPath, serverId }, timeoutAt);
 }
 
-/** Windows 探活：ws 上完成握手即认为网关存活且身份匹配。 */
-async function probeWs(wsUrl: string, serverId: string): Promise<boolean> {
+/** 在将发布的 WS 地址上完成握手、身份校验与服务绑定。 */
+async function probeWs(wsUrl: string, serverId: string, timeoutAt: number): Promise<boolean> {
+	return probeAddress({ transport: "ws", url: wsUrl, serverId }, timeoutAt);
+}
+
+async function probeAddress(address: Parameters<typeof connectNekoGateway>[0], timeoutAt: number): Promise<boolean> {
+	const remainingMs = timeoutAt - Date.now();
+	if (remainingMs <= 0) return false;
+	const controller = new AbortController();
+	const timer = setTimeout(
+		() => controller.abort(new Error("Gateway probe timed out")),
+		Math.min(PROBE_TIMEOUT_MS, remainingMs),
+	);
 	try {
-		const probe = await connectNekoGateway({ transport: "ws", url: wsUrl, serverId });
-		await probe.close();
-		return true;
+		const probe = await connectNekoGateway(address, controller.signal);
+		try {
+			return true;
+		} finally {
+			controller.abort();
+			await probe.close();
+		}
 	} catch {
 		return false;
+	} finally {
+		clearTimeout(timer);
+		controller.abort();
 	}
 }
 

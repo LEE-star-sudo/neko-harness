@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,11 +12,14 @@ const IS_WINDOWS = process.platform === "win32";
 
 let dir: string;
 let originalKey: string | undefined;
+let port: number;
 beforeEach(async () => {
 	dir = await mkdtemp(join(tmpdir(), "neko-start-"));
 	originalKey = process.env.DEEPSEEK_API_KEY;
 	// Startup tests never submit a model request. Never forward a real credential.
 	process.env.DEEPSEEK_API_KEY = "unused-startup-test";
+	port = await freePort();
+	await writeFile(join(dir, "neko.config.json"), JSON.stringify({ gateway: { port } }));
 });
 afterEach(async () => {
 	if (originalKey === undefined) delete process.env.DEEPSEEK_API_KEY;
@@ -34,6 +37,57 @@ async function freePort(): Promise<number> {
 }
 
 describe("Bun gateway startup", () => {
+	for (const first of ["TUI", "Web"] as const) {
+		it(`${first} first shares its gateway and session with the other frontend`, async () => {
+			const options = {
+				storagePath: join(dir, "session.sqlite"),
+				credentialsPath: join(dir, "credentials.json"),
+				configDir: dir,
+				cwd: dir,
+				port,
+				spawnTimeoutMs: 5_000,
+			};
+			const tui = first === "TUI" ? await connectToGateway(options) : undefined;
+			const web = await ensureNekoGateway(options).catch(async (error) => {
+				await tui?.close();
+				throw error;
+			});
+			try {
+				const terminal = tui ?? (await connectToGateway(options));
+				try {
+					expect(web.serverId).toBe(terminal.serverId);
+					expect(web.spawned === null).toBe(first === "TUI");
+					expect(terminal.spawned).toBe(first === "TUI");
+					const browser = await connectNekoGateway({ transport: "ws", url: web.wsUrl, serverId: web.serverId });
+					try {
+						const created = (await terminal.client.management.create({ cwd: dir })).id;
+						const terminalChat = await terminal.client.attach(created);
+						const browserChat = await browser.attach(created);
+						expect(browser.directory.state.value?.sessions.some((session) => session.id === created)).toBe(true);
+						expect(browserChat.view.value).toEqual(terminalChat.view.value);
+					} finally {
+						await browser.close();
+					}
+					if (first === "TUI") {
+						await web.close();
+						expect((await terminal.client.models.list(null)).length).toBeGreaterThan(0);
+					} else {
+						await terminal.close();
+						const reconnected = await connectNekoGateway({ transport: "ws", url: web.wsUrl, serverId: web.serverId });
+						await reconnected.close();
+					}
+				} finally {
+					await terminal.close();
+				}
+			} finally {
+				await tui?.close();
+				await web.close();
+			}
+			if (IS_WINDOWS) expect(existsSync(join(dir, `${web.serverId}.port`))).toBe(false);
+			else expect(existsSync(web.socketPath!)).toBe(false);
+		}, 10_000);
+	}
+
 	it("TUI starts, reuses and closes only its own gateway", async () => {
 		const options = {
 			credentialsPath: join(dir, "credentials.json"),
@@ -44,6 +98,14 @@ describe("Bun gateway startup", () => {
 		const owner = await connectToGateway(options);
 		try {
 			expect(owner.spawned).toBe(true);
+			if (!IS_WINDOWS) {
+				const ws = await connectNekoGateway({
+					transport: "ws",
+					url: `ws://127.0.0.1:${port}`,
+					serverId: owner.serverId,
+				});
+				await ws.close();
+			}
 			const reused = await connectToGateway(options);
 			expect(reused.spawned).toBe(false);
 			await reused.close();

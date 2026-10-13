@@ -32,6 +32,10 @@ neko web
 
 Web 默认自动打开 `http://127.0.0.1:8322`。两种界面都会按需启动本地网关，无需另行启动服务。
 
+macOS/Linux 上默认网关同时监听 Unix socket 和 WebSocket（`127.0.0.1:8321`），TUI 与 Web 可以按任意顺序启动并共享网关。后启动的界面退出时不会停止已有网关。
+如果已有网关使用自定义 WS 端口，启动 Web 时使用匹配的 `--gateway-port`（例如 `neko web --gateway-port 8331`）。
+Web 会验证 WS 连接及网关身份；若旧版 TUI 拉起的网关未启用 WS，请先正常退出拥有网关的界面，再重新启动。Web 不会自动重启正在运行的网关。
+
 首次使用，在 TUI 输入 `/login`，或打开 Web 设置页，填入 [DeepSeek API Key](https://platform.deepseek.com/api_keys)。也可以在启动前设置环境变量：
 
 ```bash

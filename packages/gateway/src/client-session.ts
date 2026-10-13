@@ -46,7 +46,7 @@ export type NekoGatewayConnection = {
 	readonly credentials: NekoCredentials;
 	readonly skillMarket: NekoSkillMarket;
 	readonly attachment: NekoAttachment | undefined;
-	ready(): Promise<void>;
+	ready(signal?: AbortSignal): Promise<void>;
 	attach(id: string, ctx?: Ctx): Promise<NekoChat>;
 	detach(): Promise<void>;
 	close(): Promise<void>;
@@ -84,7 +84,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 		get attachment() {
 			return attachment;
 		},
-		async ready() {
+		async ready(signal) {
 			await deadline(
 				Promise.all([
 					directory.ready,
@@ -95,11 +95,12 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 					workspaceFiles.ready,
 					skillMarket.ready,
 				]),
+				signal,
 			);
 			await Promise.all([
-				waitForValue(directory.state),
-				waitForValue(workspaces.state),
-				waitForValue(credentials.state),
+				waitForValue(directory.state, signal),
+				waitForValue(workspaces.state, signal),
+				waitForValue(credentials.state, signal),
 			]);
 		},
 		async attach(sessionId: string, ctx?: Ctx): Promise<NekoChat> {

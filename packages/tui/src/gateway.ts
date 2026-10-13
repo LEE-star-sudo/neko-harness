@@ -246,8 +246,7 @@ function gatewayArgs(plan: SpawnPlan): string[] {
 		];
 	}
 	return [
-		"--port",
-		"0", // CLI 语义：0 = 禁用 WS（TUI 走 Unix socket，不需要 WS 端口）。
+		// 保留 gateway 配置/默认 WS 监听，让后启动的 Web 也能复用；TUI 自身仍走 Unix socket。
 		"--storage",
 		plan.storagePath,
 		...(plan.credentialsPath ? ["--credentials", plan.credentialsPath] : []),

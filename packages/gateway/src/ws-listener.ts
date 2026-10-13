@@ -12,8 +12,19 @@ export type WsListener = {
 	start(accept: (link: Link) => void): Promise<void>;
 	close(): Promise<void>;
 };
-export function createWsLink(url: string): Link {
-	return boundedWebSocketLink(new WebSocket(url, { maxPayload: MAX_LINK_BYTES }));
+export function createWsLink(url: string, signal?: AbortSignal): Link {
+	signal?.throwIfAborted();
+	const socket = new WebSocket(url, { maxPayload: MAX_LINK_BYTES });
+	const link = boundedWebSocketLink(socket);
+	const abort = () => {
+		link.close("cancelled");
+		// 握手或关闭握手停滞时也立即释放底层 socket。
+		socket.terminate();
+	};
+	signal?.addEventListener("abort", abort, { once: true });
+	socket.once("close", () => signal?.removeEventListener("abort", abort));
+	if (signal?.aborted) abort();
+	return link;
 }
 export function createWsListener(options: WsListenerOptions): WsListener {
 	let server: WebSocketServer | undefined;

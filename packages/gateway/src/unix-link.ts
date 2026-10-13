@@ -96,8 +96,8 @@ export class UnixLink implements Link {
 		this.#native.close(reason);
 	}
 }
-export async function createUnixLink(path: string): Promise<Link> {
-	const socket = connect(path);
+export async function createUnixLink(path: string, signal?: AbortSignal): Promise<Link> {
+	const socket = connect({ path, ...(signal ? { signal } : {}) });
 	await new Promise<void>((resolve, reject) => {
 		socket.once("connect", resolve);
 		socket.once("error", reject);
