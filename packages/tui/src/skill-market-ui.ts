@@ -6,7 +6,7 @@ import { ChordError } from "@earendil-works/chord";
 import { Markdown, matchesKey, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { NekoGatewayClient, NekoMarketSkill } from "@neko-harness/gateway";
 import type { PickerDetail, PickerItem, PickerPanel } from "./components/picker.ts";
-import { getMarkdownTheme, style, theme } from "./theme.ts";
+import { getMarkdownTheme, style, theme } from "./theme/index.ts";
 
 /** 键位提示：键名 accent 色、说明 dim 色，键位一眼可辨（验收反馈）。 */
 const hint = (...parts: readonly (readonly [string, string])[]): string =>

@@ -1,7 +1,15 @@
-import { type Component, Container, getCapabilities, Image, type ScrollView, Text } from "@earendil-works/pi-tui";
+import {
+	type Component,
+	Container,
+	getCapabilities,
+	Image,
+	type ScrollView,
+	Spacer,
+	Text,
+} from "@earendil-works/pi-tui";
 import { type ChatImage, terminalImage } from "@neko-harness/core";
 import { encodeChunk, type ImageFile } from "@neko-harness/core/image-transfer";
-import { theme } from "../theme.ts";
+import { theme } from "../theme/index.ts";
 
 let active = 0;
 const queue: (() => void)[] = [];
@@ -87,9 +95,45 @@ export class HistoryImage implements Component {
 }
 export class ImageTranscript extends Container {
 	private scroll: () => ScrollView | undefined;
+	#itemCount = 0;
+	readonly #itemSpacers = new Map<Component, Spacer>();
 	constructor(scroll: () => ScrollView | undefined) {
 		super();
 		this.scroll = scroll;
+	}
+	/**
+	 * 顶层条目(user/assistant/tool/system/流式块):条目间固定 1 空行,首条除外。
+	 * 图片等依附于条目的内容仍用 addChild,不产生间距。
+	 */
+	addItem(component: Component): void {
+		if (this.#itemCount > 0) {
+			const spacer = new Spacer(1);
+			this.addChild(spacer);
+			this.#itemSpacers.set(component, spacer);
+		}
+		this.addChild(component);
+		this.#itemCount++;
+	}
+	/** 移除条目及其前导空行(流式块让位给正式条目时不遗留孤儿 Spacer)。 */
+	removeItem(component: Component): void {
+		const spacer = this.#itemSpacers.get(component);
+		if (spacer !== undefined) {
+			this.removeChild(spacer);
+			this.#itemSpacers.delete(component);
+		}
+		if (this.children.includes(component)) {
+			this.removeChild(component);
+			this.#itemCount--;
+		}
+	}
+	get itemCount(): number {
+		return this.#itemCount;
+	}
+	override clear() {
+		for (const child of this.children) if (child instanceof HistoryImage) child.setVisible(false);
+		this.#itemCount = 0;
+		this.#itemSpacers.clear();
+		super.clear();
 	}
 	override render(width: number): string[] {
 		const scroll = this.scroll();
@@ -109,9 +153,5 @@ export class ImageTranscript extends Container {
 			if (item.child instanceof HistoryImage)
 				item.child.setVisible(item.start < viewportBottom && item.start + item.lines.length > viewportTop);
 		return measured.flatMap(({ child, lines }) => (child instanceof HistoryImage ? child.render(width) : lines));
-	}
-	override clear() {
-		for (const child of this.children) if (child instanceof HistoryImage) child.setVisible(false);
-		super.clear();
 	}
 }

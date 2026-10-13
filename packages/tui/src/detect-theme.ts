@@ -1,5 +1,5 @@
 import type { RgbColor, TerminalColors, TUI } from "@earendil-works/pi-tui";
-import type { ThemeMode } from "./theme.ts";
+import type { ThemeMode } from "./theme/index.ts";
 
 /**
  * 终端背景明暗检测的回退链（与 pi coding-agent 同一思路）：

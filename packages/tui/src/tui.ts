@@ -2,10 +2,10 @@ import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	Container,
 	isKeyRelease,
+	Loader,
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
-	Spacer,
 	Text,
 	TruncatedText,
 	TuiAltScreen,
@@ -26,9 +26,11 @@ import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
 import { HistoryImage, ImageTranscript } from "./components/history-image.ts";
 import { LoginPanel } from "./components/login.ts";
+import { formatNotice, type NoticeLevel } from "./components/notice.ts";
 import { PickerPanel } from "./components/picker.ts";
-import { type ToolCardState, ToolExecutionComponent } from "./components/tool-execution.ts";
+import { type ToolCardState, ToolExecutionComponent, ToolSpinnerTicker } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
+import { WelcomeScreen } from "./components/welcome.ts";
 import { detectColorFgBgMode, queryTerminalMode } from "./detect-theme.ts";
 import { fileCompletion } from "./file-completion.ts";
 import { formatTokens } from "./format.ts";
@@ -40,11 +42,12 @@ import { openSkillMarket } from "./skill-market-ui.ts";
 import {
 	getActiveThemeMode,
 	getEditorTheme,
+	loadAllHighlightLanguages,
 	setActiveTheme,
 	type ThemeMode,
 	type ThemePreference,
 	theme,
-} from "./theme.ts";
+} from "./theme/index.ts";
 import { recentlyVisited, sessionPickerItems } from "./workspace.ts";
 
 export type NekoTuiOptions = {
@@ -94,6 +97,13 @@ class NekoTuiApp {
 	#compactionTimer: ReturnType<typeof setTimeout> | undefined;
 	readonly #editor: BoundedEditor;
 	readonly #footer = new StatusFooter();
+	/** 空会话欢迎屏(design D10):转录为空且不忙碌时挂载,首条消息到达即移除。 */
+	readonly #welcome = new WelcomeScreen();
+	#welcomeAttached = false;
+	/** 忙碌行(design D7):accent spinner + muted 状态文案,仅忙碌时可见。 */
+	readonly #busyLoader: Loader;
+	/** 运行中工具卡的动画驱动:仅在有运行中工具时运转(design D6)。 */
+	readonly #toolSpinner = new ToolSpinnerTicker(() => this.#onToolSpinnerTick());
 
 	#chat: NekoChat | undefined;
 	#sessionId = "";
@@ -133,6 +143,7 @@ class NekoTuiApp {
 		// 首帧前的临时主题：auto 先用 COLORFGBG（无则浅色），OSC 11 应答后再修正。
 		setActiveTheme(themePreference === "auto" ? (detectColorFgBgMode() ?? "light") : themePreference);
 		this.#ui = new TuiAltScreen(this.#terminal);
+		this.#busyLoader = new Loader(this.#ui, theme.accent, theme.muted);
 		this.#editor = new BoundedEditor(this.#ui, getEditorTheme(), { paddingX: 1, autocompleteMaxVisible: 3 });
 		this.#panel = new PickerPanel(
 			() => this.#ui.requestRender(),
@@ -181,7 +192,7 @@ class NekoTuiApp {
 								this.#editor.setText(before.replace(item.value, refs));
 							this.#ui.requestRender();
 						})
-						.catch((e) => this.addNotice(messageOf(e), true));
+						.catch((e) => this.addNotice(messageOf(e), "error"));
 				});
 			}
 			return result;
@@ -235,7 +246,7 @@ class NekoTuiApp {
 							if (session === this.#sessionId) this.#editor.insertTextAtCursor(refs);
 							this.#ui.requestRender();
 						})
-						.catch((e) => this.addNotice(messageOf(e), true));
+						.catch((e) => this.addNotice(messageOf(e), "error"));
 					return { consume: true };
 				}
 			}
@@ -274,7 +285,7 @@ class NekoTuiApp {
 			if (this.#exitStarted) return;
 			this.#chat = undefined;
 			if (this.#lastView) this.applyView({ ...this.#lastView, busy: false, status: null, streaming: null });
-			this.addNotice("Gateway unavailable. Restart to reconnect.", true);
+			this.addNotice("Gateway unavailable. Restart to reconnect.", "error");
 		});
 		const picker = this.#panel,
 			login = this.#login;
@@ -301,6 +312,8 @@ class NekoTuiApp {
 				editor: this.#editor,
 				footer: this.#footer,
 				notices: this.#notices,
+				busy: this.#busyLoader,
+				busyVisible: () => this.#busyText !== undefined,
 				panelOpen: () => this.#panel.open || this.#login.open,
 			}),
 		);
@@ -313,10 +326,14 @@ class NekoTuiApp {
 		await this.switchSession(initialSessionId);
 		this.#ui.start();
 		this.#ui.requestRender(true);
+		// 首帧后注册剩余高亮语言(不阻塞启动;失败容忍)。
+		void loadAllHighlightLanguages();
 		this.#startThemeDetection();
 		await this.#exited;
 		this.#viewUnsubscribe?.();
 		this.#directoryUnsubscribe?.();
+		this.#toolSpinner.stop();
+		this.#busyLoader.stop();
 		clearInterval(this.#sessionPanelTimer);
 		this.#terminalSchemeUnsubscribe?.();
 		this.#closeOverlay();
@@ -342,7 +359,7 @@ class NekoTuiApp {
 				void chat.compact({ instructions }).catch((e) => {
 					if (session === this.#sessionId) {
 						this.#editor.setText(text);
-						this.addNotice(messageOf(e), true);
+						this.addNotice(messageOf(e), "error");
 					}
 				});
 			return;
@@ -368,11 +385,19 @@ class NekoTuiApp {
 			return;
 		}
 		if (trimmed.startsWith("/login ")) {
-			this.addNotice("Use /login, then paste your key in the protected field.", true);
+			this.addNotice("Use /login, then paste your key in the protected field.", "warning");
 			return;
 		}
 		if (trimmed === "/model") {
 			void this.openModelOverlay();
+			return;
+		}
+		if (trimmed === "/theme") {
+			void this.openThemeOverlay();
+			return;
+		}
+		if (trimmed === "/new") {
+			void this.#manage(() => this.createSession());
 			return;
 		}
 		if (trimmed === "/skills") {
@@ -398,7 +423,7 @@ class NekoTuiApp {
 			this.#gateway.client.credentials.state.value?.statuses.deepseek.source === "none"
 		) {
 			this.#editor.setText(text);
-			this.addNotice("Configure DeepSeek with /login before sending.", true);
+			this.addNotice("Configure DeepSeek with /login before sending.", "warning");
 			return;
 		}
 		void this.sendImages(text, this.#busyText !== undefined ? "steer" : undefined);
@@ -448,7 +473,7 @@ class NekoTuiApp {
 			this.#editor.insertTextAtCursor(text);
 			this.#ui.requestRender();
 		} catch (e) {
-			this.addNotice(`Clipboard unavailable. Use an image path: ${messageOf(e)}`, true);
+			this.addNotice(`Clipboard unavailable. Use an image path: ${messageOf(e)}`, "warning");
 		} finally {
 			this.#clipboardPending = false;
 		}
@@ -494,7 +519,7 @@ class NekoTuiApp {
 			for (const [ref] of refs) if (!remaining.includes(ref)) this.#imageDrafts.get(session)?.delete(ref);
 			this.#retryRequests.delete(session);
 		} catch (e) {
-			if (session === this.#sessionId) this.addNotice(messageOf(e), true);
+			if (session === this.#sessionId) this.addNotice(messageOf(e), "error");
 		} finally {
 			for (const id of ids) await chat.releaseImage(id).catch(() => {});
 			this.#sending.delete(session);
@@ -505,7 +530,7 @@ class NekoTuiApp {
 	abort(): void {
 		const chat = this.#chat;
 		if (chat === undefined) return;
-		chat.abort(null).catch((error: unknown) => this.addNotice(messageOf(error), true));
+		chat.abort(null).catch((error: unknown) => this.addNotice(messageOf(error), "error"));
 	}
 
 	exit(): void {
@@ -555,7 +580,7 @@ class NekoTuiApp {
 		try {
 			await operation();
 		} catch (error) {
-			this.addNotice(`Session operation failed: ${messageOf(error)}`, true);
+			this.addNotice(`Session operation failed: ${messageOf(error)}`, "error");
 		} finally {
 			this.#sessionOperation = false;
 		}
@@ -645,6 +670,44 @@ class NekoTuiApp {
 		await ready;
 	}
 
+	/** /theme 浮层:进程内主题偏好(auto 跟随终端 / 明确明暗),即选即生效。 */
+	async openThemeOverlay(): Promise<void> {
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
+		const options: Array<{ value: ThemePreference; label: string; description: string }> = [
+			{ value: "auto", label: "Auto", description: "Follow the terminal background" },
+			{ value: "light", label: "Light · sakura-day", description: "Brand light theme" },
+			{ value: "dark", label: "Dark · sakura-night", description: "Brand dark theme" },
+		];
+		const ready = this.#panel.show(
+			"Theme",
+			async () =>
+				options.map((option) => ({
+					value: option.value,
+					label: `${option.label}${option.value === this.#themePreference ? " (Current)" : ""}`,
+					description: option.description,
+				})),
+			async (value) => {
+				this.#setThemePreference(value as ThemePreference);
+			},
+		);
+		this.#ui.setFocus(this.#panel);
+		await ready;
+	}
+
+	/** 进程内主题偏好:auto 恢复跟随终端;明确明暗则取消订阅并立即套用。 */
+	#setThemePreference(preference: ThemePreference): void {
+		if (preference === this.#themePreference) return;
+		this.#themePreference = preference;
+		if (preference === "auto") {
+			this.#startThemeDetection();
+			return;
+		}
+		this.#terminalSchemeUnsubscribe?.();
+		this.#terminalSchemeUnsubscribe = undefined;
+		this.#ui.setTerminalColorSchemeNotifications(false);
+		this.#applyThemeMode(preference);
+	}
+
 	async configureThinking(raw: string): Promise<void> {
 		if (this.#panel.open || this.#login.open) return;
 		const chat = this.#chat;
@@ -658,7 +721,7 @@ class NekoTuiApp {
 			if (raw) {
 				const level = model.supportedThinkingLevels.find((value) => value === raw);
 				if (!level) {
-					this.addNotice(`Available levels: ${model.supportedThinkingLevels.join(" / ")}`, true);
+					this.addNotice(`Available levels: ${model.supportedThinkingLevels.join(" / ")}`, "warning");
 					return;
 				}
 				await chat.configure({ thinkingLevel: level });
@@ -678,7 +741,7 @@ class NekoTuiApp {
 				this.#ui.setFocus(this.#panel);
 			}
 		} catch {
-			this.addNotice("Failed to configure thinking level. Try again.", true);
+			this.addNotice("Failed to configure thinking level. Try again.", "error");
 		}
 	}
 
@@ -690,14 +753,17 @@ class NekoTuiApp {
 
 	// —— 视图渲染 ——
 
-	addNotice(text: string, isError = false): void {
+	/**
+	 * 底部通知行(design D6):info `i`(muted)/ warning `!` / error `✗`,5s 自动消失。
+	 */
+	addNotice(text: string, level: NoticeLevel = "info"): void {
 		clearTimeout(this.#noticeTimer);
 		this.#noticeTimer = setTimeout(() => {
 			this.#notices.clear();
 			this.#ui.requestRender();
 		}, 5000);
 		this.#notices.clear();
-		this.#notices.addChild(new TruncatedText(isError ? theme.error(text) : theme.dim(text), 1, 0));
+		this.#notices.addChild(new TruncatedText(formatNotice(text, level), 1, 0));
 
 		this.#ui.requestRender();
 	}
@@ -739,6 +805,7 @@ class NekoTuiApp {
 					)
 						this.addNotice(
 							"Text-only model: previous images are unavailable to the model; written analysis is retained.",
+							"warning",
 						);
 				})
 				.catch(() => {});
@@ -766,6 +833,7 @@ class NekoTuiApp {
 		this.#syncStreaming(view.streaming);
 		this.#syncBusy(view);
 		this.#syncFooter(view);
+		this.#syncWelcome(view);
 		if (this.#transcript !== undefined && this.#streamingComp !== undefined) this.#transcript.scrollToEnd();
 		this.#ui.requestRender();
 	}
@@ -800,7 +868,17 @@ class NekoTuiApp {
 		for (const call of streamByCall.values()) {
 			this.#toolCard(call).sync(streamingCardState(call));
 		}
+		let anyRunning = false;
+		for (const card of this.#toolCards.values()) if (card.isRunning) anyRunning = true;
+		if (anyRunning) this.#toolSpinner.start();
+		else this.#toolSpinner.stop();
 		this.#renderedKeys = keys;
+	}
+
+	#onToolSpinnerTick(): void {
+		if (this.#exitStarted) return;
+		for (const card of this.#toolCards.values()) if (card.isRunning) card.rebuild();
+		this.#ui.requestRender();
 	}
 
 	#appendImages(images: readonly import("@neko-harness/core").ChatImage[]): void {
@@ -824,16 +902,15 @@ class NekoTuiApp {
 	}
 
 	#appendItem(item: ChatItem): void {
-		if (item.type === "user" || item.type === "system") this.#imageTranscript.addChild(new Spacer(1));
 		if (item.type === "user") {
 			const component = new UserMessageComponent(item.text, item.skill);
-			this.#imageTranscript.addChild(component);
+			this.#imageTranscript.addItem(component);
 			this.#items.set(item.key, { kind: "user", component });
 			return;
 		}
 		if (item.type === "assistant") {
 			const component = new AssistantMessageComponent(assistantContent(item), false);
-			this.#imageTranscript.addChild(component);
+			this.#imageTranscript.addItem(component);
 			this.#items.set(item.key, { kind: "assistant", component });
 			return;
 		}
@@ -851,7 +928,7 @@ class NekoTuiApp {
 			return;
 		}
 		const component = new Text(theme.dim(item.text), 1, 0);
-		this.#imageTranscript.addChild(component);
+		this.#imageTranscript.addItem(component);
 		this.#items.set(item.key, { kind: "system", component });
 	}
 
@@ -885,7 +962,7 @@ class NekoTuiApp {
 		const existing = this.#toolCards.get(call.callId);
 		if (existing !== undefined) return existing;
 		const component = new ToolExecutionComponent(streamingCardState(call));
-		this.#imageTranscript.addChild(component);
+		this.#imageTranscript.addItem(component);
 		this.#toolCards.set(call.callId, component);
 		this.#items.set(`t${call.callId}`, { kind: "tool", component });
 		return component;
@@ -894,25 +971,49 @@ class NekoTuiApp {
 	#syncStreaming(streaming: StreamingView | null): void {
 		if (streaming === null) {
 			if (this.#streamingComp !== undefined) {
-				this.#imageTranscript.removeChild(this.#streamingComp);
+				this.#imageTranscript.removeItem(this.#streamingComp);
 				this.#streamingComp = undefined;
 			}
 			return;
 		}
 		if (this.#streamingComp === undefined) {
 			this.#streamingComp = new AssistantMessageComponent();
-			this.#imageTranscript.addChild(this.#streamingComp);
+			this.#imageTranscript.addItem(this.#streamingComp);
 		}
 		this.#streamingComp.updateContent({ thinking: streaming.thinking, text: streaming.text, note: null }, true);
 	}
 
 	#syncBusy(view: ChatView): void {
 		this.#busyText = view.busy ? (view.status ?? "Thinking...") : undefined;
+		if (this.#busyText !== undefined) {
+			this.#busyLoader.setMessage(this.#busyText);
+			this.#busyLoader.start();
+		} else {
+			this.#busyLoader.stop();
+		}
 		this.#syncEditorBorder();
 	}
 
 	#syncEditorBorder(): void {
-		this.#editor.borderColor = this.#busyText !== undefined ? theme.accent : theme.dim;
+		this.#editor.borderColor = this.#busyText !== undefined ? theme.accent : theme.borderMuted;
+	}
+
+	/** 欢迎屏:仅当转录无任何条目、无流式块且不忙碌时显示;模型行随配置更新。 */
+	#syncWelcome(view: ChatView): void {
+		const empty = view.items.length === 0 && view.streaming === null && !view.busy;
+		if (empty) {
+			const modelShort = view.model.split("/").at(-1) ?? view.model;
+			this.#welcome.setModelLine(
+				view.agent.thinkingLevel !== null ? `${modelShort} · Think ${view.agent.thinkingLevel}` : modelShort,
+			);
+			if (!this.#welcomeAttached) {
+				this.#imageTranscript.addChild(this.#welcome);
+				this.#welcomeAttached = true;
+			}
+		} else if (this.#welcomeAttached) {
+			this.#imageTranscript.removeChild(this.#welcome);
+			this.#welcomeAttached = false;
+		}
 	}
 
 	#syncFooter(view: ChatView): void {
@@ -948,6 +1049,8 @@ class NekoTuiApp {
 	}
 
 	#resetTranscript(): void {
+		this.#toolSpinner.stop();
+		this.#welcomeAttached = false;
 		this.#imageTranscript.clear();
 		this.#imageKeys.clear();
 		this.#imageComponents.clear();
@@ -962,7 +1065,7 @@ class NekoTuiApp {
 
 	/** auto：首帧后异步查询终端背景（不阻塞启动），并跟随终端后续的主题变化通知。 */
 	#startThemeDetection(): void {
-		if (this.#themePreference !== "auto") return;
+		if (this.#themePreference !== "auto" || this.#terminalSchemeUnsubscribe !== undefined) return;
 		this.#ui.setTerminalColorSchemeNotifications(true);
 		this.#terminalSchemeUnsubscribe = this.#ui.onTerminalColorSchemeChange((scheme) => {
 			this.#applyThemeMode(scheme);

@@ -2,7 +2,7 @@ import { expect, it } from "bun:test";
 import { type Terminal, TuiAltScreen } from "@earendil-works/pi-tui";
 import { BoundedEditor } from "../src/components/editor.ts";
 import { isClipboardShortcut } from "../src/image-input.ts";
-import { getEditorTheme } from "../src/theme.ts";
+import { getEditorTheme } from "../src/theme/index.ts";
 
 const ref = "[Image 1: Clipboard.png]";
 function editor() {

@@ -1,13 +1,49 @@
 import { Box, Container, MouseRegion, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
-import { theme } from "../theme.ts";
+import { theme } from "../theme/index.ts";
 
-const PREVIEW_LINES = 8;
+/** 运行中工具的动画帧(braille);由 ToolSpinnerTicker 推进,无 ticker 时停在首帧。 */
+
+/** 运行中工具的动画帧(braille);由 ToolSpinnerTicker 推进,无 ticker 时停在首帧。 */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+let spinnerFrame = 0;
+
+export function currentToolFrame(): string {
+	return SPINNER_FRAMES[spinnerFrame]!;
+}
+
+/**
+ * 应用级运行动画 ticker:仅当存在运行中工具卡时 start,按固定间隔推进帧并触发回调
+ * (调用方负责 rebuild 运行中卡片与 requestRender);stop 后无后台定时器。
+ */
+export class ToolSpinnerTicker {
+	#timer: ReturnType<typeof setInterval> | undefined;
+	readonly #tick: () => void;
+	readonly #intervalMs: number;
+	constructor(tick: () => void, intervalMs = 120) {
+		this.#tick = tick;
+		this.#intervalMs = intervalMs;
+	}
+	get running(): boolean {
+		return this.#timer !== undefined;
+	}
+	start(): void {
+		if (this.#timer !== undefined) return;
+		this.#timer = setInterval(() => {
+			spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+			this.#tick();
+		}, this.#intervalMs);
+	}
+	stop(): void {
+		clearInterval(this.#timer);
+		this.#timer = undefined;
+	}
+}
 
 export type ToolCardState = {
 	readonly name: string;
 	/** 单行参数摘要。 */
 	readonly summary: string;
-	/** 参数详情（多行）；无则为 null。 */
+	/** 参数详情(多行);无则为 null。 */
 	readonly detail: string | null;
 	/** pending=待结果; running=正在执行; done=已有结果。 */
 	readonly phase: "pending" | "running" | "done";
@@ -17,7 +53,7 @@ export type ToolCardState = {
 	/** 最终结果文本。 */
 	readonly result: string | null;
 	readonly durationMs: number | null;
-	/** 补充说明（如"Not run: response interrupted."）。 */
+	/** 补充说明(如"Not run: response interrupted.")。 */
 	readonly note: string | null;
 };
 
@@ -29,8 +65,9 @@ function clipLines(text: string, maxLines: number): { visible: string; rest: num
 }
 
 /**
- * 工具调用卡片：标题行（图标 + 工具名 + 参数摘要 + 状态），运行中显示部分输出，
- * 完成后显示结果（默认预览 8 行）。底色随状态变化（待执行/成功/错误），点击切换展开。
+ * 工具调用卡片:默认单行折叠(图标 + 工具名 + 参数摘要 + 状态 + 行数提示),
+ * 点击展开参数详情与输出原文全文。底色随状态变化(待执行/成功/错误)。
+ * 状态字形统一(design D6):`…` 待执行 / braille 动画 运行中 / `✓` 成功 / `✗` 失败。
  */
 export class ToolExecutionComponent extends Container {
 	#state: ToolCardState;
@@ -41,11 +78,15 @@ export class ToolExecutionComponent extends Container {
 	constructor(state: ToolCardState) {
 		super();
 		this.#state = state;
-		this.#text = new Text("", 1, 0);
-		this.#box = new Box(0, 0, theme.toolPendingBg);
+		this.#text = new Text("", 0, 0);
+		this.#box = new Box(1, 0, theme.toolPendingBg);
 		this.#box.addChild(new MouseRegion(this.#text, (event: TuiMouseEvent) => this.#onClick(event)));
 		this.addChild(this.#box);
 		this.rebuild();
+	}
+
+	get isRunning(): boolean {
+		return this.#state.phase === "running";
 	}
 
 	sync(state: ToolCardState): void {
@@ -55,16 +96,20 @@ export class ToolExecutionComponent extends Container {
 
 	#onClick(event: TuiMouseEvent): { handled: boolean } | undefined {
 		if (event.type !== "click" || event.button !== "left") return undefined;
-		this.#expanded = !this.#expanded;
-		this.rebuild();
+		this.setExpanded(!this.#expanded);
 		return { handled: true };
+	}
+
+	setExpanded(expanded: boolean): void {
+		this.#expanded = expanded;
+		this.rebuild();
 	}
 
 	#statusLine(phase: Phase): string {
 		if (phase === "pending") return theme.dim("…");
-		if (phase === "running") return theme.accent("Running...");
+		if (phase === "running") return theme.accent(`${currentToolFrame()} Running...`);
 		return this.#state.isError
-			? theme.error("x Failed")
+			? theme.error("✗ Failed")
 			: theme.ok(`✓${this.#state.durationMs !== null ? ` ${(this.#state.durationMs / 1000).toFixed(1)}s` : ""}`);
 	}
 
@@ -79,11 +124,13 @@ export class ToolExecutionComponent extends Container {
 			if (detail.rest > 0) text += `\n${theme.dim(`... ${detail.rest} more lines`)}`;
 		}
 
+		// 默认单行折叠(design D12):标题行 + 行数提示;点击展开参数详情与输出原文全文。
 		const body = state.phase === "running" ? state.output : state.result;
-		if (body !== null && body !== "") {
-			const clipped = clipLines(body, this.#expanded ? Number.MAX_SAFE_INTEGER : PREVIEW_LINES);
-			text += `\n${clipped.visible}`;
-			if (clipped.rest > 0) text += `\n${theme.dim(`... ${clipped.rest} more lines (click to expand)`)}`;
+		if (!this.#expanded && body !== null && body !== "") {
+			text += theme.dim(`  +${body.split("\n").length} lines`);
+		}
+		if (this.#expanded && body !== null && body !== "") {
+			text += `\n${theme.toolOutput(body)}`;
 		}
 		if (state.note !== null) {
 			text += `\n${theme.error(state.note)}`;

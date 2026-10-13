@@ -23,6 +23,7 @@
 		"@earendil-works/pi-tui": "1.2.0",
 		"@neko-harness/core": "workspace:*",
 		"@neko-harness/gateway": "workspace:*",
-		"@earendil-works/chord": "1.2.0"
+		"@earendil-works/chord": "1.2.0",
+		"highlight.js": "11.12.0"
 	}
 }

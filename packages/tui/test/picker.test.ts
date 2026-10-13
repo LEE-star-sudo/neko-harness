@@ -62,7 +62,7 @@ it("filters, navigates, retries failure and applies at most once", async () => {
 	expect(panel.render(80).join("\n")).toContain("No results");
 	panel.handleInput("\x7f");
 	panel.handleInput("t");
-	expect(panel.render(80).join("\n")).toContain("> Two");
+	expect(panel.render(80).join("\n")).toContain("❯ Two");
 	panel.handleInput("\r");
 	panel.handleInput("\r");
 	expect(picks).toBe(1);
@@ -91,12 +91,12 @@ it("moves once per Kitty key press, allows repeat and ignores release", async ()
 	);
 	panel.handleInput("\x1b[1;1:1B");
 	panel.handleInput("\x1b[1;1:3B");
-	expect(panel.render(80).join("\n")).toContain("> Session 2");
+	expect(panel.render(80).join("\n")).toContain("❯ Session 2");
 	panel.handleInput("\x1b[1;1:2B");
-	expect(panel.render(80).join("\n")).toContain("> Session 3");
+	expect(panel.render(80).join("\n")).toContain("❯ Session 3");
 	panel.handleInput("\x1b[1;1:1A");
 	panel.handleInput("\x1b[1;1:3A");
-	expect(panel.render(80).join("\n")).toContain("> Session 2");
+	expect(panel.render(80).join("\n")).toContain("❯ Session 2");
 	panel.handleInput("\x1b[27;1:3u");
 	expect(panel.open).toBe(true);
 	panel.handleInput("\x1b[13;1:3u");
@@ -136,7 +136,7 @@ it("preserves selection by identity through live reorder at all supported widths
 	]) {
 		panel.height = height!;
 		const rows = panel.render(width!);
-		expect(rows.join("\n")).toContain("> Updated Beta");
+		expect(rows.join("\n")).toContain("❯ Updated Beta");
 		expect(rows.length).toBe(height!);
 	}
 	panel.handleInput("\r");
@@ -170,7 +170,7 @@ it("keeps search through updates and chooses the adjacent item when selection di
 		{ value: "c", label: "Gamma", searchText: "shared" },
 		{ value: "x", label: "Excluded" },
 	]);
-	expect(panel.render(80).join("\n")).toContain("> Gamma");
+	expect(panel.render(80).join("\n")).toContain("❯ Gamma");
 	expect(panel.render(80).join("\n")).not.toContain("Excluded");
 	panel.handleInput("\r");
 	await tick();

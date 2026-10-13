@@ -9,7 +9,7 @@ import {
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { labels } from "../labels.ts";
-import { style, theme } from "../theme.ts";
+import { style, theme } from "../theme/index.ts";
 
 export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string; header?: boolean };
 
@@ -28,7 +28,7 @@ export type PickerDetail = {
 
 /** A single searchable panel. Async generations cannot reopen a closed panel. */
 export class PickerPanel implements Component {
-	readonly search = new Input({ prompt: "Search: ", placeholder: "Type to filter" });
+	readonly search = new Input({ prompt: "❯ ", placeholder: "Type to filter" });
 	#items: readonly PickerItem[] = [];
 	#index = 0;
 	#generation = 0;
@@ -196,7 +196,9 @@ export class PickerPanel implements Component {
 	render(width: number): string[] {
 		const height = Math.max(1, this.height);
 		const w = Math.max(1, width - 2);
-		const rows = [style.bold(this.#title)];
+		const rows = [
+			`${theme.accent(style.bold(this.#title))}${this.#state === "ready" ? theme.muted(` (${this.#items.length})`) : ""}`,
+		];
 		if (this.#detail !== undefined) {
 			const body = this.#detail.lines(w, Math.max(1, height - 2));
 			rows.push(...body);
@@ -236,7 +238,7 @@ export class PickerPanel implements Component {
 				const leftWidth = Math.max(1, w - 3 - visibleWidth(right));
 				const left = truncateToWidth(item.label, leftWidth, "...");
 				const label = right ? `${left}${" ".repeat(Math.max(1, leftWidth - visibleWidth(left) + 1))}${right}` : left;
-				rows.push(start + i === this.#index ? theme.selection(`> ${label}`) : `  ${label}`);
+				rows.push(start + i === this.#index ? theme.selection(`❯ ${label}`) : `  ${label}`);
 			}
 			if (items.length === 0) rows.push(labels.noResults);
 			while (rows.length < height - 1 - details.length) rows.push("");

@@ -68,7 +68,7 @@ it("keeps bottom rows, selection and help visible at supported sizes", async () 
 		for (let i = 0; i < 29; i++) panel.handleInput("\x1b[B");
 		frame = renderLayoutFrame(root, width, height, () => {});
 		const plain = frame.lines.map(stripTerminalSequences).join("\n");
-		expect(plain).toContain("> Session 29");
+		expect(plain).toContain("❯ Session 29");
 		expect(plain).toContain("Esc Close");
 		expect(plain).toContain("Ready");
 		expect(frame.lines.every((line) => visibleWidth(line) <= width)).toBe(true);
@@ -95,7 +95,7 @@ it("small window fallback preserves the editor draft", () => {
 it("bounds real multiline editing and slash completion without losing cursor or footer", async () => {
 	const { TuiAltScreen, CombinedAutocompleteProvider, CURSOR_MARKER } = await import("@earendil-works/pi-tui");
 	const { BoundedEditor } = await import("../src/components/editor.ts");
-	const { getEditorTheme } = await import("../src/theme.ts");
+	const { getEditorTheme } = await import("../src/theme/index.ts");
 	const terminal = { columns: 80, rows: 24 } as import("@earendil-works/pi-tui").Terminal;
 	const ui = new TuiAltScreen(terminal);
 	const editor = new BoundedEditor(ui, getEditorTheme(), { autocompleteMaxVisible: 2 });

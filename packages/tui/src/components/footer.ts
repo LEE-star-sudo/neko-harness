@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { type Component, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { formatTokens } from "../format.ts";
 import { labels } from "../labels.ts";
-import { theme } from "../theme.ts";
+import { theme } from "../theme/index.ts";
 
 export type FooterStats = {
 	readonly contextUsage?: { tokens: number | null; window: number; percent: number | null };
@@ -15,6 +15,13 @@ export type FooterStats = {
 	readonly cwd: string;
 };
 
+/** 主行右侧状态词的语义色:就绪 ok / 忙碌 accent / 压缩进行 warning / 失败 error。 */
+type StatusTone = "ok" | "accent" | "warning" | "error";
+
+/**
+ * 状态栏两行(design D8):主行身份(工作区 · 模型 · Think 档)+ 右对齐状态词,
+ * 副行度量(Ctx/In/Out/Cache/成本)+ 键位提示。窄屏按候选列表逐级退化。
+ */
 export class StatusFooter implements Component {
 	panelOpen = false;
 	#stats: FooterStats | undefined;
@@ -22,16 +29,60 @@ export class StatusFooter implements Component {
 		this.#stats = stats;
 	}
 	invalidate(): void {}
+
+	#tone(): StatusTone {
+		const s = this.#stats;
+		if (!s) return "ok";
+		if (s.compaction !== undefined) {
+			if (s.compaction.startsWith("Compaction failed")) return "error";
+			if (["Compacting", "Waiting", "Retrying", "Applying"].some((w) => s.compaction!.includes(w))) return "warning";
+			return "ok";
+		}
+		return s.busy ? "accent" : "ok";
+	}
+
 	render(width: number): string[] {
 		const s = this.#stats;
 		if (!s) return [labels.connecting, ""].map((x) => truncateToWidth(x, width));
 		const space = Math.max(1, width - 2);
-		const status = truncateToWidth(s.compaction ?? s.busy ?? labels.ready, Math.min(28, Math.floor(space / 2)));
-		const workspace = truncateToWidth(basename(s.cwd) || s.cwd, Math.max(1, space - visibleWidth(status) - 3));
-		let first = `${workspace} | ${s.busy ? theme.accent(status) : theme.ok(status)}`;
-		for (const field of [s.model.split("/").at(-1) ?? s.model, s.thinkingLevel ? `Think: ${s.thinkingLevel}` : ""]) {
-			if (field && visibleWidth(first) + visibleWidth(field) + 3 <= space) first += ` | ${theme.model(field)}`;
+
+		// —— 主行:身份(左)+ 状态词(右)——
+		const statusText = truncateToWidth(s.compaction ?? s.busy ?? labels.ready, Math.min(28, Math.floor(space / 2)));
+		const tone = this.#tone();
+		const statusStyled =
+			tone === "error"
+				? theme.error(statusText)
+				: tone === "warning"
+					? theme.warning(statusText)
+					: tone === "accent"
+						? theme.accent(statusText)
+						: theme.ok(statusText);
+		const modelShort = s.model.split("/").at(-1) ?? s.model;
+		const identity: Array<{ text: string; slot: (t: string) => string }> = [
+			{ text: basename(s.cwd) || s.cwd, slot: theme.muted },
+			{ text: modelShort, slot: theme.model },
+			...(s.thinkingLevel ? [{ text: `Think ${s.thinkingLevel}`, slot: theme.dim }] : []),
+		];
+		const statusWidth = visibleWidth(statusText);
+		// 逐级丢弃最右身份段,直到左段与状态词可容纳(至少留 1 格间隔)。
+		const leftBudget = Math.max(1, space - statusWidth - 1);
+		let left = "";
+		let leftWidth = 0;
+		for (let count = identity.length; count >= 1 && left === ""; count--) {
+			const parts = identity.slice(0, count).map((p) => p.text);
+			if (parts.join(" · ").length <= leftBudget) {
+				left = parts.map((text, i) => identity[i]!.slot(text)).join(theme.dim(" · "));
+				leftWidth = parts.join(" · ").length;
+			}
 		}
+		if (left === "") {
+			left = theme.muted(truncateToWidth(identity[0]!.text, leftBudget));
+			leftWidth = Math.min(visibleWidth(identity[0]!.text), leftBudget);
+		}
+		const gap = Math.max(1, space - leftWidth - statusWidth);
+		const first = ` ${left}${" ".repeat(gap)}${statusStyled}`;
+
+		// —— 副行:度量 + 键位(候选逐级退化)——
 		const hints = this.panelOpen
 			? labels.close
 			: s.canAbort && !s.busy
@@ -45,32 +96,48 @@ export class StatusFooter implements Component {
 			context && context.window > 0
 				? `Ctx ${context.percent === null ? "?" : `${context.percent.toFixed(1)}%`}/${formatTokens(context.window)}`
 				: "";
-		const usage = [contextText, s.usageText].filter(Boolean).join(" | ");
+		const usage = [contextText, s.usageText].filter(Boolean).join(" · ");
 		const cache = s.usageText.match(/Cache: \S+/)?.[0] ?? "";
-		const essentials = [contextText, cache].filter(Boolean).join(" | ");
+		const essentials = [contextText, cache].filter(Boolean).join(" · ");
 		const shortContext = contextText.split("/")[0] ?? "";
-		const shortEssentials = [shortContext, cache].filter(Boolean).join(" | ");
+		const shortEssentials = [shortContext, cache].filter(Boolean).join(" · ");
 		const minimalHints = this.panelOpen ? labels.close : s.canAbort || s.busy ? "Esc Stop" : "/ Cmds";
+		const joinHints = (metric: string, hint: string) => (metric ? `${metric} · ${hint}` : hint);
 		const candidates = this.panelOpen
-			? [`${essentials} | ${hints}`, `${shortEssentials} | ${hints}`, hints]
+			? [joinHints(essentials, hints), joinHints(shortEssentials, hints), hints]
 			: [
-					`${usage} | ${hints}`,
-					`${usage} | ${compactHints}`,
-					`${usage} | ${minimalHints}`,
-					`${essentials} | ${compactHints}`,
-					`${essentials} | ${minimalHints}`,
-					`${shortEssentials} | ${minimalHints}`,
+					joinHints(usage, hints),
+					joinHints(usage, compactHints),
+					joinHints(usage, minimalHints),
+					joinHints(essentials, compactHints),
+					joinHints(essentials, minimalHints),
+					joinHints(shortEssentials, minimalHints),
 					minimalHints,
 				];
 		const second = candidates.find((line) => visibleWidth(line) <= space) ?? minimalHints;
+		// Ctx 占比阈值配色:>90% error、>75% warning,否则随副行弱化。
+		// 分段着色,而非 dim 包裹后字符串替换(SGR [39m 会截断外层的 dim)。
 		const shownContext = second.includes(contextText) ? contextText : shortContext;
+		const percent = context?.percent ?? null;
 		const contextLabel =
-			context && context.percent !== null && context.percent > 90 ? theme.error(shownContext) : theme.dim(shownContext);
-		return [` ${first}`, ` ${theme.dim(second).replace(shownContext, contextLabel)}`].map((line) =>
-			truncateToWidth(line, width),
-		);
+			percent !== null && percent > 90
+				? theme.error(shownContext)
+				: percent !== null && percent > 75
+					? theme.warning(shownContext)
+					: theme.muted(shownContext);
+		let secondLine: string;
+		const contextAt = shownContext !== "" ? second.indexOf(shownContext) : -1;
+		if (contextAt >= 0) {
+			const dimSeg = (text: string) => (text === "" ? "" : theme.dim(text));
+			secondLine =
+				dimSeg(second.slice(0, contextAt)) + contextLabel + dimSeg(second.slice(contextAt + shownContext.length));
+		} else {
+			secondLine = theme.dim(second);
+		}
+		return [first, ` ${secondLine}`].map((line) => truncateToWidth(line, width));
 	}
 }
+
 export function usageText(input: number, output: number, cacheRead: number, costTotal: number): string {
 	return `In: ${formatTokens(input)} Out: ${formatTokens(output)} Cache: ${formatTokens(cacheRead)} $${costTotal.toFixed(4)}`;
 }

@@ -4,9 +4,11 @@ import type { SlashCommand } from "@earendil-works/pi-tui";
 export const commands: SlashCommand[] = [
 	{ name: "compact", description: "Compact context (/compact optional instructions)" },
 	{ name: "exit", description: "Exit neko TUI" },
+	{ name: "new", description: "Create a new session" },
 	{ name: "sessions", description: "Switch or create a session" },
 	{ name: "login", description: "Configure DeepSeek API key" },
 	{ name: "model", description: "Choose a model" },
+	{ name: "theme", description: "Choose color theme (auto/light/dark)" },
 	{ name: "think", description: "Set thinking level (/think high)" },
 	{ name: "fork", description: "Fork this session" },
 	{ name: "archive", description: "Archive this session" },

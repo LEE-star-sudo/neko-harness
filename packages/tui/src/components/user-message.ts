@@ -1,8 +1,8 @@
 import { Container, Markdown, Text } from "@earendil-works/pi-tui";
 import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
-import { getMarkdownTheme, theme } from "../theme.ts";
+import { getMarkdownTheme, theme } from "../theme/index.ts";
 
-/** 用户消息：蓝色气泡（整行背景），Markdown 渲染；/skill: 展开块折叠为单行标记。 */
+/** 用户消息：蓝色气泡（整行背景 + 樱花左缘条），Markdown 渲染；/skill: 展开块折叠为单行标记。 */
 export class UserMessageComponent extends Container {
 	#text: string;
 	#skill?: SkillInvocation;
@@ -17,6 +17,12 @@ export class UserMessageComponent extends Container {
 	setText(text: string): void {
 		this.#text = text;
 		this.#rebuild();
+	}
+
+	/** 每行加 `▍` accent 左缘（底色 userBg 贯通）；内容宽度 -1，间距由内容自身 padding 提供。 */
+	override render(width: number): string[] {
+		const bar = theme.userBg(theme.accent("▍"));
+		return super.render(Math.max(1, width - 1)).map((line) => `${bar}${line}`);
 	}
 
 	#rebuild(): void {

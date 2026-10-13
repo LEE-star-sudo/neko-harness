@@ -1,5 +1,5 @@
 // neko TUI 入口：bun --conditions=neko-source packages/tui/src/main.ts [选项]
-import type { ThemePreference } from "./theme.ts";
+import type { ThemePreference } from "./theme/index.ts";
 import { runTui } from "./tui.ts";
 
 const USAGE = `Usage: neko tui [options]

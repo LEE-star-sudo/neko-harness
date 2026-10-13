@@ -1,7 +1,7 @@
 import { type Component, Input, isKeyRelease, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { CREDENTIAL_PROVIDERS, type CredentialProviderId, credentialProvider } from "@neko-harness/core";
 import type { NekoCredentialState } from "@neko-harness/gateway";
-import { theme } from "../theme.ts";
+import { theme } from "../theme/index.ts";
 
 /** Input is never rendered; replacing it also discards its undo/kill buffers. */
 export class LoginPanel implements Component {

@@ -3,7 +3,7 @@ import { type Terminal, TuiAltScreen } from "@earendil-works/pi-tui";
 import type { FileCandidates } from "../../core/src/file-mentions.ts";
 import { WorkspaceFiles } from "../../core/src/workspace-files.ts";
 import { BoundedEditor } from "../src/components/editor.ts";
-import { getEditorTheme } from "../src/theme.ts";
+import { getEditorTheme } from "../src/theme/index.ts";
 
 let files = new WorkspaceFiles();
 afterEach(async () => {
@@ -161,7 +161,7 @@ it("uses Pi for file and directory completion without submitting", async () => {
 it("closes Pi candidates before starting the double-Escape clear sequence", async () => {
 	const { TuiAltScreen, visibleWidth } = await import("@earendil-works/pi-tui");
 	const { BoundedEditor } = await import("../src/components/editor.ts");
-	const { getEditorTheme } = await import("../src/theme.ts");
+	const { getEditorTheme } = await import("../src/theme/index.ts");
 	for (const width of [120, 80, 60]) {
 		const editor = new BoundedEditor(
 			new TuiAltScreen({ columns: width, rows: 24 } as import("@earendil-works/pi-tui").Terminal),
