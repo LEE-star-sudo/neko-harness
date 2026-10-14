@@ -5,6 +5,7 @@ import type { ImageMetadata } from "./image-metadata.ts";
 import { type DefaultImagePrompt, savedDefaultImagePrompt } from "./image-prompt.ts";
 import type { ImageInfo } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
+import type { JobSummary } from "./jobs.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import type { SkillInvocation } from "./skill-invocation.ts";
 import type { Delegation, SubagentSummary } from "./subagents.ts";
@@ -34,6 +35,8 @@ export type ChatView = {
 	approvals?: ToolApproval[];
 	subagents?: Delegation[];
 	agents?: SubagentSummary[];
+	/** Absent on a gateway without background jobs. */
+	jobs?: JobSummary[];
 	rounds?: Delegation[];
 	taskUsage?: UsageTotals;
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
@@ -118,7 +121,7 @@ export type ChatItem = { order?: number } & (
 			/** write diff 因行数或字节预算截断；缺省为 false。 */
 			diffTruncated?: boolean;
 	  }
-	| { type: "system"; key: string; id: number; text: string }
+	| { type: "system"; key: string; id: number; text: string; jobId?: string }
 );
 
 /** 正在生成的一轮（live.generation.message + live.tools 的合并投影）。 */
@@ -389,6 +392,18 @@ export function projectChatView(
 	const items: ChatItem[] = [];
 	for (const entry of view.entries) {
 		const message = entry.model?.[0];
+		const jobReport = entry.kind === NekoInput.kind ? (entry.data as InputData | undefined)?.jobReport : undefined;
+		if (message?.role === "user" && jobReport) {
+			// A background job report is a system notice, not something the user typed.
+			items.push({
+				type: "system",
+				key: `e${entry.id}`,
+				id: entry.id,
+				text: userText(message.content),
+				jobId: jobReport.jobId,
+			});
+			continue;
+		}
 		if (message?.role === "user") {
 			const defaultImagePrompt =
 				entry.kind === NekoInput.kind

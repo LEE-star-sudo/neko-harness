@@ -507,6 +507,7 @@ export function createSubagentExtension(
 								tools: agent.tools.filter(
 									(t) =>
 										t.name !== "subagent" &&
+										t.name !== "job" &&
 										(role === "coder" || READ_TOOLS.has(t.name) || (role === "explore" && t.name === "bash")),
 								),
 							});

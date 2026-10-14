@@ -29,6 +29,9 @@ const TOOL_GUIDELINES: Record<string, readonly string[]> = {
 		"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
 	],
 	bash: ["Use bash for file operations like ls, rg, find"],
+	job: [
+		'Use job {action:"start", command, title?, timeout?} for long-running commands (dev servers, watchers, long builds or tests) instead of bash, which would block. Jobs have no stdin. start returns within 2 seconds, with the early result if the command already ended; a job that ends later reports back to you automatically, so do not poll. Read new output with {action:"output", jobId, since?} using the offset from the previous call, list jobs with {action:"list"}, end one with {action:"stop", jobId}. Run short commands with bash.',
+	],
 
 	web_search: ["Use web_search for current information from the internet instead of guessing."],
 	web_extract: ["Use web_extract to read the full content of a web page when you have its URL."],

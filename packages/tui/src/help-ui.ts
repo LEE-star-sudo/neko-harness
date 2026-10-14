@@ -49,6 +49,13 @@ export function helpLines(platform: string = process.platform): string[] {
 		["S", "Stop current round; keep agent context (Enter confirms)"],
 		["Click", "Open round card or status-bar Agents entry"],
 	]);
+	section("Jobs", [
+		["/jobs", "View background jobs"],
+		["Enter", "Open job output"],
+		["S", "Stop selected running job (Enter confirms)"],
+		["End", "Jump to the newest output"],
+		["←", "Back"],
+	]);
 	section("Skills", [
 		["U", "Install for user"],
 		["P", "Install for project"],

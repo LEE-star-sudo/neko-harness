@@ -8,6 +8,8 @@ export type FooterStats = {
 	readonly contextUsage?: { tokens: number | null; window: number; percent: number | null };
 	readonly subagentCount?: number;
 	readonly approvalCount?: number;
+	/** Running background jobs; omitted or 0 shows nothing. */
+	readonly jobCount?: number;
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;
@@ -103,6 +105,7 @@ export class StatusFooter implements Component {
 				? ""
 				: `→ Agents ${s.subagentCount}${s.approvalCount ? ` · Approval ${s.approvalCount}` : ""}`
 			: "";
+		const jobHint = s.jobCount && !this.panelOpen ? `Jobs ${s.jobCount}` : "";
 		const hints = this.panelOpen
 			? ""
 			: s.canAbort && !s.busy
@@ -122,7 +125,7 @@ export class StatusFooter implements Component {
 		const shortContext = contextText.split("/")[0] ?? "";
 		const shortEssentials = [shortContext, cost].filter(Boolean).join(" · ");
 		const minimalHints = this.panelOpen ? "" : s.canAbort || s.busy ? "Esc Stop" : "/help Keys";
-		const joinHints = (metric: string, hint: string) => [metric, agentHint, hint].filter(Boolean).join(" · ");
+		const joinHints = (metric: string, hint: string) => [metric, agentHint, jobHint, hint].filter(Boolean).join(" · ");
 		const candidates = this.panelOpen
 			? [joinHints(essentials, hints), joinHints(shortEssentials, hints), joinHints("", hints)]
 			: [
@@ -132,7 +135,9 @@ export class StatusFooter implements Component {
 					joinHints(shortEssentials, minimalHints),
 					joinHints("", minimalHints),
 				];
-		const second = candidates.find((line) => visibleWidth(line) <= space) ?? (agentHint || minimalHints);
+		const second =
+			candidates.find((line) => visibleWidth(line) <= space) ??
+			([agentHint, jobHint].filter(Boolean).join(" · ") || minimalHints);
 		// Ctx 占比阈值配色:>90% error、>75% warning,否则随副行弱化。
 		// 分段着色,而非 dim 包裹后字符串替换(SGR [39m 会截断外层的 dim)。
 		const shownContext = second.includes(contextText) ? contextText : shortContext;

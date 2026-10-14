@@ -17,6 +17,7 @@ import { withAbortSignal } from "@earendil-works/chord/context";
 import { type ConversationId, type EntryRecord, UsageDoc } from "@earendil-works/pi-durable";
 import {
 	type ChatView,
+	type JobSummary,
 	listDelegations,
 	mergeUsage,
 	type NekoRuntime,
@@ -61,6 +62,12 @@ const emptyView: ChatView = {
 	items: [],
 	streaming: null,
 };
+/** The job list is broadcast on every change, so a long command is clipped there; output is read on demand. */
+const JOB_COMMAND_PREVIEW_CHARS = 1000;
+const clipJob = (job: JobSummary): JobSummary =>
+	job.command.length > JOB_COMMAND_PREVIEW_CHARS
+		? { ...job, command: `${job.command.slice(0, JOB_COMMAND_PREVIEW_CHARS)}…` }
+		: job;
 /** The resource has one native view subscription for all attachments, released with its last hold. */
 async function openProjection(runtime: NekoRuntime, session: NekoSession, context: Context) {
 	const view = await session.viewState();
@@ -80,7 +87,9 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			changes.some(
 				(change) =>
 					change.type === "document" &&
-					((["app.neko.delegations", "app.neko.approvals", "app.neko.subagents"].includes(change.record.kind) &&
+					((["app.neko.delegations", "app.neko.approvals", "app.neko.subagents", "app.neko.jobs"].includes(
+						change.record.kind,
+					) &&
 						change.conversationId === session.id) ||
 						(change.record.kind === "pi.usage" &&
 							change.conversationId !== undefined &&
@@ -118,6 +127,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 				"",
 				{ models: runtime.listModels(), contextEntries: view.value.entries, compaction },
 			);
+			const jobs = (await session.jobs()).map(clipJob);
 			const subagents = await listDelegations(runtime.harness, session.id, context);
 			const approvals = await runtime.approvals.list(session.id, context);
 			for (const entry of subagents)
@@ -140,6 +150,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			const u = totalUsage(aggregate);
 			return {
 				...projected,
+				jobs,
 				agents: summarizeSubagents(
 					subagents,
 					(await runtime.harness.snapshot(SubagentsDoc, session.id, context))?.items,
@@ -367,6 +378,21 @@ export function serveSessions(host: Host, runtime: NekoRuntime, context: Context
 				return null;
 			},
 			skills: () => runtime.listSkills(projection.value.session.id),
+			jobOutput: async ({ jobId, since }) => {
+				try {
+					const { job, output } = await projection.value.session.jobOutput(jobId, since);
+					return { job: clipJob(job), ...output };
+				} catch (error) {
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot read job output");
+				}
+			},
+			jobStop: async ({ jobId }) => {
+				try {
+					return clipJob(await projection.value.session.stopJob(jobId));
+				} catch (error) {
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot stop job");
+				}
+			},
 			usage: async () => {
 				const usage = totalUsage(await projection.value.session.usage());
 				return {

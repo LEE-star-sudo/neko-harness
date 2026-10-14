@@ -15,6 +15,7 @@ export const commands: SlashCommand[] = [
 	{ name: "login", description: "Configure DeepSeek API key" },
 	{ name: "model", description: "Choose a model" },
 	{ name: "agents", description: "View agent tasks and activity" },
+	{ name: "jobs", description: "View background jobs" },
 	{ name: "theme", description: "Choose color theme (auto/light/dark)" },
 	{ name: "think", description: "Set thinking level (/think high)" },
 	{ name: "fork", description: "Fork this session" },

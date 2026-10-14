@@ -27,6 +27,7 @@ import {
 	LiveDoc as importLiveDoc,
 	MemoryStorage,
 	type Submission,
+	type Tx,
 	UsageDoc,
 	type UsageState,
 	watchEvents,
@@ -47,6 +48,8 @@ import { ImageDetails } from "./image-metadata.ts";
 import { addDefaultImagePrompt } from "./image-prompt.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
+import { JobManager } from "./job-engine.ts";
+import { type JobOutputRead, type JobSummary, JobsDoc, summarizeJobRecord } from "./jobs.ts";
 import { totalUsage } from "./projection.ts";
 import { expandSkillCommand } from "./prompt/invoke.ts";
 import { createNekoPrompt } from "./prompt/prompt.ts";
@@ -143,6 +146,12 @@ export type NekoSession = {
 	abort(): Promise<void>;
 	compact(instructions?: string): Promise<void>;
 	compactionRecord(): Promise<CompactionRecord | null>;
+	/** Background jobs of this session: running ones and the latest terminal ones, without output. */
+	jobs(): Promise<JobSummary[]>;
+	/** Bounded output of one job, resuming after `since`; rejects for an unknown job. */
+	jobOutput(jobId: string, since?: number): Promise<{ job: JobSummary; output: JobOutputRead }>;
+	/** Stop one job of this session; an ended job is returned as it is, an unknown one rejects. */
+	stopJob(jobId: string): Promise<JobSummary>;
 };
 
 /** Directory entry of `listConversations()`. */
@@ -374,6 +383,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			resourceSnapshots.stage(id, requestId, cwd, await loadResources(cwd));
 		}, resourceSnapshots.discard),
 	);
+	const jobs = new JobManager();
+	registry.install(jobs.extension);
 	for (const extension of options.extensions ?? []) registry.install(extension);
 	let approvals!: ToolApprovals;
 	const approvalExtension = createApprovalExtension(() => approvals);
@@ -453,6 +464,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		if (target) await registerWorkspace(savedWorkspace((await target.agent(context)).cwd));
 	}
 
+	const jobIo = (id: ConversationId) => ({
+		commit: <T>(change: (tx: Tx) => T | Promise<T>) => harness.commit(change, context),
+		state: () => harness.snapshot(JobsDoc, id, context),
+	});
 	let lastActivity = 0;
 	for (const record of existing)
 		lastActivity = Math.max(lastActivity, (await harness.snapshot(ActivityDoc, record.id, context))?.lastUsedAt ?? 0);
@@ -473,6 +488,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const cleanup = () => {
 		if (!closing)
 			closing = (async () => {
+				jobs.shutdown();
 				await workspaceFiles.close();
 				await metadata.close();
 			})();
@@ -625,6 +641,16 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		compactionRecord() {
 			return readCompaction(harness, storage, target.id, context);
+		},
+		jobs() {
+			return jobs.list(jobIo(target.id), target.id);
+		},
+		jobOutput(jobId, since) {
+			return jobs.readOutput(jobIo(target.id), target.id, jobId, since);
+		},
+		async stopJob(jobId) {
+			const job = await jobs.stop(jobIo(target.id), target.id, jobId, "user", context);
+			return summarizeJobRecord(job);
 		},
 		async compact(instructions) {
 			const agent = await target.agent(context);
@@ -840,6 +866,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		getConversation,
 		async archiveConversation(id) {
 			await (await sessionFor(id)).abort();
+			await jobs.stopAll(jobIo(id), id);
 			await metadata.archive(id);
 			await harness.commit(async (tx) => {
 				(await tx.doc(ArchivedDoc, id)).archived = true;

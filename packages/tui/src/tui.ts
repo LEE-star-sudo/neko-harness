@@ -22,6 +22,7 @@ import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { promptHistory } from "@neko-harness/core/input-history";
 import { sessionName } from "@neko-harness/core/session-display";
+import { JOBS_UNSUPPORTED, jobsClient } from "@neko-harness/gateway/client-session";
 import type { NekoChat } from "@neko-harness/gateway/contract";
 import { ApprovalDock } from "./approval-dock.ts";
 import { copyLastAnswer } from "./clipboard-write.ts";
@@ -29,6 +30,7 @@ import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
 import { HistoryImage, ImageTranscript } from "./components/history-image.ts";
+import { JobReportNotice } from "./components/job-report.ts";
 import { LoginPanel } from "./components/login.ts";
 import { formatNotice, type NoticeLevel } from "./components/notice.ts";
 import { PickerPanel } from "./components/picker.ts";
@@ -43,6 +45,7 @@ import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import { HelpDetail } from "./help-ui.ts";
 import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
+import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
 import { openSkillMarket } from "./skill-market-ui.ts";
@@ -81,7 +84,8 @@ type ItemEntry =
 	| { readonly kind: "user"; readonly component: UserMessageComponent }
 	| { readonly kind: "assistant"; readonly component: AssistantMessageComponent }
 	| { readonly kind: "tool"; readonly component: ToolExecutionComponent }
-	| { readonly kind: "system"; readonly component: Text };
+	| { readonly kind: "system"; readonly component: Text }
+	| { readonly kind: "job-report"; readonly component: JobReportNotice };
 
 /**
  * neko 终端界面：gateway 客户端（design D3/D4），底部输入框 + 消息区（流式渲染）+
@@ -121,6 +125,7 @@ class NekoTuiApp {
 
 	#chat: NekoChat | undefined;
 	#agentsPanel = false;
+	#jobsPanel = false;
 	#agentDetails = new Map<string, SubagentDetail>();
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
@@ -171,6 +176,7 @@ class NekoTuiApp {
 			() => {
 				this.#thinkingModel = undefined;
 				this.#agentsPanel = false;
+				this.#jobsPanel = false;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
 				this.#ui.setFocus(this.#editor);
@@ -431,6 +437,10 @@ class NekoTuiApp {
 		}
 		if (trimmed === "/agents") {
 			this.#showAgents();
+			return;
+		}
+		if (trimmed === "/jobs") {
+			this.#showJobs();
 			return;
 		}
 		const instructions = compactInstructions(trimmed);
@@ -696,6 +706,7 @@ class NekoTuiApp {
 	async switchSession(id: string): Promise<void> {
 		this.#approval.close();
 		this.#chat = undefined;
+		if (this.#jobsPanel && this.#panel.open) this.#panel.close();
 		if (this.#sessionId) this.#texts.set(this.#sessionId, this.#editor.getText());
 		this.#viewUnsubscribe?.();
 		this.#viewUnsubscribe = undefined;
@@ -915,6 +926,36 @@ class NekoTuiApp {
 		this.#ui.setFocus(this.#panel);
 		if (taskId !== undefined) this.#panel.showDetail(this.#agentDetail(taskId));
 	}
+	#showJobs(): void {
+		if (this.#panel.open || this.#login.open) return;
+		const chat = this.#chat;
+		if (chat === undefined) return;
+		const jobs = jobsClient(chat);
+		if (!jobs.supported) {
+			this.addNotice(JOBS_UNSUPPORTED, "warning");
+			return;
+		}
+		const changed = () => this.#ui.requestRender();
+		this.#jobsPanel = true;
+		this.#panel.pointerSelection = true;
+		this.#panel.emptyText = JOBS_EMPTY;
+		this.#panel.listKey = (data, value) => {
+			if (matchesKey(data, "left")) {
+				this.#panel.close();
+				return true;
+			}
+			if (data.toLowerCase() !== "s" || this.#panel.search.getValue() !== "" || value === undefined) return false;
+			if (jobs.list().find((job) => job.jobId === value)?.status !== "running") return false;
+			confirmStop(this.#panel, jobs, value, (message) => this.addNotice(message, "error"), changed);
+			return true;
+		};
+		void this.#panel.show(
+			"Jobs",
+			async () => jobItems(jobs.list()),
+			async (value) => new JobDetail(jobs, value, this.#panel, changed).open(),
+		);
+		this.#ui.setFocus(this.#panel);
+	}
 	#agentDetail(target: string | number) {
 		const round = typeof target === "number" ? this.#lastView?.subagents?.find((r) => r.taskId === target) : undefined;
 		const id = typeof target === "string" ? target : (round?.agentId ?? `agent-${round?.childId}`);
@@ -983,6 +1024,7 @@ class NekoTuiApp {
 		if (this.#chat) this.#approval.update(view.subagents ?? []);
 		else this.#approval.close();
 		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? [], view.agents));
+		if (this.#jobsPanel) this.#panel.update(jobItems(view.jobs ?? []));
 		for (const identity of view.agents ?? []) {
 			const detail = this.#agentDetails.get(identity.agentId);
 			if (detail) {
@@ -1137,6 +1179,12 @@ class NekoTuiApp {
 			this.#items.set(item.key, { kind: "tool", component });
 			return;
 		}
+		if (item.jobId !== undefined) {
+			const component = new JobReportNotice(item.text);
+			this.#imageTranscript.addItem(component);
+			this.#items.set(item.key, { kind: "job-report", component });
+			return;
+		}
 		const component = new ThemedText(item.text, theme.dim, 1, 0);
 		this.#imageTranscript.addItem(component);
 		this.#items.set(item.key, { kind: "system", component });
@@ -1155,7 +1203,7 @@ class NekoTuiApp {
 			entry.component.sync(mergeStream(item, streamCall));
 			return;
 		}
-		if (entry.kind === "system" && item.type === "system") {
+		if ((entry.kind === "system" || entry.kind === "job-report") && item.type === "system") {
 			entry.component.setText(item.text);
 		}
 	}
@@ -1237,6 +1285,7 @@ class NekoTuiApp {
 		const usage = view.taskUsage ?? view.usage;
 		this.#footer.setStats({
 			subagentCount: view.agents?.length ?? 0,
+			jobCount: view.jobs?.filter((job) => job.status === "running").length ?? 0,
 			approvalCount: view.subagents?.reduce((n, d) => n + (d.approvalCount ?? 0), 0) ?? 0,
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,

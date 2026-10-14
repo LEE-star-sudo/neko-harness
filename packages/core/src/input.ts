@@ -10,6 +10,8 @@ export type InputData = {
 	images: (ImageInfo & { contentIndex: number })[];
 	skill?: SkillInvocation;
 	defaultImagePrompt?: DefaultImagePrompt;
+	/** A background job's completion report; shown as a system item, never as user input or history. */
+	jobReport?: { jobId: string; status: string; exitCode: number | null };
 };
 /** Content and UI metadata travel in the same durable input, including while queued. */
 export const NekoInput = defineEntry<InputData>("app.neko.input");

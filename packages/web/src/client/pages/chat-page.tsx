@@ -2,6 +2,7 @@ import type { SubagentSummary } from "@neko-harness/core";
 import { useEffect, useRef, useState } from "react";
 import { ApprovalInbox } from "../components/approval-inbox";
 import { Composer } from "../components/composer";
+import { JobPanel } from "../components/job-panel";
 import { MessageList } from "../components/message-list";
 import { DismissButton, folderName, useMobile } from "../components/primitives";
 import { SessionList } from "../components/session-list";
@@ -48,8 +49,12 @@ export function ChatPage() {
 			},
 		}));
 	}, [agentEntries, currentSessionId]);
+	// Tied to the session it was opened in, so switching sessions closes it.
+	const [jobsOpenFor, setJobsOpenFor] = useState<string | null>(null);
+	const jobsOpen = jobsOpenFor !== null && jobsOpenFor === currentSessionId;
 	const selectIdentity = (id: string, taskId?: number) => {
 		if (!currentSessionId) return;
+		setJobsOpenFor(null);
 		const nonce = ++targetSequence.current;
 		setPanels((previous) => ({
 			...previous,
@@ -80,7 +85,21 @@ export function ChatPage() {
 			</a>
 			<SessionList open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 			<div className="flex min-w-0 flex-1 flex-col">
-				<TopBar sidebarOpen={sidebarOpen} conn={phase} onToggleSessions={() => setSidebarOpen(!sidebarOpen)} />
+				<TopBar
+					sidebarOpen={sidebarOpen}
+					conn={phase}
+					onToggleSessions={() => setSidebarOpen(!sidebarOpen)}
+					jobsOpen={jobsOpen}
+					onToggleJobs={() => {
+						if (!jobsOpen && currentSessionId)
+							setPanels((previous) =>
+								previous[currentSessionId]
+									? { ...previous, [currentSessionId]: { ...previous[currentSessionId]!, open: false } }
+									: previous,
+							);
+						setJobsOpenFor(jobsOpen ? null : (currentSessionId ?? null));
+					}}
+				/>
 				{notice !== null && (
 					<div
 						className={`discrete-in flex items-center gap-2 border-b py-1 pr-2 pl-9 text-xs ${
@@ -151,6 +170,15 @@ export function ChatPage() {
 					onClose={() => setPanels((previous) => ({ ...previous, [sessionId]: { ...panel, open: false } }))}
 				/>
 			))}
+			{currentSessionId && view?.jobs !== undefined && (
+				<JobPanel
+					key={currentSessionId}
+					sessionId={currentSessionId}
+					jobs={view.jobs}
+					open={jobsOpen}
+					onClose={() => setJobsOpenFor(null)}
+				/>
+			)}
 		</div>
 	);
 }

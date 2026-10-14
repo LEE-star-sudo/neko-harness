@@ -25,6 +25,14 @@ export {
 export type { DefaultImagePrompt } from "./image-prompt.ts";
 export { decodeImage, IMAGE_LIMITS, type ImageInfo, prepareImage, terminalImage } from "./images.ts";
 export {
+	JOB_LIMITS,
+	type JobOutputRead,
+	type JobReason,
+	type JobStatus,
+	type JobSummary,
+	JobsDoc,
+} from "./jobs.ts";
+export {
 	type ChatImage,
 	type ChatItem,
 	type ChatView,

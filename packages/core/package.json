@@ -54,6 +54,11 @@
 			"types": "./dist/application-updates.d.ts",
 			"import": "./dist/application-updates.js"
 		},
+		"./job-summary": {
+			"neko-source": "./src/job-summary.ts",
+			"types": "./dist/job-summary.d.ts",
+			"import": "./dist/job-summary.js"
+		},
 		"./input-history": {
 			"neko-source": "./src/input-history.ts",
 			"types": "./dist/input-history.d.ts",

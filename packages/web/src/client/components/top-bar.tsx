@@ -11,8 +11,17 @@ const phases: Record<ConnPhase, string> = {
 	reconnecting: "重连中…",
 	error: "连接失败",
 };
-export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void; sidebarOpen?: boolean }) {
-	const { workspaceRoot, currentSessionId, operating, sessions } = useNekoState();
+export function TopBar(props: {
+	conn: ConnPhase;
+	onToggleSessions: () => void;
+	sidebarOpen?: boolean;
+	onToggleJobs?: () => void;
+	jobsOpen?: boolean;
+}) {
+	const { workspaceRoot, currentSessionId, operating, sessions, view } = useNekoState();
+	// `jobs` is absent on a gateway without background jobs, so the entry stays hidden there.
+	const jobs = view?.jobs;
+	const running = jobs?.filter((job) => job.status === "running").length ?? 0;
 	const current = sessions.find((session) => session.id === currentSessionId);
 	return (
 		<>
@@ -40,6 +49,17 @@ export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void; s
 				>
 					{operating ? "切换中…" : phases[props.conn]}
 				</output>
+				{jobs !== undefined && jobs.length > 0 && props.onToggleJobs && (
+					<button
+						type="button"
+						className="focus-neko shrink-0 whitespace-nowrap rounded-full border border-sakura-300 px-2.5 py-0.5 text-xs text-sakura-800 hover:bg-sakura-50"
+						aria-expanded={props.jobsOpen}
+						title="后台任务"
+						onClick={props.onToggleJobs}
+					>
+						任务{running > 0 ? ` · ${running} 运行中` : ` ${jobs.length}`}
+					</button>
+				)}
 				<ExportMenu />
 			</header>
 			<UpdateNotice />

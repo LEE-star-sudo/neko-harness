@@ -4,6 +4,7 @@ import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { CopyButton } from "./copy-button";
 import { ImageGallery } from "./image-gallery";
+import { JobReportCard } from "./job-report-card";
 import { Markdown } from "./markdown";
 import { SkillInvocationCard } from "./skill-card";
 import { ThinkingBlock } from "./thinking";
@@ -349,7 +350,16 @@ export function MessageList({
 								);
 							}
 							case "system":
-								return <SystemRow key={item.key} text={item.text} />;
+								return item.jobId !== undefined ? (
+									<JobReportCard
+										key={item.key}
+										text={item.text}
+										jobId={item.jobId}
+										job={view?.jobs?.find((job) => job.jobId === item.jobId)}
+									/>
+								) : (
+									<SystemRow key={item.key} text={item.text} />
+								);
 							default:
 								return null;
 						}

@@ -115,6 +115,12 @@ export const appActions = {
 	subagent(taskId: number | string) {
 		return requireConnection().subagent(taskId);
 	},
+	jobOutput(sessionId: string, jobId: string, since?: number) {
+		return requireConnection().jobOutput(sessionId, jobId, since);
+	},
+	jobStop(sessionId: string, jobId: string) {
+		return requireConnection().jobStop(sessionId, jobId);
+	},
 	checkUpdates() {
 		return requireConnection().checkUpdates();
 	},

@@ -3,7 +3,7 @@ import { ApplicationProtocolError, type UpdateState } from "@neko-harness/core/a
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
-import { createGatewayConnection, type NekoGatewayConnection } from "@neko-harness/gateway/client-session";
+import { createGatewayConnection, jobsClient, type NekoGatewayConnection } from "@neko-harness/gateway/client-session";
 import { boundedWebSocketLink } from "@neko-harness/gateway/link";
 import type {
 	NekoBrowseOptions,
@@ -289,6 +289,17 @@ export class GatewayConnection {
 		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");
 		if (!this.ready) throw new Error("会话未就绪");
 		await this.#chat!.compact({ instructions });
+	}
+	/** Background job calls are bound to the session the panel was opened for. */
+	#jobs(sessionId: string) {
+		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换");
+		return jobsClient(this.#chat!);
+	}
+	async jobOutput(sessionId: string, jobId: string, since?: number) {
+		return this.#jobs(sessionId).output(jobId, since);
+	}
+	async jobStop(sessionId: string, jobId: string) {
+		return this.#jobs(sessionId).stop(jobId);
 	}
 	async image(entryId: number, contentIndex: number, sessionId?: string): Promise<ImageFile> {
 		if (sessionId !== undefined && sessionId !== this.#currentSessionId) throw new Error("会话已切换，草稿已保留");

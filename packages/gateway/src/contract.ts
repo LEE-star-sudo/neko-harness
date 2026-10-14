@@ -111,9 +111,34 @@ export const SubagentSummarySchema = Type.Object({
 	historyThrough: Type.Optional(integer),
 	historyUsage: Type.Optional(usage),
 });
+const jobStatus = Type.Enum(["running", "exited", "failed", "stopped", "lost"]);
+/** One background job without its output; `command` is clipped by the host so the list stays bounded. */
+export const JobSummarySchema = Type.Object({
+	jobId: str,
+	title: str,
+	command: str,
+	cwd: str,
+	status: jobStatus,
+	startedAt: num,
+	endedAt: Type.Union([num, nil]),
+	exitCode: Type.Union([num, nil]),
+	reason: Type.Optional(Type.Enum(["timeout", "spawn-error", "restart", "aborted"])),
+	timeoutSeconds: Type.Optional(num),
+	outputBytes: integer,
+});
+export const JobOutputSchema = Type.Object({
+	job: JobSummarySchema,
+	text: str,
+	/** Pass back as `since` to continue reading. */
+	offset: integer,
+	truncated: bool,
+	dropped: integer,
+});
 export const ChatViewSchema = Type.Object({
 	historyBefore: Type.Optional(Type.Union([integer, nil])),
 	agents: Type.Optional(Type.Array(SubagentSummarySchema)),
+	/** Absent on a gateway without background jobs; empty means supported with none. */
+	jobs: Type.Optional(Type.Array(JobSummarySchema)),
 	rounds: Type.Optional(Type.Array(DelegationSchema)),
 	subagents: Type.Optional(Type.Array(DelegationSchema)),
 	taskUsage: Type.Optional(usage),
@@ -193,7 +218,14 @@ export const ChatViewSchema = Type.Object({
 				diffRemoved: Type.Union([num, nil]),
 				diffTruncated: Type.Optional(bool),
 			}),
-			Type.Object({ type: Type.Literal("system"), order: Type.Optional(num), key: str, id: integer, text: str }),
+			Type.Object({
+				type: Type.Literal("system"),
+				order: Type.Optional(num),
+				key: str,
+				id: integer,
+				text: str,
+				jobId: Type.Optional(str),
+			}),
 		]),
 	),
 	streaming: Type.Union([nil, Type.Object({ thinking: str, text: str, toolCalls: Type.Array(call) })]),
@@ -341,6 +373,11 @@ export const NekoChat = contract("neko.chat", {
 				abort: rpc(nil, nil),
 				usage: rpc(nil, usage),
 				skills: rpc(nil, Type.Array(Type.Object({ name: str, description: str, location: str, level }))),
+				jobOutput: rpc(
+					Type.Object({ jobId: str, since: Type.Optional(integer) }, { additionalProperties: false }),
+					JobOutputSchema,
+				),
+				jobStop: rpc(Type.Object({ jobId: str }, { additionalProperties: false }), JobSummarySchema),
 				configure: rpc(change, nil),
 				compact: rpc(Type.Object({ instructions: Type.Optional(str) }, { additionalProperties: false }), nil),
 				importImage: rpc(str, Type.Object({ id: str, name: str })),
@@ -484,6 +521,8 @@ export type NekoSessionDirectory = Handle<typeof NekoSessionDirectory>;
 export type NekoSessionManagement = Handle<typeof NekoSessionManagement>;
 export type NekoModels = Handle<typeof NekoModels>;
 export type NekoChat = Handle<typeof NekoChat>;
+export type WireJobSummary = Static<typeof JobSummarySchema>;
+export type WireJobOutput = Static<typeof JobOutputSchema>;
 export type NekoWorkspaces = Handle<typeof NekoWorkspaces>;
 export type NekoWorkspaceFiles = Handle<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Handle<typeof NekoCredentials>;

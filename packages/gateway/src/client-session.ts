@@ -13,6 +13,8 @@ import {
 	NekoSubagent,
 	NekoWorkspaceFiles,
 	NekoWorkspaces,
+	type WireJobOutput,
+	type WireJobSummary,
 } from "./contract.ts";
 import { identifiedLink } from "./link.ts";
 import { type SubagentClient, subagentClient } from "./subagent-client.ts";
@@ -38,6 +40,36 @@ export function waitForValue<T>(state: Readable<T | undefined>, signal?: AbortSi
 		signal?.addEventListener("abort", abort, { once: true });
 		if (signal?.aborted) abort();
 	});
+}
+export const JOBS_UNSUPPORTED = "This gateway does not support background jobs. Restart the gateway to enable them.";
+export type JobsClient = {
+	/** False for a gateway built before background jobs: the view carries no `jobs` field at all. */
+	readonly supported: boolean;
+	/** Current summaries; empty when unsupported. */
+	list(): readonly WireJobSummary[];
+	output(jobId: string, since?: number): Promise<WireJobOutput>;
+	stop(jobId: string): Promise<WireJobSummary>;
+};
+/** Capability-probed access to a chat's background jobs; an old gateway degrades instead of failing. */
+export function jobsClient(chat: NekoChat): JobsClient {
+	const supported = () => chat.view.value?.jobs !== undefined;
+	const require = () => {
+		if (!supported()) throw new Error(JOBS_UNSUPPORTED);
+	};
+	return {
+		get supported() {
+			return supported();
+		},
+		list: () => chat.view.value?.jobs ?? [],
+		async output(jobId, since) {
+			require();
+			return chat.jobOutput({ jobId, ...(since === undefined ? {} : { since }) });
+		},
+		async stop(jobId) {
+			require();
+			return chat.jobStop({ jobId });
+		},
+	};
 }
 export type NekoGatewayConnection = {
 	readonly application: NekoApplicationInfo;

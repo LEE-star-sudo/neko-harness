@@ -36,6 +36,10 @@ export type PickerDetail = {
 export class PickerPanel implements Component {
 	pointerSelection = false;
 	agentNavigation = false;
+	/** Shown instead of "No results" when the unfiltered list is empty. */
+	emptyText: string | undefined;
+	/** Pre-filter for list keys (e.g. `S`, `←`); return true to consume. Reset when the panel closes. */
+	listKey: ((data: string, value: string | undefined) => boolean) | undefined;
 	readonly search = new Input({ prompt: "❯ ", placeholder: "Type to filter" });
 	#items: readonly PickerItem[] = [];
 	#index = 0;
@@ -106,6 +110,8 @@ export class PickerPanel implements Component {
 	close(): void {
 		this.pointerSelection = false;
 		this.agentNavigation = false;
+		this.emptyText = undefined;
+		this.listKey = undefined;
 		++this.#generation;
 		for (const detail of this.#details) detail.close?.();
 		this.#details = [];
@@ -180,6 +186,10 @@ export class PickerPanel implements Component {
 		}
 		if (this.#state !== "ready") return;
 		const items = this.#filtered();
+		if (this.listKey?.(data, items[this.#index]?.value)) {
+			this.changed();
+			return;
+		}
 		if (matchesKey(data, "up")) this.#move(-1);
 		else if (matchesKey(data, "down")) this.#move(1);
 		else if (matchesKey(data, "enter")) {
@@ -299,7 +309,8 @@ export class PickerPanel implements Component {
 				if (this.pointerSelection) this.#pointerRows.set(rows.length, start + i);
 				rows.push(rendered);
 			}
-			if (items.length === 0) rows.push(labels.noResults);
+			if (items.length === 0)
+				rows.push(this.emptyText !== undefined && this.#items.length === 0 ? this.emptyText : labels.noResults);
 			while (rows.length < height - 1 - details.length) rows.push("");
 			rows.push(...details.map((line) => theme.dim(line)));
 		}
