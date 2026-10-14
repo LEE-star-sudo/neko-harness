@@ -32,6 +32,8 @@ export type NekoTuiGatewayOptions = {
 	readonly configDir?: string;
 	/** 等待 gateway 就绪的超时。 */
 	readonly spawnTimeoutMs?: number;
+	/** 传输平台选择，默认当前平台；用于跨平台启动回归测试。 */
+	readonly platform?: NodeJS.Platform;
 };
 
 export type NekoTuiGateway = {
@@ -48,6 +50,7 @@ const SERVER_ID_FILENAME = "gateway-server-id";
 const SOCKET_POLL_MS = 50;
 const CONNECT_RETRY_MS = 100;
 const CONNECT_RETRIES = 20;
+const CONNECT_TIMEOUT_MS = 5_000;
 
 export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Promise<NekoTuiGateway> {
 	// 与 gateway 的解析保持一致（CLI > neko.config.json > 默认）：socket 默认名依赖数据目录与 serverId 文件。
@@ -55,14 +58,18 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 	const storagePath = options.storagePath ?? config.storagePath ?? DEFAULT_STORAGE_PATH;
 	const nekoDir = dirname(storagePath);
 	const fileServerId = readServerId(join(nekoDir, SERVER_ID_FILENAME));
+	const platform = options.platform ?? process.platform;
 
-	if (process.platform === "win32") {
+	if (platform === "win32") {
 		// Windows 无 Unix socket：读端口文件发现 ws 地址；文件过期（连接失败）按无活跃网关处理。
 		if (fileServerId !== undefined) {
 			const wsUrl = await readGatewayPortFile(nekoDir, fileServerId);
 			if (wsUrl !== undefined) {
 				try {
-					const client = await connectNekoGateway({ transport: "ws", url: wsUrl, serverId: fileServerId });
+					const client = await connectBeforeDeadline(
+						{ transport: "ws", url: wsUrl, serverId: fileServerId },
+						Date.now() + (options.spawnTimeoutMs ?? CONNECT_TIMEOUT_MS),
+					);
 					return { client, socketPath: undefined, serverId: fileServerId, spawned: false, close: () => client.close() };
 				} catch (error) {
 					if (error instanceof ApplicationProtocolError) throw error;
@@ -70,7 +77,7 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 				}
 			}
 		}
-		return spawnAndConnect({ ...options, storagePath, socketPath: undefined, nekoDir, fileServerId });
+		return spawnAndConnect({ ...options, platform, storagePath, socketPath: undefined, nekoDir, fileServerId });
 	}
 
 	const socketPath =
@@ -94,10 +101,11 @@ export async function connectToGateway(options: NekoTuiGatewayOptions = {}): Pro
 		}
 	}
 
-	return spawnAndConnect({ ...options, storagePath, socketPath, nekoDir, fileServerId });
+	return spawnAndConnect({ ...options, platform, storagePath, socketPath, nekoDir, fileServerId });
 }
 
 type SpawnPlan = {
+	readonly platform: NodeJS.Platform;
 	readonly configDir?: string;
 	readonly storagePath: string;
 	readonly credentialsPath?: string;
@@ -133,8 +141,9 @@ async function connectSpawned(
 ): Promise<NekoTuiGateway> {
 	const timeoutMs = plan.spawnTimeoutMs ?? 20_000;
 
-	if (process.platform === "win32") {
-		// Windows：等 serverId 文件 → 读端口文件 → ws 连接。
+	if (plan.platform === "win32") {
+		// Windows：端口文件可能残留或在启动中被改写，持续发现地址直到完整握手成功。
+		const timeoutAt = Date.now() + timeoutMs;
 		const serverId =
 			plan.fileServerId ??
 			(await waitForValue(
@@ -145,19 +154,20 @@ async function connectSpawned(
 				outputTail,
 				spawnError,
 			));
-		const wsUrl = await waitForValue(
-			() => readGatewayPortFile(plan.nekoDir, serverId),
-			"gateway ready (port file)",
-			timeoutMs,
-			child,
-			outputTail,
-			spawnError,
-		);
-		let lastError: unknown;
-		for (let attempt = 0; attempt < CONNECT_RETRIES; attempt++) {
-			if (child.exitCode !== null || spawnError() !== undefined) break;
+		let lastError: unknown = new Error("Gateway port file unavailable");
+		while (Date.now() < timeoutAt) {
+			if (child.exitCode !== null || child.signalCode !== null || spawnError() !== undefined) {
+				lastError =
+					spawnError() ?? new Error(`Gateway process exited (code ${child.exitCode}, signal ${child.signalCode})`);
+				break;
+			}
+			const wsUrl = await readGatewayPortFile(plan.nekoDir, serverId);
+			if (wsUrl === undefined) {
+				await sleep(Math.min(SOCKET_POLL_MS, Math.max(0, timeoutAt - Date.now())));
+				continue;
+			}
 			try {
-				const client = await connectNekoGateway({ transport: "ws", url: wsUrl, serverId });
+				const client = await connectBeforeDeadline({ transport: "ws", url: wsUrl, serverId }, timeoutAt, child);
 				return {
 					client,
 					socketPath: undefined,
@@ -173,11 +183,12 @@ async function connectSpawned(
 			} catch (error) {
 				if (error instanceof ApplicationProtocolError) throw error;
 				lastError = error;
-				await sleep(CONNECT_RETRY_MS);
 			}
+			await sleep(Math.min(CONNECT_RETRY_MS, Math.max(0, timeoutAt - Date.now())));
 		}
+		const timeout = Date.now() >= timeoutAt ? ` (startup timed out after ${timeoutMs}ms)` : "";
 		throw new Error(
-			`Gateway connection failed: ${lastError instanceof Error ? lastError.message : String(lastError)}\n${outputTail()}`,
+			`Gateway connection failed${timeout}: ${lastError instanceof Error ? lastError.message : String(lastError)}${formatTail(outputTail())}`,
 		);
 	}
 
@@ -239,7 +250,7 @@ async function connectSpawned(
 
 /** CLI options shared by source and compiled gateway entrypoints. */
 function gatewayArgs(plan: SpawnPlan): string[] {
-	if (process.platform === "win32") {
+	if (plan.platform === "win32") {
 		// Windows：仅 WS（--no-socket），不传 --port 走 win32 默认的随机端口，地址经端口文件发现。
 		return [
 			"--no-socket",
@@ -277,6 +288,32 @@ function serverIdFromSocketPath(socketPath: string): string | undefined {
 	return isServerId(candidate) ? candidate : undefined;
 }
 
+/** 每次连接均有超时；成功后撤掉计时器，保留连接供 TUI 使用。 */
+async function connectBeforeDeadline(
+	address: Parameters<typeof connectNekoGateway>[0],
+	timeoutAt: number,
+	child?: ChildProcess,
+): Promise<NekoGatewayClient> {
+	const remaining = timeoutAt - Date.now();
+	if (remaining <= 0) throw new Error("Gateway connection timed out");
+	const controller = new AbortController();
+	const timer = setTimeout(
+		() => controller.abort(new Error("Gateway connection timed out")),
+		Math.min(CONNECT_TIMEOUT_MS, remaining),
+	);
+	const exited = () => controller.abort(new Error("Gateway process exited during connection"));
+	child?.once("exit", exited);
+	try {
+		return await connectNekoGateway(address, controller.signal);
+	} catch (error) {
+		if (controller.signal.aborted) throw controller.signal.reason;
+		throw error;
+	} finally {
+		clearTimeout(timer);
+		child?.removeListener("exit", exited);
+	}
+}
+
 type OutputTail = () => string;
 
 /** 收集子进程输出尾部，spawn 失败时给出可操作的错误信息。 */
@@ -308,8 +345,10 @@ async function waitForValue<T>(
 			throw new Error(`Gateway process failed to start: ${error.message}${formatTail(outputTail())}`);
 		const value = await poll();
 		if (value !== undefined) return value;
-		if (child.exitCode !== null) {
-			throw new Error(`Gateway process exited early (exit ${child.exitCode})${formatTail(outputTail())}`);
+		if (child.exitCode !== null || child.signalCode !== null) {
+			throw new Error(
+				`Gateway process exited early (exit ${child.exitCode}, signal ${child.signalCode})${formatTail(outputTail())}`,
+			);
 		}
 		if (Date.now() - start > timeoutMs) {
 			child.kill("SIGTERM");
