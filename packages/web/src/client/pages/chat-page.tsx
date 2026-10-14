@@ -1,5 +1,5 @@
-import type { Delegation } from "@neko-harness/core";
-import { useEffect, useState } from "react";
+import type { SubagentSummary } from "@neko-harness/core";
+import { useEffect, useRef, useState } from "react";
 import { ApprovalInbox } from "../components/approval-inbox";
 import { Composer } from "../components/composer";
 import { MessageList } from "../components/message-list";
@@ -14,6 +14,7 @@ import { useNekoState } from "../lib/store";
 export function ChatPage() {
 	const { view, phase, notice, operating, workspaceRoot, currentSessionId } = useNekoState();
 	const mobile = useMobile();
+	const targetSequence = useRef(0);
 	const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
 	useEffect(() => {
 		const query = window.matchMedia("(max-width: 1023px)");
@@ -22,26 +23,40 @@ export function ChatPage() {
 		return () => query.removeEventListener("change", update);
 	}, []);
 	const [panels, setPanels] = useState<
-		Record<string, { open: boolean; selected: number | null; entries: Delegation[] }>
+		Record<
+			string,
+			{ open: boolean; selected: string | null; entries: SubagentSummary[]; target?: { taskId: number; nonce: number } }
+		>
 	>({});
-	const agentEntries = view?.subagents;
+	const agentEntries = view?.agents;
 	useEffect(() => {
 		if (!currentSessionId || !agentEntries?.length) return;
 		setPanels((previous) => ({
 			...previous,
 			[currentSessionId]: {
 				open: previous[currentSessionId]?.open ?? true,
-				selected: previous[currentSessionId]?.selected ?? agentEntries[0]!.taskId,
+				...(previous[currentSessionId]?.target ? { target: previous[currentSessionId]!.target } : {}),
+				selected: previous[currentSessionId]?.selected ?? agentEntries[0]!.agentId,
 				entries: agentEntries,
 			},
 		}));
 	}, [agentEntries, currentSessionId]);
-	const selectAgent = (id: number) => {
+	const selectIdentity = (id: string, taskId?: number) => {
 		if (!currentSessionId) return;
+		const nonce = ++targetSequence.current;
 		setPanels((previous) => ({
 			...previous,
-			[currentSessionId]: { open: true, selected: id, entries: agentEntries ?? [] },
+			[currentSessionId]: {
+				open: true,
+				selected: id,
+				entries: agentEntries ?? [],
+				...(taskId === undefined ? {} : { target: { taskId, nonce } }),
+			},
 		}));
+	};
+	const selectAgent = (taskId: number) => {
+		const round = view?.subagents?.find((r) => r.taskId === taskId);
+		if (round?.agentId) selectIdentity(round.agentId, taskId);
 	};
 	const [sidebarOpen, setSidebarOpen] = useState(() => !window.matchMedia(MOBILE_QUERY).matches);
 	useEffect(() => {
@@ -96,9 +111,11 @@ export function ChatPage() {
 									<button
 										type="button"
 										className="focus-neko rounded-full border border-sakura-300 bg-surface px-3.5 py-1 text-xs font-medium text-sakura-800 hover:bg-sakura-50"
-										onClick={() => selectAgent(panels[currentSessionId ?? ""]?.selected ?? agentEntries![0]!.taskId)}
+										onClick={() =>
+											selectIdentity(panels[currentSessionId ?? ""]?.selected ?? agentEntries![0]!.agentId)
+										}
 									>
-										子智能体 · {agentEntries!.length} 个任务
+										子智能体 · {agentEntries!.length} 个
 										{agentEntries!.some((d) => d.approvalCount)
 											? ` · 待审批 ${agentEntries!.reduce((n, d) => n + (d.approvalCount ?? 0), 0)}`
 											: ""}
@@ -121,7 +138,8 @@ export function ChatPage() {
 					approval={approvalInPanel && sessionId === currentSessionId ? <ApprovalInbox /> : undefined}
 					selected={panel.selected}
 					open={sessionId === currentSessionId && panel.open}
-					onSelect={selectAgent}
+					onSelect={selectIdentity}
+					target={panel.target}
 					onClose={() => setPanels((previous) => ({ ...previous, [sessionId]: { ...panel, open: false } }))}
 				/>
 			))}

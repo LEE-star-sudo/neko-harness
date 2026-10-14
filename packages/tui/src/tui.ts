@@ -116,7 +116,7 @@ class NekoTuiApp {
 
 	#chat: NekoChat | undefined;
 	#agentsPanel = false;
-	#agentDetails = new Map<number, SubagentDetail>();
+	#agentDetails = new Map<string, SubagentDetail>();
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
 	#directoryUnsubscribe: (() => void) | undefined;
@@ -849,20 +849,27 @@ class NekoTuiApp {
 		this.#panel.agentNavigation = true;
 		void this.#panel.show(
 			"Agents",
-			async () => subagentItems(this.#lastView?.subagents ?? []),
-			async (value) => this.#agentDetail(Number(value)),
+			async () => subagentItems(this.#lastView?.subagents ?? [], this.#lastView?.agents),
+			async (value) => this.#agentDetail(value),
 		);
 		this.#ui.setFocus(this.#panel);
 		if (taskId !== undefined) this.#panel.showDetail(this.#agentDetail(taskId));
 	}
-	#agentDetail(taskId: number) {
-		let detail = this.#agentDetails.get(taskId);
+	#agentDetail(target: string | number) {
+		const round = typeof target === "number" ? this.#lastView?.subagents?.find((r) => r.taskId === target) : undefined;
+		const id = typeof target === "string" ? target : (round?.agentId ?? `agent-${round?.childId}`);
+		let detail = this.#agentDetails.get(id);
 		if (!detail) {
-			detail = new SubagentDetail(this.#gateway.client, taskId, this.#panel, () => this.#ui.requestRender());
-			this.#agentDetails.set(taskId, detail);
+			detail = new SubagentDetail(this.#gateway.client, id, this.#panel, () => this.#ui.requestRender());
+			this.#agentDetails.set(id, detail);
 		}
-		detail.entry = this.#lastView?.subagents?.find((entry) => entry.taskId === taskId);
-		return detail.open();
+		detail.identity = this.#lastView?.agents?.find((a) => a.agentId === id);
+		detail.entry = this.#lastView?.subagents?.find(
+			(r) => r.taskId === (detail!.identity?.activeRoundId ?? detail!.identity?.lastRoundId),
+		);
+		detail.open();
+		if (typeof target === "number") detail.locate(target);
+		return detail;
 	}
 	#closeOverlay(): void {
 		if (this.#panel.open) this.#panel.close();
@@ -909,10 +916,13 @@ class NekoTuiApp {
 		this.#lastView = view;
 		if (this.#chat) this.#approval.update(view.subagents ?? []);
 		else this.#approval.close();
-		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? []));
-		for (const entry of view.subagents ?? []) {
-			const detail = this.#agentDetails.get(entry.taskId);
-			if (detail) detail.entry = entry;
+		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? [], view.agents));
+		for (const identity of view.agents ?? []) {
+			const detail = this.#agentDetails.get(identity.agentId);
+			if (detail) {
+				detail.identity = identity;
+				detail.entry = view.subagents?.find((r) => r.taskId === (identity.activeRoundId ?? identity.lastRoundId));
+			}
 		}
 		const imageModel = `${this.#sessionId}:${view.agent.model?.provider}/${view.agent.model?.modelId}`;
 		if (
@@ -1152,7 +1162,7 @@ class NekoTuiApp {
 	#syncFooter(view: ChatView): void {
 		const usage = view.taskUsage ?? view.usage;
 		this.#footer.setStats({
-			subagentCount: view.subagents?.length ?? 0,
+			subagentCount: view.agents?.length ?? 0,
 			approvalCount: view.subagents?.reduce((n, d) => n + (d.approvalCount ?? 0), 0) ?? 0,
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,

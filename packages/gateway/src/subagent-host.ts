@@ -9,8 +9,17 @@ import {
 	opaque,
 	resource,
 } from "@earendil-works/chord";
-import type { ConversationId, EntryId, TaskId } from "@earendil-works/pi-durable";
-import { type ChatView, listDelegations, type NekoRuntime, projectChatView } from "@neko-harness/core";
+import { type ConversationId, type EntryId, type TaskId, UsageDoc } from "@earendil-works/pi-durable";
+import {
+	agentIdFor,
+	type ChatView,
+	listDelegations,
+	type NekoRuntime,
+	projectChatView,
+	SubagentsDoc,
+	subagentUsageTotals,
+	subtractSubagentUsage,
+} from "@neko-harness/core";
 import { Type } from "typebox";
 import { NekoSubagent } from "./contract.ts";
 import { IMAGE_CHUNK_BYTES } from "./image-uploads.ts";
@@ -91,7 +100,10 @@ async function openReader(
 			const stopApprovals = runtime.harness.subscribeCommits(({ changes }) => {
 				if (
 					changes.some(
-						(c) => c.type === "document" && c.record.kind === "app.neko.approvals" && c.conversationId === parentId,
+						(c) =>
+							c.type === "document" &&
+							["app.neko.approvals", "app.neko.delegations", "app.neko.subagents"].includes(c.record.kind) &&
+							c.conversationId === parentId,
 					)
 				)
 					fn(null);
@@ -107,7 +119,18 @@ async function openReader(
 				through === undefined
 					? (await runtime.approvals.list(parentId as ConversationId, context)).filter((a) => a.childId === childId)
 					: [];
-			revision = remember({ ...project(page.entries), approvals, historyBefore: page.next });
+			const currentUsage = await runtime.harness.snapshot(UsageDoc, childId as ConversationId, context);
+			const rounds = (await listDelegations(runtime.harness, parentId as ConversationId, context))
+				.filter((r) => r.childId === childId)
+				.map(({ usageStart, usageEnd: _end, ...round }) => ({
+					...round,
+					roundUsage:
+						round.roundUsage ??
+						(through === undefined && usageStart && currentUsage
+							? subagentUsageTotals(subtractSubagentUsage(currentUsage, usageStart))
+							: null),
+				}));
+			revision = remember({ ...project(page.entries), rounds, approvals, historyBefore: page.next });
 			return revision;
 		},
 		async chunk(input: { kind: "view" | "history"; before?: number; token?: number; offset: number }) {
@@ -153,7 +176,7 @@ async function openReader(
 }
 const ChildProjection = local("neko.subagent-projection", {
 	version: 1,
-	input: Type.Object({ parentId: Type.Integer(), taskId: Type.Integer() }),
+	input: Type.Object({ parentId: Type.Integer(), agentId: Type.String() }),
 	members: {
 		revision: Type.Integer(),
 		reader: opaque<Awaited<ReturnType<typeof openReader>>>("neko.subagent-reader@1"),
@@ -166,8 +189,10 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 			reader: resource({
 				rev: 1,
 				async open() {
-					const entry = (await listDelegations(runtime.harness, input.parentId as ConversationId, context)).find(
-						(d) => d.taskId === input.taskId,
+					const entry = (await listDelegations(runtime.harness, input.parentId as ConversationId, context)).find((d) =>
+						input.agentId.startsWith("round-")
+							? d.taskId === Number(input.agentId.slice(6))
+							: (d.agentId ?? agentIdFor(d.childId)) === input.agentId,
 					);
 					if (!entry) throw new ChordError("gone", "Subagent unavailable");
 					const r = await openReader(
@@ -209,7 +234,10 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 			if (!(await runtime.getConversation(Number(input.sessionId) as ConversationId)))
 				throw new ChordError("gone", "Session unavailable");
 			const entry = (await listDelegations(runtime.harness, Number(input.sessionId) as ConversationId, context)).find(
-				(d) => d.taskId === input.taskId,
+				(d) =>
+					input.agentId !== undefined
+						? (d.agentId ?? agentIdFor(d.childId)) === input.agentId
+						: d.taskId === input.taskId,
 			);
 			if (!entry) throw new ChordError("forbidden", "Subagent does not belong to this session");
 			return entry;
@@ -217,7 +245,7 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 		const { target } = self.resources({ target: resource({ rev: 1, deps: [owner], open: check }) });
 		const shared = self.get(
 			ChildProjection,
-			{ parentId: Number(input.sessionId), taskId: input.taskId },
+			{ parentId: Number(input.sessionId), agentId: input.agentId ?? `round-${input.taskId}` },
 			{ principal: hostPrincipal },
 		);
 		const { authorizedRevision } = self.state({ authorizedRevision: cell(Type.Integer(), 0) });
@@ -246,20 +274,33 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 			decideApproval: async ({ id, version, decision }) => {
 				const entry = await check();
 				if (entry.historyThrough !== undefined) throw new ChordError("forbidden", "Fork history is read-only");
+				const approval = (await runtime.approvals.list(Number(input.sessionId) as ConversationId, context)).find(
+					(a) => a.id === id && a.childId === entry.childId,
+				);
+				if (!approval) throw new ChordError("forbidden", "Approval does not belong to this agent");
 				return runtime.approvals.decide(
 					Number(input.sessionId) as ConversationId,
-					entry.taskId,
+					approval.delegationTaskId,
 					id,
 					version,
 					decision,
 					context,
 				);
 			},
-			stop: async () => {
+			stop: async (request) => {
 				const entry = await check();
 				if (entry.historyThrough !== undefined) throw new ChordError("forbidden", "Fork history is read-only");
-				await runtime.harness.abortTask(entry.taskId as TaskId, context);
-				await runtime.harness.waitForTask(entry.taskId as TaskId, context);
+				const taskId = request?.taskId ?? input.taskId;
+				if (taskId === undefined) throw new ChordError("invalid", "Select the exact active round to stop");
+				const valid = await runtime.harness.commit(async (tx) => {
+					const identity = (await tx.doc(SubagentsDoc, Number(input.sessionId) as ConversationId)).items.find(
+						(a) => a.childId === entry.childId,
+					);
+					return identity?.activeRoundId === taskId;
+				}, context);
+				if (!valid) return null;
+				await runtime.harness.abortTask(taskId as TaskId, context);
+				await runtime.harness.waitForTask(taskId as TaskId, context);
 				return null;
 			},
 		};

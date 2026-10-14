@@ -132,7 +132,7 @@ it("reuses full transcript components, preserves expansion on reopen, and releas
 				.join("\n")
 				.match(/Final report/g),
 		).toHaveLength(1);
-		expect(subagentItems([entry])[0]?.rightLabel).toBe("Done");
+		expect(subagentItems([entry])[0]?.rightLabel).toBe("Idle");
 	} finally {
 		detail.close();
 		setActiveTheme("light");
@@ -277,7 +277,7 @@ it("dispatches clicks to the footer and the rendered agent list row", async () =
 	panel.render(60);
 	expect(panel.handleMouse({ ...event, y: 2 })?.handled).toBe(true);
 	await new Promise((resolve) => setTimeout(resolve, 0));
-	expect(picked).toBe(String(entry.taskId));
+	expect(picked).toBe(`agent-${entry.childId}`);
 });
 
 it("loads older records on upward scroll without an H command or a viewport jump", async () => {
@@ -326,5 +326,68 @@ it("loads older records on upward scroll without an H command or a viewport jump
 	detail.scroll(-100);
 	expect(detail.lines(60, 10).map(stripTerminalSequences).join("\n")).toContain("Earlier record");
 	expect(calls).toBe(1);
+	detail.close();
+});
+
+it("groups multiple completed rounds into one idle entry while preserving per-round cards", () => {
+	const first = { ...entry, agentId: `agent-${entry.childId}`, round: 1 };
+	const second = { ...first, taskId: 4, title: "Follow up", round: 2 };
+	const items = subagentItems([first, second]);
+	expect(items).toHaveLength(1);
+	expect(items[0]!.value).toBe(first.agentId);
+	expect(items[0]!.rightLabel).toBe("Idle");
+	expect(items[0]!.description).toContain("2 rounds");
+	expect(first.status).toBe("completed");
+});
+
+it("loads and locates an earlier round without replacing its historical status", async () => {
+	const first = { ...entry, agentId: "agent-2", round: 1, inputEntryId: 1 };
+	const second = {
+		...first,
+		taskId: 4,
+		round: 2,
+		inputEntryId: 120,
+		title: "Second",
+		status: "running" as const,
+		endedAt: null,
+	};
+	const snapshot: ChatView = {
+		...view,
+		historyBefore: 120,
+		rounds: [first, second],
+		items: [{ type: "user", key: "e120", id: 120, text: "Second input", subagentRoundId: 4 }],
+	};
+	let calls = 0;
+	const service = {
+		view: {
+			value: snapshot,
+			subscribe(fn: (v: ChatView) => void) {
+				fn(snapshot);
+				return () => {};
+			},
+		},
+		history: async () => {
+			calls++;
+			return {
+				items: [{ type: "user" as const, key: "e1", id: 1, text: "First input", subagentRoundId: 3 }],
+				next: null,
+			};
+		},
+	} as unknown as ReturnType<NekoGatewayConnection["subagent"]>;
+	const client = { subagent: () => service } as unknown as NekoGatewayConnection;
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	const detail = new SubagentDetail(client, "agent-2", panel, () => {});
+	detail.entry = second;
+	detail.open();
+	detail.locate(first.taskId);
+	await new Promise((r) => setTimeout(r, 0));
+	const text = detail.lines(60, 8).map(stripTerminalSequences).join("\n");
+	expect(calls).toBe(1);
+	expect(text).toContain("Task 1");
+	expect(text).toContain("First input");
+	expect(first.status).toBe("completed");
 	detail.close();
 });

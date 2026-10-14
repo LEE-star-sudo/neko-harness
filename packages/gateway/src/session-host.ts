@@ -23,6 +23,8 @@ import {
 	type NekoSession,
 	prepareImage,
 	projectChatView,
+	SubagentsDoc,
+	summarizeSubagents,
 	totalUsage,
 } from "@neko-harness/core";
 import { workspaceTarget } from "@neko-harness/core/workspace-files";
@@ -78,7 +80,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			changes.some(
 				(change) =>
 					change.type === "document" &&
-					((["app.neko.delegations", "app.neko.approvals"].includes(change.record.kind) &&
+					((["app.neko.delegations", "app.neko.approvals", "app.neko.subagents"].includes(change.record.kind) &&
 						change.conversationId === session.id) ||
 						(change.record.kind === "pi.usage" &&
 							change.conversationId !== undefined &&
@@ -125,7 +127,9 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 						: 0;
 			childIds = new Set(subagents.filter((entry) => entry.historyThrough === undefined).map((entry) => entry.childId));
 			let aggregate = await session.usage();
-			for (const child of subagents.filter((entry) => entry.historyThrough === undefined))
+			for (const child of new Map(
+				subagents.filter((entry) => entry.historyThrough === undefined).map((r) => [r.childId, r]),
+			).values())
 				aggregate = mergeUsage(
 					aggregate,
 					(await runtime.harness.snapshot(UsageDoc, child.childId as ConversationId, context)) ?? {
@@ -136,7 +140,14 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			const u = totalUsage(aggregate);
 			return {
 				...projected,
-				subagents: subagents.map((entry) => ({ ...entry, report: entry.report?.slice(0, 512) ?? null })),
+				agents: summarizeSubagents(
+					subagents,
+					(await runtime.harness.snapshot(SubagentsDoc, session.id, context))?.items,
+				),
+				subagents: subagents.map(({ usageStart: _start, usageEnd: _end, ...entry }) => ({
+					...entry,
+					report: entry.report?.slice(0, 512) ?? null,
+				})),
 				taskUsage: {
 					input: u.input,
 					output: u.output,

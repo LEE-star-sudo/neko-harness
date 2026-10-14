@@ -1,32 +1,47 @@
-import type { ChatView, Delegation } from "@neko-harness/core";
+import type { ChatView, SubagentSummary } from "@neko-harness/core";
 import { downloadImage } from "@neko-harness/core/image-transfer";
 import { mergeTranscriptItems } from "@neko-harness/core/transcript-items";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
 import { ImageReaderContext } from "./image-gallery";
 import { MessageList } from "./message-list";
 
-const labels = { queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已停止" };
-function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
+const labels = {
+	idle: "空闲",
+	queued: "排队中",
+	running: "运行中",
+	completed: "已完成",
+	failed: "失败",
+	cancelled: "已停止",
+};
+function Detail({
+	entry,
+	active,
+	target,
+}: {
+	entry: SubagentSummary;
+	active: boolean;
+	target?: { taskId: number; nonce: number };
+}) {
 	const { phase, operating, view: parentView } = useNekoState();
 	const [view, setView] = useState<ChatView | null>(null);
 	const [error, setError] = useState("");
 	const [older, setOlder] = useState<ChatView["items"]>([]);
 	const [before, setBefore] = useState<number | null | undefined>();
 	const [loading, setLoading] = useState(false);
-	const [now, setNow] = useState(Date.now);
+	const [, setNow] = useState(Date.now);
 	useEffect(() => {
-		if (!active || entry.endedAt !== null) return;
+		if (!active || entry.activeRoundId === null) return;
 		const timer = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(timer);
-	}, [active, entry.endedAt]);
+	}, [active, entry.activeRoundId]);
 	// A ready gateway can still be attaching a different session. Cached panels must
 	// wait for that attachment and its first snapshot before acquiring child handles.
 	const ready = phase === "ready" && !operating && parentView !== null;
 	const service = useMemo(
-		() => (ready && active ? appActions.subagent(entry.taskId) : null),
-		[ready, active, entry.taskId],
+		() => (ready && active ? appActions.subagent(entry.agentId) : null),
+		[ready, active, entry.agentId],
 	);
 	const epoch = useRef(0);
 	useEffect(() => {
@@ -63,7 +78,7 @@ function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
 		if (!view) return null;
 		return { ...view, items: mergeTranscriptItems(older, view.items) };
 	}, [view, older]);
-	const history = async () => {
+	const history = useCallback(async () => {
 		if (!service || loading || before == null) return;
 		const generation = epoch.current;
 		setLoading(true);
@@ -77,7 +92,20 @@ function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
 		} finally {
 			if (generation === epoch.current) setLoading(false);
 		}
-	};
+	}, [service, loading, before]);
+	const targetEntry = target ? view?.rounds?.find((r) => r.taskId === target.taskId)?.inputEntryId : undefined;
+	const currentRound = view?.rounds?.find((r) => r.taskId === (entry.activeRoundId ?? entry.lastRoundId));
+	useEffect(() => {
+		if (
+			active &&
+			targetEntry !== undefined &&
+			merged &&
+			!merged.items.some((i) => i.type === "user" && i.id === targetEntry) &&
+			before != null &&
+			!loading
+		)
+			void history();
+	}, [active, targetEntry, merged, before, loading, history]);
 	return (
 		<div className={`${active ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
 			<div className="flex flex-wrap items-center gap-2 border-b border-sakura-100 p-3 text-xs">
@@ -86,17 +114,21 @@ function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
 					{labels[entry.status]}
 				</span>
 				{view && (
-					<span title="此子任务用量">
+					<span title="子智能体累计用量">
 						↑{view.usage.input} ↓{view.usage.output} · ${view.usage.cost.toFixed(4)}
 					</span>
 				)}
-				<span>{Math.max(0, Math.round(((entry.endedAt ?? now) - entry.createdAt) / 1000))}s</span>
+				{currentRound && (
+					<span title="当前或最近任务耗时">
+						{Math.max(0, Math.round(((currentRound.endedAt ?? Date.now()) - currentRound.createdAt) / 1000))}s
+					</span>
+				)}
 				{entry.historyThrough === undefined && (entry.status === "running" || entry.status === "queued") && (
 					<button
 						type="button"
 						className="focus-neko rounded-lg border border-sakura-300 px-2 leading-[14px]"
 						onClick={() => {
-							void service?.stop(null).catch((e) => setError(String(e)));
+							void service?.stop({ taskId: entry.activeRoundId! }).catch((e) => setError(String(e)));
 						}}
 					>
 						停止此任务
@@ -111,6 +143,7 @@ function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
 			<ImageReaderContext.Provider value={imageReader}>
 				<MessageList
 					view={merged}
+					focusEntry={targetEntry !== undefined && target ? { id: targetEntry, nonce: target.nonce } : undefined}
 					onLoadEarlier={active && before != null ? history : undefined}
 					busy={view?.busy ?? false}
 					emptyLabel={entry.status === "queued" ? "任务排队中…" : "暂无内容"}
@@ -126,15 +159,17 @@ export function SubagentPanel({
 	onSelect,
 	onClose,
 	approval,
+	target,
 }: {
-	entries: Delegation[];
-	selected: number | null;
+	entries: SubagentSummary[];
+	selected: string | null;
 	open: boolean;
-	onSelect: (id: number) => void;
+	onSelect: (id: string) => void;
 	onClose: () => void;
 	approval?: ReactNode;
+	target?: { taskId: number; nonce: number };
 }) {
-	const [visited, setVisited] = useState<number[]>([]);
+	const [visited, setVisited] = useState<string[]>([]);
 	const closeButton = useRef<HTMLButtonElement>(null);
 	const panel = useRef<HTMLElement>(null);
 	const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
@@ -213,21 +248,28 @@ export function SubagentPanel({
 				{entries.map((entry) => (
 					<button
 						type="button"
-						key={entry.taskId}
-						aria-pressed={selected === entry.taskId}
-						className={`focus-neko block w-full rounded-lg px-2 py-1.5 text-left text-sm ${selected === entry.taskId ? "bg-tianyi-100" : "hover:bg-sakura-50"}`}
-						onClick={() => onSelect(entry.taskId)}
+						key={entry.agentId}
+						aria-pressed={selected === entry.agentId}
+						className={`focus-neko flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm ${selected === entry.agentId ? "bg-tianyi-100" : "hover:bg-sakura-50"}`}
+						onClick={() => onSelect(entry.agentId)}
 					>
-						<span className="text-tianyi-700">{entry.role}</span> · {entry.title}
-						<span className="ml-2 text-xs text-ink-500">
-							{entry.approvalCount ? `待审批 ${entry.approvalCount}` : labels[entry.status]}
+						<span className="min-w-0 truncate">
+							<span className="text-tianyi-700">{entry.role}</span> · {entry.title}
 						</span>
+						<span className="shrink-0 text-xs text-ink-500">{entry.roundCount} 轮</span>
 					</button>
 				))}
 			</div>
 			{visited.map((id) => {
-				const entry = entries.find((d) => d.taskId === id);
-				return entry ? <Detail key={id} entry={entry} active={open && id === selected} /> : null;
+				const entry = entries.find((d) => d.agentId === id);
+				return entry ? (
+					<Detail
+						key={id}
+						entry={entry}
+						active={open && id === selected}
+						target={id === selected ? target : undefined}
+					/>
+				) : null;
 			})}
 			{approval}
 		</aside>

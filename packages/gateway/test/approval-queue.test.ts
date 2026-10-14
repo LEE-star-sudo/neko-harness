@@ -12,7 +12,8 @@ it("aggregates pending requests across children and releases readers on settleme
 			publish: (approvals: ToolApproval[]) => void;
 		}
 	>();
-	const connect = (id: number) => {
+	const connect = (target: number | string) => {
+		const id = Number(target);
 		let value = { approvals: [{ id, status: "pending", createdAt: id }] } as ChatView;
 		const listeners = new Set<(v: ChatView | undefined) => void>();
 		const service = {

@@ -348,3 +348,136 @@ it("synchronizes approvals without an open child and scopes decisions across att
 		await cleanup(target);
 	}
 }, 30000);
+
+it("groups continued rounds into one agent, accounts once and binds stop to the exact active round", async () => {
+	const target = await makeGateway();
+	let id = "",
+		entered = false;
+	target.faux.setResponses([
+		fauxAssistantMessage(
+			[fauxToolCall("subagent", { type: "plan", title: "Planner", task: "Remember first evidence" })],
+			{ stopReason: "toolUse" },
+		),
+		fauxAssistantMessage("First report"),
+		fauxAssistantMessage("Main one"),
+		() =>
+			fauxAssistantMessage(
+				[fauxToolCall("subagent", { action: "continue", agentId: id, title: "Next plan", task: "Second task" })],
+				{ stopReason: "toolUse" },
+			),
+		async (_request, opts) => {
+			entered = true;
+			await new Promise<void>((r) => {
+				if (opts?.signal?.aborted) r();
+				else opts?.signal?.addEventListener("abort", () => r(), { once: true });
+			});
+			return fauxAssistantMessage("", { stopReason: "aborted" });
+		},
+		fauxAssistantMessage("Main stopped"),
+	]);
+	const client = await connectNekoGateway(testAddress(target));
+	const other = await connectNekoGateway(testAddress(target));
+	let stop = () => {};
+	try {
+		const chat = await client.attach(String(target.gateway.runtime.root.id));
+		const otherChat = await other.attach(String(target.gateway.runtime.root.id));
+		await chat.submit({ content: "First" });
+		await waitFor(() => chat.view.value?.agents?.[0]?.status === "idle", "idle identity");
+		id = chat.view.value!.agents![0]!.agentId;
+		const first = chat.view.value!.subagents![0]!;
+		const child = client.subagent(id);
+		stop = child.view.subscribe(() => {});
+		await waitFor(() => child.view.value?.rounds?.length === 1, "first round detail");
+		await chat.submit({ content: "Second" });
+		await waitFor(() => entered && chat.view.value?.subagents?.length === 2, "running followup");
+		const second = chat.view.value!.subagents![1]!;
+		expect(chat.view.value!.agents).toHaveLength(1);
+		expect(chat.view.value!.agents![0]!.activeRoundId).toBe(second.taskId);
+		expect(chat.view.value!.subagents![0]!.status).toBe("completed");
+		await child.stop({ taskId: first.taskId });
+		expect(chat.view.value!.agents![0]!.status).toBe("running");
+		await child.stop({ taskId: second.taskId });
+		await waitFor(
+			() => chat.view.value?.agents?.[0]?.status === "idle" && otherChat.view.value?.agents?.[0]?.status === "idle",
+			"both clients idle",
+		);
+		await waitFor(
+			() => child.view.value?.rounds?.length === 2 && child.view.value?.rounds?.[1]?.status === "cancelled",
+			"cancelled round detail",
+		);
+		expect(child.view.value!.rounds![0]!.report).toBe("First report");
+		const total = totalUsage(await target.gateway.runtime.globalUsage());
+		expect(chat.view.value!.taskUsage!.input).toBe(total.input);
+		expect(chat.view.value!.taskUsage!.cost).toBe(total.cost.total);
+		expect(child.view.value!.rounds![0]!.roundUsage!.input).toBeGreaterThan(0);
+	} finally {
+		stop();
+		await client.close();
+		await other.close();
+		await cleanup(target);
+	}
+}, 30000);
+
+it("adds main and unique child costs as 0.19 rather than summing each round's cumulative spend", async () => {
+	const { UsageDoc } = await import("@earendil-works/pi-durable");
+	const target = await makeGateway();
+	let id = "";
+	const tool = (args: Record<string, string>) =>
+		fauxAssistantMessage([fauxToolCall("subagent", args)], { stopReason: "toolUse" });
+	target.faux.setResponses([
+		tool({ type: "plan", title: "First agent", task: "First" }),
+		fauxAssistantMessage("First"),
+		fauxAssistantMessage("Main"),
+		() => tool({ action: "continue", agentId: id, title: "Second round", task: "Second" }),
+		fauxAssistantMessage("Second"),
+		fauxAssistantMessage("Main"),
+		tool({ type: "plan", title: "Other agent", task: "Other" }),
+		fauxAssistantMessage("Other"),
+		fauxAssistantMessage("Main"),
+	]);
+	const client = await connectNekoGateway(testAddress(target));
+	try {
+		const chat = await client.attach(String(target.gateway.runtime.root.id));
+		await chat.submit({ content: "First" });
+		await waitFor(() => chat.view.value?.agents?.[0]?.status === "idle", "first");
+		id = chat.view.value!.agents![0]!.agentId;
+		await chat.submit({ content: "Second" });
+		await waitFor(
+			() => chat.view.value?.subagents?.length === 2 && chat.view.value.agents?.[0]?.status === "idle",
+			"second",
+		);
+		await chat.submit({ content: "Other" });
+		await waitFor(
+			() => chat.view.value?.agents?.length === 2 && chat.view.value.agents.every((a) => a.status === "idle"),
+			"other",
+		);
+		const children = chat.view.value!.agents!;
+		await target.gateway.runtime.harness.commit(async (tx) => {
+			for (const [conversationId, price] of [
+				[target.gateway.runtime.root.id, 0.1],
+				[children[0]!.childId, 0.05],
+				[children[1]!.childId, 0.04],
+			] as const) {
+				const doc = await tx.doc(UsageDoc, conversationId as never);
+				doc.models = {
+					billing: {
+						input: 100,
+						output: 10,
+						cacheRead: 20,
+						cacheWrite: 30,
+						totalTokens: 160,
+						cost: { input: price, output: 0, cacheRead: 0, cacheWrite: 0, total: price },
+					},
+				};
+				doc.tools = {};
+			}
+		}, target.gateway.runtime.context);
+		await waitFor(() => Math.abs((chat.view.value?.taskUsage?.cost ?? 0) - 0.19) < 1e-9, "deduplicated cost");
+		expect(chat.view.value!.agents).toHaveLength(2);
+		expect(chat.view.value!.subagents).toHaveLength(3);
+		expect(chat.view.value!.taskUsage!.cost).toBeCloseTo(0.19, 10);
+	} finally {
+		await client.close();
+		await cleanup(target);
+	}
+}, 30000);

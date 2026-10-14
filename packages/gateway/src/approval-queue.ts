@@ -4,10 +4,10 @@ import type { SubagentClient } from "./subagent-client.ts";
 export type PendingApproval = { item: ToolApproval; title: string; service: SubagentClient };
 /** Session-scoped, bounded child readers, independent of transcript panels. */
 export class ApprovalQueue {
-	#readers = new Map<number, { service: SubagentClient; stop: () => void; title: string }>();
-	#connect: (id: number) => SubagentClient;
+	#readers = new Map<number | string, { service: SubagentClient; stop: () => void; title: string }>();
+	#connect: (id: number | string) => SubagentClient;
 	#changed: () => void;
-	constructor(connect: (id: number) => SubagentClient, changed: () => void) {
+	constructor(connect: (id: number | string) => SubagentClient, changed: () => void) {
 		this.#connect = connect;
 		this.#changed = changed;
 	}
@@ -26,16 +26,17 @@ export class ApprovalQueue {
 	update(entries: readonly Delegation[]) {
 		const pending = entries.filter((d) => d.approvalCount && d.historyThrough === undefined);
 		for (const [id, reader] of this.#readers) {
-			if (!pending.some((d) => d.taskId === id)) {
+			if (!pending.some((d) => (d.agentId ?? d.taskId) === id)) {
 				this.#readers.delete(id);
 				reader.stop();
 			}
 		}
 		for (const entry of pending) {
-			if (this.#readers.has(entry.taskId)) continue;
-			const service = this.#connect(entry.taskId);
+			const key = entry.agentId ?? entry.taskId;
+			if (this.#readers.has(key)) continue;
+			const service = this.#connect(key);
 			const reader = { service, title: entry.title, stop: () => {} };
-			this.#readers.set(entry.taskId, reader);
+			this.#readers.set(key, reader);
 			reader.stop = service.view.subscribe(() => this.#changed());
 		}
 		this.#changed();

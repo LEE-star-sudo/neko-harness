@@ -53,7 +53,7 @@ export type NekoGatewayConnection = {
 	readonly attachment: NekoAttachment | undefined;
 	ready(signal?: AbortSignal): Promise<void>;
 	attach(id: string, ctx?: Ctx): Promise<NekoChat>;
-	subagent(taskId: number): SubagentClient;
+	subagent(target: number | string): SubagentClient;
 	detach(): Promise<void>;
 	close(): Promise<void>;
 };
@@ -91,9 +91,9 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 	let closing: Promise<void> | undefined;
 	const connection: NekoGatewayConnection = {
 		application,
-		subagent(taskId) {
+		subagent(target) {
 			if (!attachment) throw new Error("No active session");
-			const input = { ...attachment, taskId };
+			const input = { ...attachment, ...(typeof target === "string" ? { agentId: target } : { taskId: target }) };
 			return subagentClient(() => host.get(NekoSubagent, input, { at: serverId }));
 		},
 		host,

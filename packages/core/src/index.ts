@@ -59,7 +59,18 @@ export {
 } from "./runtime.ts";
 export { mergeUsage } from "./session-metadata.ts";
 export type { SkillInvocation } from "./skill-invocation.ts";
-export { type Delegation, DelegationsDoc, listDelegations, SubagentDoc } from "./subagents.ts";
+export { subagentUsageTotals, subtractSubagentUsage } from "./subagent-usage.ts";
+export {
+	agentIdFor,
+	type Delegation,
+	DelegationsDoc,
+	listDelegations,
+	listSubagents,
+	SubagentDoc,
+	type SubagentSummary,
+	SubagentsDoc,
+	summarizeSubagents,
+} from "./subagents.ts";
 export { ApprovalsDoc, type ToolApproval, ToolApprovals } from "./tool-approvals.ts";
 export { mergeTranscriptItems } from "./transcript-items.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

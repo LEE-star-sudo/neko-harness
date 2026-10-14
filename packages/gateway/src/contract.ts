@@ -70,6 +70,12 @@ const call = Type.Object({
 });
 export const DelegationSchema = Type.Object({
 	parentId: integer,
+	agentId: Type.Optional(str),
+	round: Type.Optional(integer),
+	runnerId: Type.Optional(integer),
+	inputEntryId: Type.Optional(integer),
+	answerEntryId: Type.Optional(integer),
+	roundUsage: Type.Optional(Type.Union([usage, nil])),
 	taskId: integer,
 	callId: str,
 	childId: integer,
@@ -84,8 +90,27 @@ export const DelegationSchema = Type.Object({
 	historyThrough: Type.Optional(integer),
 	historyUsage: Type.Optional(usage),
 });
+export const SubagentSummarySchema = Type.Object({
+	agentId: str,
+	parentId: integer,
+	childId: integer,
+	role: Type.Enum(["explore", "plan", "coder"]),
+	title: str,
+	status: Type.Enum(["idle", "queued", "running"]),
+	activeRoundId: Type.Union([integer, nil]),
+	lastRoundId: integer,
+	lastReport: Type.Optional(nullableString),
+	roundCount: integer,
+	taskTitle: str,
+	approvalCount: integer,
+	createdAt: num,
+	historyThrough: Type.Optional(integer),
+	historyUsage: Type.Optional(usage),
+});
 export const ChatViewSchema = Type.Object({
 	historyBefore: Type.Optional(Type.Union([integer, nil])),
+	agents: Type.Optional(Type.Array(SubagentSummarySchema)),
+	rounds: Type.Optional(Type.Array(DelegationSchema)),
 	subagents: Type.Optional(Type.Array(DelegationSchema)),
 	taskUsage: Type.Optional(usage),
 	model: str,
@@ -256,7 +281,12 @@ export const NekoModels = contract("neko.models", {
 const imageChunk = Type.Object({ data: str, total: integer, mimeType: str });
 export const NekoSubagent = contract("neko.subagent", {
 	version: 1,
-	input: Type.Object({ sessionId: str, attachmentId: str, taskId: integer }),
+	input: Type.Object({
+		sessionId: str,
+		attachmentId: str,
+		taskId: Type.Optional(integer),
+		agentId: Type.Optional(str),
+	}),
 	variants: {
 		ready: {
 			state: { revision: integer },
@@ -275,7 +305,7 @@ export const NekoSubagent = contract("neko.subagent", {
 					Type.Object({ id: integer, version: str, decision: Type.Enum(["allowed", "denied"]) }),
 					Type.Enum(["pending", "allowed", "denied", "cancelled"]),
 				),
-				stop: rpc(nil, nil),
+				stop: rpc(Type.Union([nil, Type.Object({ taskId: integer })]), nil),
 			},
 		},
 	},

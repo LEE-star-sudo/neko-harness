@@ -14,7 +14,7 @@ import {
 	wrapTool,
 } from "@earendil-works/pi-durable";
 import { createBashTool } from "@earendil-works/pi-durable/tools";
-import { DelegationsDoc, SubagentDoc } from "./subagents.ts";
+import { DelegationsDoc, SubagentDoc, SubagentsDoc } from "./subagents.ts";
 
 export type ToolApproval = {
 	id: number;
@@ -167,8 +167,14 @@ export function createApprovalExtension(service: () => ToolApprovals) {
 					const child = await approvals.harness.conversation(api.conversationId, context);
 					const agent = await child!.agent(context);
 					const cwd = await realpath(agent.cwd!);
+					const identity = (await api.snapshot(SubagentsDoc, parent, context))?.items.find(
+						(a) => a.childId === api.conversationId,
+					);
 					const delegation = (await api.snapshot(DelegationsDoc, parent, context))?.items.find(
-						(d) => d.childId === api.conversationId && d.historyThrough === undefined,
+						(d) =>
+							d.childId === api.conversationId &&
+							d.historyThrough === undefined &&
+							d.taskId === identity?.activeRoundId,
 					);
 					if (!delegation) return { block: "Missing delegation" };
 					await approvals.ensure(

@@ -165,15 +165,18 @@ export function MessageList({
 	emptyLabel,
 	onLoadEarlier,
 	tray,
+	focusEntry,
 }: {
 	view: ChatView | null;
 	busy: boolean;
 	onSubagent?: (taskId: number) => void;
+	focusEntry?: { id: number; nonce: number };
 	emptyLabel?: string;
 	onLoadEarlier?: () => Promise<void>;
 	tray?: ReactNode;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
+	const focusedEntry = useRef("");
 	const stickRef = useRef(true);
 	const loadingEarlier = useRef(false);
 	const [showJump, setShowJump] = useState(false);
@@ -193,6 +196,19 @@ export function MessageList({
 		const el = containerRef.current;
 		if (el !== null) el.scrollTo({ top: el.scrollHeight });
 	});
+
+	useEffect(() => {
+		if (!focusEntry || !items.some((i) => i.type === "user" && i.id === focusEntry.id)) return;
+		const key = `${focusEntry.id}:${focusEntry.nonce}`;
+		if (focusedEntry.current === key) return;
+		const el = containerRef.current;
+		const row = el?.querySelector<HTMLElement>(`[data-entry-id="${focusEntry.id}"]`);
+		if (!el || !row) return;
+		focusedEntry.current = key;
+		stickRef.current = false;
+		el.scrollTop += row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+		setShowJump(true);
+	}, [focusEntry, items]);
 
 	const onScroll = (): void => {
 		const el = containerRef.current;
@@ -237,16 +253,42 @@ export function MessageList({
 						))}
 					{items.map((item) => {
 						switch (item.type) {
-							case "user":
-								return (
-									<UserRow
-										key={item.key}
-										text={item.text}
-										images={item.images}
-										skill={item.skill}
-										defaultImagePrompt={item.defaultImagePrompt}
-									/>
+							case "user": {
+								const round = view?.rounds?.find(
+									(r) => r.inputEntryId === item.id || r.taskId === item.subagentRoundId,
 								);
+								return (
+									<div key={item.key} data-entry-id={item.id}>
+										{round && (
+											<details className="chat-row border-t border-sakura-200 pt-2 text-xs text-ink-500">
+												<summary className="cursor-pointer">
+													任务 {round.round ?? ""} · {round.title} ·{" "}
+													{
+														{
+															queued: "排队中",
+															running: "运行中",
+															completed: "已完成",
+															failed: "失败",
+															cancelled: "已停止",
+														}[round.status]
+													}
+												</summary>
+												<p className="pt-1">
+													{round.roundUsage
+														? `本轮 ↑${round.roundUsage.input} ↓${round.roundUsage.output} · 缓存 ${round.roundUsage.cacheRead}/${round.roundUsage.cacheWrite} · $${round.roundUsage.cost.toFixed(4)}`
+														: "本轮用量未记录"}
+												</p>
+											</details>
+										)}
+										<UserRow
+											text={item.text}
+											images={item.images}
+											skill={item.skill}
+											defaultImagePrompt={item.defaultImagePrompt}
+										/>
+									</div>
+								);
+							}
 							case "assistant":
 								return <AssistantRow key={item.key} item={item} />;
 							case "tool": {

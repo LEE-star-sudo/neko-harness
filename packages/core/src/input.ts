@@ -5,6 +5,7 @@ import type { SkillInvocation } from "./skill-invocation.ts";
 
 export type InputData = {
 	at: number;
+	subagentRoundId?: number;
 	prompt: string;
 	images: (ImageInfo & { contentIndex: number })[];
 	skill?: SkillInvocation;

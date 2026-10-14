@@ -1,5 +1,12 @@
 import { type Component, matchesKey } from "@earendil-works/pi-tui";
-import { type ChatItem, type ChatView, type Delegation, mergeTranscriptItems } from "@neko-harness/core";
+import {
+	type ChatItem,
+	type ChatView,
+	type Delegation,
+	mergeTranscriptItems,
+	type SubagentSummary,
+	summarizeSubagents,
+} from "@neko-harness/core";
 import { downloadImage } from "@neko-harness/core/image-transfer";
 import type { NekoGatewayConnection } from "@neko-harness/gateway/client-session";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
@@ -12,17 +19,25 @@ import { UserMessageComponent } from "./components/user-message.ts";
 import { theme } from "./theme/index.ts";
 
 const labels = { queued: "Queued", running: "Running", completed: "Done", failed: "Failed", cancelled: "Stopped" };
-export const subagentItems = (entries: readonly Delegation[]) =>
-	entries.map((d) => ({
-		value: String(d.taskId),
+export const subagentItems = (entries: readonly Delegation[], summaries = summarizeSubagents(entries)) =>
+	summaries.map((d) => ({
+		value: d.agentId,
 		label: `${d.role} · ${d.title}`,
-		description: `${d.historyThrough !== undefined ? "Snapshot · " : ""}${labels[d.status]}`,
-		rightLabel: d.approvalCount ? `Approval ${d.approvalCount}` : labels[d.status],
+		description: `${d.historyThrough !== undefined ? "Snapshot · " : ""}${d.taskTitle} · ${d.roundCount} rounds`,
+		rightLabel: d.approvalCount
+			? `Approval ${d.approvalCount}`
+			: d.status === "idle"
+				? "Idle"
+				: d.status === "queued"
+					? "Queued"
+					: "Running",
 	}));
 export class SubagentDetail implements PickerDetail {
 	get help() {
-		const canStop =
-			this.entry?.historyThrough === undefined && (this.entry?.status === "running" || this.entry?.status === "queued");
+		const canStop = this.identity
+			? this.identity.activeRoundId !== null && this.identity.historyThrough === undefined
+			: this.entry?.historyThrough === undefined &&
+				(this.entry?.status === "running" || this.entry?.status === "queued");
 		return shortcutHints(
 			["←", "Main"],
 			["↑↓/Wheel", "Scroll"],
@@ -49,8 +64,11 @@ export class SubagentDetail implements PickerDetail {
 	#panel: PickerPanel;
 	#active = false;
 	entry: Delegation | undefined;
+	identity: SubagentSummary | undefined;
+	#targetRound: number | undefined;
+	#locating = false;
 	#epoch = 0;
-	constructor(client: NekoGatewayConnection, taskId: number, panel: PickerPanel, changed: () => void) {
+	constructor(client: NekoGatewayConnection, taskId: number | string, panel: PickerPanel, changed: () => void) {
 		this.#service = client.subagent(taskId);
 		this.#changed = changed;
 		this.#panel = panel;
@@ -74,9 +92,31 @@ export class SubagentDetail implements PickerDetail {
 			this.#entries = new Map(
 				mergeTranscriptItems([...this.#entries.values()], view.items).map((item) => [item.key, item]),
 			);
+			void this.#loadTarget();
 			this.#changed();
 		});
 		return this;
+	}
+	locate(taskId: number) {
+		this.#targetRound = taskId;
+		void this.#loadTarget();
+		this.#changed();
+	}
+	async #loadTarget() {
+		if (this.#locating || !this.#active || this.#targetRound === undefined) return;
+		const entryId = this.#view?.rounds?.find((r) => r.taskId === this.#targetRound)?.inputEntryId;
+		if (entryId === undefined) return;
+		this.#locating = true;
+		try {
+			while (this.#active && !this.#entries.has(`e${entryId}`) && this.#before != null && !this.#loading) {
+				const before = this.#before;
+				await this.history();
+				if (before === this.#before) break;
+			}
+		} finally {
+			this.#locating = false;
+			this.#changed();
+		}
 	}
 	close() {
 		this.#epoch++;
@@ -128,15 +168,17 @@ export class SubagentDetail implements PickerDetail {
 		} else if (
 			data.toLowerCase() === "s" &&
 			this.entry?.historyThrough === undefined &&
-			(this.entry?.status === "running" || this.entry?.status === "queued")
-		)
+			(this.identity?.activeRoundId != null ||
+				(!this.identity && (this.entry?.status === "running" || this.entry?.status === "queued")))
+		) {
+			const stopTaskId = this.identity?.activeRoundId ?? this.entry?.taskId;
 			this.#panel.showDetail({
 				help: shortcutHints(["Enter", "Stop"], ["Esc", "Back"]),
 				lines: () => [theme.warning("Stop this task? Existing changes will be kept.")],
 				handleKey: (key) => {
 					if (!matchesKey(key, "enter")) return false;
 					void this.#service
-						.stop(null)
+						.stop(stopTaskId === undefined ? null : { taskId: stopTaskId })
 						.catch((e) => {
 							this.#error = String(e);
 						})
@@ -147,7 +189,7 @@ export class SubagentDetail implements PickerDetail {
 					return true;
 				},
 			});
-		else return false;
+		} else return false;
 		return true;
 	}
 	#component(item: ChatItem): Component {
@@ -175,9 +217,9 @@ export class SubagentDetail implements PickerDetail {
 		const entry = this.entry;
 		const rows: string[] = entry
 			? [
-					theme.accent(`${entry.role} · ${entry.title}`),
+					theme.accent(`${entry.role} · ${this.identity?.title ?? entry.title}`),
 					theme.dim(
-						`${entry.historyThrough !== undefined ? "Snapshot · " : ""}${labels[entry.status]} · ${Math.max(0, Math.round(((entry.endedAt ?? Date.now()) - entry.createdAt) / 1000))}s`,
+						`${entry.historyThrough !== undefined ? "Snapshot · " : ""}${this.identity ? (this.identity.status === "idle" ? "Idle" : this.identity.status === "queued" ? "Queued" : "Running") : labels[entry.status]} · ${Math.max(0, Math.round(((entry.endedAt ?? Date.now()) - entry.createdAt) / 1000))}s`,
 					),
 					"",
 				]
@@ -185,12 +227,28 @@ export class SubagentDetail implements PickerDetail {
 		if (this.#view)
 			rows.push(
 				theme.dim(
-					`In ${this.#view.usage.input} · Out ${this.#view.usage.output} · $${this.#view.usage.cost.toFixed(4)}`,
+					`Total In ${this.#view.usage.input} · Out ${this.#view.usage.output} · $${this.#view.usage.cost.toFixed(4)}`,
 				),
 				"",
 			);
 		const imageRows: { image: HistoryImage; start: number; end: number }[] = [];
+		let targetOffset: number | undefined;
 		for (const item of [...this.#entries.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
+			if (item.type === "user") {
+				const round = this.#view?.rounds?.find((r) => r.inputEntryId === item.id || r.taskId === item.subagentRoundId);
+				if (round?.taskId === this.#targetRound) targetOffset = rows.length;
+				if (round) {
+					rows.push(theme.accent(`Task ${round.round ?? ""} · ${round.title} · ${labels[round.status]}`));
+					const u = round.roundUsage;
+					rows.push(
+						theme.dim(
+							u
+								? `Round In ${u.input} · Out ${u.output} · Cache ${u.cacheRead}/${u.cacheWrite} · $${u.cost.toFixed(4)}`
+								: "Round usage not recorded",
+						),
+					);
+				}
+			}
 			rows.push(...this.#component(item).render(width));
 			if (item.type === "tool") {
 				for (const approval of this.#view?.approvals ?? [])
@@ -250,6 +308,11 @@ export class SubagentDetail implements PickerDetail {
 		if (this.#prependOffset !== undefined) {
 			this.#offset += Math.max(0, this.#maxOffset - this.#prependOffset);
 			this.#prependOffset = undefined;
+		}
+		if (targetOffset !== undefined) {
+			this.#offset = targetOffset;
+			this.#follow = false;
+			this.#targetRound = undefined;
 		}
 		this.#offset = this.#follow ? this.#maxOffset : Math.min(this.#offset, this.#maxOffset);
 		for (const image of imageRows) {

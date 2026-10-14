@@ -12,7 +12,7 @@ const PREAMBLE =
 /** Rules contributed per tool, in the spirit of pi's promptGuidelines. */
 const TOOL_GUIDELINES: Record<string, readonly string[]> = {
 	subagent: [
-		"Delegate only independent, sufficiently scoped work when isolation or parallelism helps. Handle simple tasks directly. Pass necessary context and user constraints; research-only requests must not become coding tasks. Verify and integrate reports. Do not modify files concurrently with a coder assigned those files.",
+		"Delegate only independent, sufficiently scoped work when isolation or parallelism helps. Handle simple tasks directly. Pass necessary context and user constraints; research-only requests must not become coding tasks. For related follow-up work, list and continue a suitable idle subagent using its stable agentId; busy means no task was accepted. Do not change its role. Verify and integrate reports. Do not modify files concurrently with a coder assigned those files.",
 	],
 	find_files: [
 		"Use find_files to discover files; query is a literal substring. Narrow the directory when results are partial.",

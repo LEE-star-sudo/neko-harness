@@ -71,7 +71,7 @@ it("rejects incompatible live gateway without spawning a competing instance", as
 		port: 0,
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
-		updates: { protocolVersion: 4 },
+		updates: { protocolVersion: 5 },
 	});
 	try {
 		await expect(

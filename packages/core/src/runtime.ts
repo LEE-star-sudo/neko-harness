@@ -54,7 +54,13 @@ import { createResourceLoader, scanSkillsByLevel } from "./prompt/resources.ts";
 import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
-import { createSubagentExtension, DelegationsDoc, refreshDelegations } from "./subagents.ts";
+import { subagentUsageTotals, subtractSubagentUsage } from "./subagent-usage.ts";
+import {
+	createSubagentExtension,
+	DelegationsDoc,
+	installSubagentCoordinator,
+	refreshDelegations,
+} from "./subagents.ts";
 import { createApprovalExtension, prepareApprovalConversations, ToolApprovals } from "./tool-approvals.ts";
 import { createWebSearchTools } from "./web-search.ts";
 import {
@@ -401,6 +407,11 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const existing = await scanConversations();
 
 	try {
+		await installSubagentCoordinator(
+			harness,
+			existing.map((r) => r.id),
+			context,
+		);
 		await prepareApprovalConversations(
 			harness,
 			existing.map((r) => r.id),
@@ -702,13 +713,27 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 							}
 						cursor = page.next;
 					} while (cursor);
+					const frozen = new Map<number, { through: number; state: UsageState }>();
 					for (const reference of references) {
 						if (!calls.has(reference.callId)) continue;
-						const latest = await tx.scanEntries({ conversationId: reference.childId as ConversationId }, 1);
-						const usage = totalUsage(await tx.doc(UsageDoc, reference.childId as ConversationId));
+						let snapshot = frozen.get(reference.childId);
+						if (!snapshot) {
+							const latest = await tx.scanEntries({ conversationId: reference.childId as ConversationId }, 1);
+							snapshot = {
+								through: latest.items[0]?.id ?? 0,
+								state: JSON.parse(JSON.stringify(await tx.doc(UsageDoc, reference.childId as ConversationId))),
+							};
+							frozen.set(reference.childId, snapshot);
+						}
+						const usage = totalUsage(snapshot.state);
 						inherited.push({
 							...reference,
-							historyThrough: reference.historyThrough ?? latest.items[0]?.id ?? 0,
+							historyThrough: reference.historyThrough ?? snapshot.through,
+							roundUsage:
+								reference.roundUsage ??
+								(reference.usageStart
+									? subagentUsageTotals(subtractSubagentUsage(snapshot.state, reference.usageStart))
+									: null),
 							historyUsage: reference.historyUsage ?? {
 								input: usage.input,
 								output: usage.output,

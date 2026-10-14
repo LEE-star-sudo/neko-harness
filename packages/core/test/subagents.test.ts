@@ -97,6 +97,7 @@ it("limits foreground children, cancels queued/running delegates and keeps sibli
 		await submission.wait(runtime.context);
 		const settled = await list();
 		expect(settled.filter((d) => d.status === "cancelled")).toHaveLength(2);
+		expect(settled.find((d) => d.taskId === queued.taskId)!.roundUsage!.input).toBe(0);
 		expect(settled.filter((d) => d.status === "completed")).toHaveLength(2);
 		const child = await runtime.harness.conversation(queued.childId as never, runtime.context);
 		expect((await child!.entries({}, 10, undefined, runtime.context)).items).toHaveLength(0);

@@ -45,8 +45,8 @@ export function helpLines(platform: string = process.platform): string[] {
 		["Enter", "Confirm selected approval option"],
 		["PgUp / PgDn", "Scroll full approval command"],
 		["[/]", "Select another pending approval"],
-		["S", "Stop active task (Enter confirms)"],
-		["Click", "Open task card or status-bar Agents entry"],
+		["S", "Stop current round; keep agent context (Enter confirms)"],
+		["Click", "Open round card or status-bar Agents entry"],
 	]);
 	section("Skills", [
 		["U", "Install for user"],

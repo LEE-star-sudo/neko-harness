@@ -7,7 +7,7 @@ import type { ImageInfo } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import type { SkillInvocation } from "./skill-invocation.ts";
-import type { Delegation } from "./subagents.ts";
+import type { Delegation, SubagentSummary } from "./subagents.ts";
 import type { ToolApproval } from "./tool-approvals.ts";
 import { savedWorkspace } from "./workspace.ts";
 
@@ -33,6 +33,8 @@ export type ChatView = {
 	historyBefore?: number | null;
 	approvals?: ToolApproval[];
 	subagents?: Delegation[];
+	agents?: SubagentSummary[];
+	rounds?: Delegation[];
 	taskUsage?: UsageTotals;
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
 	contextUsage?: { tokens: number | null; window: number; percent: number | null };
@@ -73,6 +75,7 @@ export type ChatItem = { order?: number } & (
 			images?: ChatImage[];
 			skill?: SkillInvocation;
 			defaultImagePrompt?: DefaultImagePrompt;
+			subagentRoundId?: number;
 	  }
 	| {
 			type: "assistant";
@@ -156,7 +159,10 @@ export function summarizeToolCall(name: string, args: unknown): ToolSummary {
 	const record = (args ?? {}) as Record<string, unknown>;
 	switch (name) {
 		case "subagent":
-			return { args: `${record.type}: ${record.title}`, detail: String(record.task ?? "") };
+			return {
+				args: record.action === "list" ? "List agents" : `${record.agentId ?? record.type}: ${record.title}`,
+				detail: String(record.task ?? ""),
+			};
 		case "find_files":
 		case "search_text":
 			return {
@@ -323,6 +329,9 @@ export function projectChatView(
 					: undefined;
 			items.push({
 				type: "user",
+				...((entry.data as InputData | undefined)?.subagentRoundId
+					? { subagentRoundId: (entry.data as InputData).subagentRoundId! }
+					: {}),
 				key: `e${entry.id}`,
 				id: entry.id,
 				text:

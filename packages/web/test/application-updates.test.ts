@@ -49,7 +49,7 @@ it("reports immutable web version and changing installed version with no-store",
 			socketPath,
 			providers: [faux.provider],
 			model: { provider: "faux", modelId: "faux-1" },
-			updates: { protocolVersion: 4 },
+			updates: { protocolVersion: 5 },
 		});
 		const incompatible = await (await fetch(`${web.url}/api/info`)).json();
 		expect(incompatible.protocolCompatible).toBe(false);
@@ -119,7 +119,7 @@ it("rediscovers a changed gateway address and drops incompatible retries", async
 			port: 0,
 			providers: [faux.provider],
 			model: { provider: "faux", modelId: "faux-1" },
-			updates: { protocolVersion: 4 },
+			updates: { protocolVersion: 5 },
 		});
 		await waitFor(() => phase === "error", "incompatible phase");
 		const count = discoveries;
