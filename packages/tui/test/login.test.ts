@@ -1,18 +1,19 @@
 import { expect, it } from "bun:test";
 import { Container, CURSOR_MARKER, stripTerminalSequences, Text, visibleWidth } from "@earendil-works/pi-tui";
 import { renderLayoutFrame } from "@earendil-works/pi-tui/dist/layout.js";
+import type { NekoCredentialState } from "@neko-harness/gateway";
 import { StatusFooter } from "../src/components/footer.ts";
 import { LoginPanel } from "../src/components/login.ts";
 import { createAppLayout } from "../src/layout.ts";
 
-const emptyState = () => ({
+const emptyState = (): NekoCredentialState => ({
 	revision: 1,
 	statuses: {
 		deepseek: { savedConfigured: false, environmentConfigured: false, source: "none" },
 		tavily: { savedConfigured: false, environmentConfigured: false, source: "keyless" },
 	},
 });
-const savedState = () => ({
+const savedState = (): NekoCredentialState => ({
 	revision: 1,
 	statuses: {
 		deepseek: { savedConfigured: true, environmentConfigured: true, source: "saved" },
