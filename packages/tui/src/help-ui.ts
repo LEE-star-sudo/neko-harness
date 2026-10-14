@@ -22,6 +22,7 @@ export function helpLines(platform: string = process.platform): string[] {
 		["Alt+Enter", "Queue while running"],
 		["Esc", "Stop a running task or blocking compaction"],
 		["Esc Esc", "Clear draft when idle (press twice quickly)"],
+		["Up / Down", "Browse previous inputs in this session"],
 		["Ctrl+C", "Stop while running; exit when idle"],
 		["Ctrl+S", "Open sessions"],
 		[platform === "win32" ? "Alt+V" : "Ctrl+V", "Paste clipboard image or text"],

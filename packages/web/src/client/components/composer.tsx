@@ -1,10 +1,21 @@
 import type { NekoSkillInfo } from "@neko-harness/core";
 import { replaceMention } from "@neko-harness/core/file-mentions";
 import { compactInstructions, type ImageFile } from "@neko-harness/core/image-transfer";
+import { promptHistory } from "@neko-harness/core/input-history";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import {
+	type KeyboardEvent,
+	useEffect,
+	useId,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+	useSyncExternalStore,
+} from "react";
 import { appActions } from "../lib/bootstrap";
 import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
+import { type HistoryBrowse, stepHistory } from "../lib/input-history";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { readUpgradeDraft, removeUpgradeDraft, saveUpgradeDraft } from "../lib/upgrade-draft";
 import { ComposerSuggestions } from "./composer-suggestions";
@@ -127,6 +138,28 @@ function SessionComposer(props: Props & { sessionId: string }) {
 	const current = useRef(draft);
 	current.current = draft;
 	const locked = useRef(false);
+	const history = useMemo(() => promptHistory(view?.items ?? []), [view?.items]);
+	const browse = useRef<HistoryBrowse | null>(null);
+	const recalled = useRef<"start" | "end" | null>(null);
+	useLayoutEffect(() => {
+		const el = textarea.current;
+		if (!recalled.current || !el) return;
+		const at = recalled.current === "start" ? 0 : el.value.length;
+		recalled.current = null;
+		el.setSelectionRange(at, at);
+		el.style.height = "auto";
+		el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+	});
+	const recallHistory = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+		const el = e.currentTarget;
+		const step = stepHistory(browse.current, history, e, el.value, { start: el.selectionStart, end: el.selectionEnd });
+		if (!step) return false;
+		browse.current = step.browse;
+		recalled.current = step.caret;
+		setMenu(false);
+		edit({ text: step.text });
+		return true;
+	};
 	const update = (next: Draft) => {
 		current.current = next;
 		drafts.set(props.sessionId, next);
@@ -499,6 +532,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						}}
 						className="max-h-40 min-h-10 min-w-0 w-full resize-none bg-transparent px-4 py-2 text-base text-ink-900 focus:outline-none"
 						onChange={(e) => {
+							browse.current = null;
 							edit({ text: e.target.value });
 							setCommandSelected(0);
 							setMenu(!(e.nativeEvent as InputEvent).isComposing && isCommandQuery(e.target.value));
@@ -529,6 +563,8 @@ function SessionComposer(props: Props & { sessionId: string }) {
 									e.preventDefault();
 									acceptCommand();
 								} else setMenu(false);
+							} else if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !menu && recallHistory(e)) {
+								e.preventDefault();
 							} else if (e.key === "Enter" && !e.shiftKey) {
 								e.preventDefault();
 								if (menu && menuItems.length) acceptCommand();

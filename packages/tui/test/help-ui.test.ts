@@ -13,6 +13,7 @@ it("lists commands and context-specific shortcuts, with platform clipboard keys"
 	for (const action of [
 		"Alt+Enter",
 		"Esc Esc",
+		"Browse previous inputs",
 		"Ctrl+S",
 		"Install for user",
 		"Install for project",

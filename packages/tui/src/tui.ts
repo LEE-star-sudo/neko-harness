@@ -20,6 +20,7 @@ import type {
 import { normalizeWorkspace } from "@neko-harness/core";
 import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
+import { promptHistory } from "@neko-harness/core/input-history";
 import { sessionName } from "@neko-harness/core/session-display";
 import type { NekoChat } from "@neko-harness/gateway/contract";
 import { ApprovalDock } from "./approval-dock.ts";
@@ -108,6 +109,7 @@ class NekoTuiApp {
 	#noticeTimer: ReturnType<typeof setTimeout> | undefined;
 	#compactionTimer: ReturnType<typeof setTimeout> | undefined;
 	readonly #editor: BoundedEditor;
+	#historyItems: ChatView["items"] | undefined;
 	readonly #footer = new StatusFooter();
 	/** 空会话欢迎屏(design D10):转录为空且不忙碌时挂载,首条消息到达即移除。 */
 	readonly #welcome = new WelcomeScreen();
@@ -704,6 +706,8 @@ class NekoTuiApp {
 		this.#sessionId = id;
 		void this.#refreshSkills(handle);
 		this.#editor.setText(this.#texts.get(id) ?? "");
+		this.#editor.setHistory([]);
+		this.#historyItems = undefined;
 		this.#resetTranscript();
 		const view = handle.view;
 		if (view.value !== undefined) this.applyView(view.value);
@@ -972,6 +976,10 @@ class NekoTuiApp {
 
 	applyView(view: ChatView): void {
 		this.#lastView = view;
+		if (this.#historyItems !== view.items) {
+			this.#historyItems = view.items;
+			this.#editor.setHistory(promptHistory(view.items));
+		}
 		if (this.#chat) this.#approval.update(view.subagents ?? []);
 		else this.#approval.close();
 		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? [], view.agents));

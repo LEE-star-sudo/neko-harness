@@ -53,10 +53,32 @@ export class BoundedEditor extends Editor {
 		this.#completionEpoch++;
 		this.resetEscapeSequence();
 		super.setText(text);
+		this.#flushHistory();
+	}
+
+	/**
+	 * Replace the browsable prompt history (newest first). Pi exposes only append, so this writes its private
+	 * field; the version is pinned and a test covers it. While browsing, the update waits so the visible entry
+	 * and position do not shift.
+	 */
+	setHistory(entries: readonly string[]): void {
+		if (this["historyIndex"] > -1) {
+			this.#pendingHistory = entries;
+			return;
+		}
+		this.#pendingHistory = undefined;
+		const current: string[] = this["history"];
+		if (current.length === entries.length && current.every((entry, i) => entry === entries[i])) return;
+		this["history"] = [...entries];
+	}
+	#pendingHistory?: readonly string[];
+	#flushHistory(): void {
+		if (this.#pendingHistory !== undefined && this["historyIndex"] === -1) this.setHistory(this.#pendingHistory);
 	}
 
 	override handleInput(data: string): void {
 		if (isKeyRelease(data)) return;
+		this.#flushHistory();
 		this.#completionEpoch++;
 		if (matchesKey(data, "escape") && this.isShowingAutocomplete()) {
 			this.resetEscapeSequence();
