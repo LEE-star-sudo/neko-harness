@@ -29,6 +29,7 @@ async function waitFor<T>(read: () => Promise<T>, test: (v: T) => boolean): Prom
 
 it("continues the same child with prior context, exposes identity, discovers it and preserves per-round usage", async () => {
 	const faux = fauxProvider();
+	const reports: unknown[] = [];
 	let id = "";
 	faux.setResponses([
 		call({ type: "explore", title: "Investigation", task: "Remember evidence alpha" }),
@@ -47,7 +48,7 @@ it("continues the same child with prior context, exposes identity, discovers it 
 		},
 		fauxAssistantMessage("Main two"),
 	]);
-	const runtime = await createNekoRuntime(options(faux));
+	const runtime = await createNekoRuntime({ ...options(faux), onReport: (error) => reports.push(error) });
 	try {
 		await runtime.waitAnswer(await runtime.submit("First"));
 		let records = await listDelegations(runtime.harness, runtime.root.id, runtime.context);
@@ -67,6 +68,7 @@ it("continues the same child with prior context, exposes identity, discovers it 
 		expect(await listSubagents(runtime.harness, runtime.root.id, runtime.context)).toHaveLength(1);
 		const main = await runtime.root.conversation.context(runtime.context);
 		expect(JSON.stringify(main.messages)).toContain(`Agent: ${id}`);
+		expect(reports).toEqual([]);
 	} finally {
 		await runtime.close();
 	}

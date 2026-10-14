@@ -262,6 +262,44 @@ const parameters = Type.Object(
 	{ additionalProperties: false },
 );
 
+const structuredOutputSchema = Type.Union([
+	Type.Object(
+		{
+			agentId: Type.String(),
+			roundId: Type.Integer(),
+			status: Type.Enum(["completed", "failed", "cancelled"]),
+			report: Type.String(),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object(
+		{
+			items: Type.Array(
+				Type.Object(
+					{
+						agentId: Type.String(),
+						parentId: Type.Integer(),
+						childId: Type.Integer(),
+						role: Type.Enum(["explore", "plan", "coder"]),
+						title: Type.String(),
+						status: Type.Enum(["idle", "queued", "running"]),
+						activeRoundId: Type.Union([Type.Integer(), Type.Null()]),
+						lastRoundId: Type.Integer(),
+						lastReport: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+						roundCount: Type.Integer(),
+						taskTitle: Type.String(),
+						approvalCount: Type.Integer(),
+						createdAt: Type.Number(),
+					},
+					{ additionalProperties: false },
+				),
+			),
+			next: Type.Union([Type.Integer(), Type.Null()]),
+		},
+		{ additionalProperties: false },
+	),
+]);
+
 export function createSubagentExtension(
 	prepare: (id: ConversationId, requestId: string, cwd: string) => Promise<void>,
 	discard: (id: ConversationId, requestId: string) => void,
@@ -412,6 +450,7 @@ export function createSubagentExtension(
 				description:
 					"Manage persistent foreground subagents. create (default): type explore/plan/coder, title, task. continue: agentId, title, task; reuses its own context, only while idle. list: discover this session's agents, optional cursor/limit. Explore Bash requires per-call user approval. Keep constraints explicit; verify and integrate final reports. Subagents cannot delegate.",
 				parameters,
+				structuredOutputSchema,
 				replay: "safe",
 				execute: async (input, api, context) => {
 					if (!Value.Check(actionParameters, input))
