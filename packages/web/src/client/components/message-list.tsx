@@ -1,6 +1,8 @@
 import type { ChatItem, ChatView, DefaultImagePrompt, StreamingView } from "@neko-harness/core";
+import { copyText } from "@neko-harness/core/conversation-export";
 import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { CopyButton } from "./copy-button";
 import { ImageGallery } from "./image-gallery";
 import { Markdown } from "./markdown";
 import { SkillInvocationCard } from "./skill-card";
@@ -41,8 +43,10 @@ function UserRow({
 	images,
 	skill: invocation,
 	defaultImagePrompt,
+	copy,
 }: {
 	text: string;
+	copy: string;
 	images?: import("@neko-harness/core").ChatImage[];
 	skill?: SkillInvocation;
 	defaultImagePrompt?: DefaultImagePrompt;
@@ -50,18 +54,19 @@ function UserRow({
 	// /skill: 展开块渲染为折叠卡片；参数仍以用户气泡显示，未命中时原样渲染。
 	if (invocation !== undefined) {
 		return (
-			<div className="chat-row anim-user flex justify-end">
+			<div className="chat-row anim-user flex flex-col items-end">
 				<div className="chat-bubble flex min-w-0 flex-col items-stretch gap-1.5">
 					<SkillInvocationCard invocation={invocation} />
 					{invocation.args !== "" && (
 						<div className="bubble-user px-4 py-2.5 whitespace-pre-wrap">{invocation.args}</div>
 					)}
 				</div>
+				<CopyButton text={copy} />
 			</div>
 		);
 	}
 	return (
-		<div className="chat-row anim-user flex justify-end">
+		<div className="chat-row anim-user flex flex-col items-end">
 			<div
 				className={`bubble-user chat-bubble px-4 py-2.5 whitespace-pre-wrap${defaultImagePrompt ? " [&>div]:mt-0" : ""}`}
 			>
@@ -76,6 +81,7 @@ function UserRow({
 				)}
 				{images && <ImageGallery images={images} />}
 			</div>
+			<CopyButton text={copy} />
 		</div>
 	);
 }
@@ -94,11 +100,12 @@ function AssistantRow({ item }: { item: Extract<ChatItem, { type: "assistant" }>
 	// 流式期间文本从无到有，出现时再渲染，不会闪烁。
 	if (item.text.trim() === "" && item.thinking.trim() === "" && item.note === null) return null;
 	return (
-		<div className="chat-row anim-other flex justify-start">
+		<div className="chat-row anim-other flex flex-col items-start">
 			<div className="bubble-assistant space-y-1.5 px-4 py-2.5">
 				<AssistantBody thinking={item.thinking} text={item.text} />
 				{item.note !== null && <div className="text-xs text-sakura-800 italic">⚠ {item.note}</div>}
 			</div>
+			<CopyButton text={copyText(item)} label="复制回答" />
 		</div>
 	);
 }
@@ -282,6 +289,7 @@ export function MessageList({
 										)}
 										<UserRow
 											text={item.text}
+											copy={copyText(item)}
 											images={item.images}
 											skill={item.skill}
 											defaultImagePrompt={item.defaultImagePrompt}

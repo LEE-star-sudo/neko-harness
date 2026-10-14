@@ -20,8 +20,10 @@ import type {
 import { normalizeWorkspace } from "@neko-harness/core";
 import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
+import { sessionName } from "@neko-harness/core/session-display";
 import type { NekoChat } from "@neko-harness/gateway/contract";
 import { ApprovalDock } from "./approval-dock.ts";
+import { copyLastAnswer } from "./clipboard-write.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
@@ -29,11 +31,12 @@ import { HistoryImage, ImageTranscript } from "./components/history-image.ts";
 import { LoginPanel } from "./components/login.ts";
 import { formatNotice, type NoticeLevel } from "./components/notice.ts";
 import { PickerPanel } from "./components/picker.ts";
-import { ThemedText, ThemedTruncatedText } from "./components/themed-text.ts";
+import { ThemedText, ThemedTruncatedText, ThemedWrappedText } from "./components/themed-text.ts";
 import { type ToolCardState, ToolExecutionComponent, ToolSpinnerTicker } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { WelcomeScreen } from "./components/welcome.ts";
 import { detectColorFgBgMode, followTerminalTheme } from "./detect-theme.ts";
+import { type ExportArgs, exportToFile, parseExportArgs } from "./export-command.ts";
 import { fileCompletion } from "./file-completion.ts";
 import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
@@ -507,6 +510,14 @@ class NekoTuiApp {
 			void this.#manage(() => this.archiveSession());
 			return;
 		}
+		if (trimmed === "/copy") {
+			void this.#copyLastAnswer();
+			return;
+		}
+		if (trimmed === "/export" || trimmed.startsWith("/export ")) {
+			void this.#exportSession(trimmed.slice("/export".length));
+			return;
+		}
 		const chat = this.#chat;
 		if (chat === undefined) return;
 		if (
@@ -615,6 +626,51 @@ class NekoTuiApp {
 			for (const id of ids) await chat.releaseImage(id).catch(() => {});
 			this.#sending.delete(session);
 			this.#ui.requestRender();
+		}
+	}
+
+	/** /copy：最后一条回答（不含 thinking）写入剪贴板；只取已提交条目，忙碌时同样可用。 */
+	async #copyLastAnswer(): Promise<void> {
+		const outcome = await copyLastAnswer(this.#lastView?.items ?? [], {
+			osc52: (sequence) => this.#terminal.write(sequence),
+		});
+		this.addNotice(outcome.message, outcome.level);
+	}
+
+	/** /export：发起时快照转录与 chat 句柄，写入文件；期间切换会话不影响导出内容。 */
+	async #exportSession(argumentText: string): Promise<void> {
+		const view = this.#lastView;
+		const chat = this.#chat;
+		const sessionId = this.#sessionId;
+		if (view === undefined || chat === undefined) {
+			this.addNotice("No session is open.", "warning");
+			return;
+		}
+		let args: ExportArgs;
+		try {
+			args = parseExportArgs(argumentText);
+		} catch (error) {
+			this.addNotice(messageOf(error), "warning", { wrap: true });
+			return;
+		}
+		const summary = this.#gateway.client.directory.state.value?.sessions.find((s) => s.id === sessionId);
+		const title = summary ? sessionName(summary, "") : "";
+		this.addNotice("Exporting...");
+		try {
+			const { path, skippedImages } = await exportToFile({
+				...args,
+				cwd: this.#options.cwd ?? process.cwd(),
+				source: { sessionId, title, model: view.model, cwd: view.cwd, exportedAt: new Date(), items: view.items },
+				loadImage: (image) =>
+					downloadImage((offset) =>
+						chat.getImage({ entryId: image.entryId, contentIndex: image.contentIndex, offset }),
+					),
+			});
+			const other = sessionId !== this.#sessionId ? ` (session ${title || sessionId})` : "";
+			const skipped = skippedImages > 0 ? `; ${skippedImages} image(s) not embedded` : "";
+			this.addNotice(`Exported${other} to ${path}${skipped}`, "info", { wrap: true, ttlMs: 20000 });
+		} catch (error) {
+			this.addNotice(`Export failed: ${messageOf(error)}`, "error", { wrap: true, ttlMs: 20000 });
 		}
 	}
 
@@ -882,14 +938,16 @@ class NekoTuiApp {
 	/**
 	 * 底部通知行(design D6):info `i`(muted)/ warning `!` / error `✗`,5s 自动消失。
 	 */
-	addNotice(text: string, level: NoticeLevel = "info"): void {
+	addNotice(text: string, level: NoticeLevel = "info", options: { wrap?: boolean; ttlMs?: number } = {}): void {
 		clearTimeout(this.#noticeTimer);
 		this.#noticeTimer = setTimeout(() => {
 			this.#notices.clear();
 			this.#ui.requestRender();
-		}, 5000);
+		}, options.ttlMs ?? 5000);
 		this.#notices.clear();
-		this.#notices.addChild(new ThemedTruncatedText(() => formatNotice(text, level), 1, 0));
+		const content = () => formatNotice(text, level);
+		// 需要完整可读的通知（如导出路径）换行显示，其余保持单行截断。
+		this.#notices.addChild(options.wrap ? new ThemedWrappedText(content) : new ThemedTruncatedText(content, 1, 0));
 
 		this.#ui.requestRender();
 	}

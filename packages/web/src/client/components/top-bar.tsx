@@ -1,6 +1,7 @@
 import { sessionName } from "@neko-harness/core/session-display";
 import type { ConnPhase } from "../lib/store";
 import { useNekoState } from "../lib/store";
+import { ExportMenu } from "./export-menu";
 import { folderName, Icon } from "./primitives";
 import { UpdateNotice } from "./update-notice";
 
@@ -39,6 +40,7 @@ export function TopBar(props: { conn: ConnPhase; onToggleSessions: () => void; s
 				>
 					{operating ? "切换中…" : phases[props.conn]}
 				</output>
+				<ExportMenu />
 			</header>
 			<UpdateNotice />
 		</>

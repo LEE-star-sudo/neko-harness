@@ -34,3 +34,15 @@ export class ThemedTruncatedText implements Component {
 		return new TruncatedText(this.#content(), this.#paddingX, this.#paddingY).render(width);
 	}
 }
+
+/** Like ThemedTruncatedText but wraps, for notices whose full text (e.g. a file path) must stay readable. */
+export class ThemedWrappedText implements Component {
+	readonly #content: () => string;
+	constructor(content: () => string) {
+		this.#content = content;
+	}
+	invalidate(): void {}
+	render(width: number): string[] {
+		return new Text(this.#content(), 1, 0).render(width);
+	}
+}

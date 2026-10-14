@@ -1,7 +1,9 @@
 import { RUNNING_VERSION, updateAction } from "@neko-harness/core/application-version";
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { storeActions, useNekoState } from "../lib/store";
 import { reloadForUpgrade } from "./composer";
+import { DismissButton } from "./primitives";
 
 export async function copyUpdateCommand(): Promise<string> {
 	let text: string;
@@ -25,7 +27,9 @@ export function useUpdateAction() {
 }
 export function UpdateNotice() {
 	const action = useUpdateAction();
-	if (action === "none") return null;
+	// 仅本次页面内关闭；状态变化（如新版本或需重启）会重新提示。
+	const [dismissed, setDismissed] = useState<string | null>(null);
+	if (action === "none" || dismissed === action) return null;
 	const text =
 		action === "install"
 			? "发现新版本 · 运行 neko update"
@@ -54,6 +58,7 @@ export function UpdateNotice() {
 					查看步骤
 				</Link>
 			)}
+			<DismissButton label="关闭更新提示" onClick={() => setDismissed(action)} />
 		</output>
 	);
 }

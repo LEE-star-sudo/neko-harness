@@ -28,6 +28,7 @@ export function Icon({
 		| "info"
 		| "key"
 		| "download"
+		| "copy"
 		| "trash"
 		| "eye";
 	size?: number;
@@ -54,6 +55,7 @@ export function Icon({
 		info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 12v4M12 8h.01",
 		key: "M12.7 11.3 21 3m-4.2 1.8 3 3M8 19a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
 		download: "M12 4v10m0 0-4-4m4 4 4-4M5 20h14",
+		copy: "M9 9h11v11H9zM5 15H4V4h11v1",
 		trash: "M4.5 7h15M9.5 7V4.5h5V7m-7.5 0 .8 13h8.4l.8-13",
 		eye: "M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Zm9.5 2.4a2.4 2.4 0 1 0 0-4.8 2.4 2.4 0 0 0 0 4.8Z",
 		sparkles:
@@ -215,3 +217,18 @@ export function Popover(props: { anchor: HTMLElement; label: string; onClose: ()
 	);
 }
 export const folderName = (path: string) => path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
+
+/** 条幅右侧的小关闭按钮。 */
+export function DismissButton(props: { label: string; onClick: () => void }) {
+	return (
+		<button
+			type="button"
+			className="icon-btn focus-neko rounded hover:bg-black/5"
+			aria-label={props.label}
+			title={props.label}
+			onClick={props.onClick}
+		>
+			<Icon name="close" size={14} />
+		</button>
+	);
+}

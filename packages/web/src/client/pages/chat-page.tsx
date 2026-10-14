@@ -3,17 +3,24 @@ import { useEffect, useRef, useState } from "react";
 import { ApprovalInbox } from "../components/approval-inbox";
 import { Composer } from "../components/composer";
 import { MessageList } from "../components/message-list";
-import { folderName, useMobile } from "../components/primitives";
+import { DismissButton, folderName, useMobile } from "../components/primitives";
 import { SessionList } from "../components/session-list";
 import { SubagentPanel } from "../components/subagent-panel";
 import { TopBar } from "../components/top-bar";
 import { appActions, reportError } from "../lib/bootstrap";
 import { MOBILE_QUERY } from "../lib/layout";
-import { useNekoState } from "../lib/store";
+import { storeActions, useNekoState } from "../lib/store";
+
+const INFO_NOTICE_MS = 8000;
 
 export function ChatPage() {
 	const { view, phase, notice, operating, workspaceRoot, currentSessionId } = useNekoState();
 	const mobile = useMobile();
+	useEffect(() => {
+		if (notice?.level !== "info") return;
+		const timer = setTimeout(storeActions.clearNotice, INFO_NOTICE_MS);
+		return () => clearTimeout(timer);
+	}, [notice]);
 	const targetSequence = useRef(0);
 	const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
 	useEffect(() => {
@@ -76,14 +83,15 @@ export function ChatPage() {
 				<TopBar sidebarOpen={sidebarOpen} conn={phase} onToggleSessions={() => setSidebarOpen(!sidebarOpen)} />
 				{notice !== null && (
 					<div
-						className={`discrete-in border-b px-4 py-1.5 text-center text-xs ${
+						className={`discrete-in flex items-center gap-2 border-b py-1 pr-2 pl-9 text-xs ${
 							notice.level === "error"
 								? "border-sakura-300 bg-sakura-100 text-sakura-900"
 								: "border-tianyi-200 bg-tianyi-50 text-tianyi-900"
 						}`}
 						role="alert"
 					>
-						{notice.text}
+						<span className="min-w-0 flex-1 text-center">{notice.text}</span>
+						<DismissButton label="关闭提示" onClick={storeActions.clearNotice} />
 					</div>
 				)}
 				<main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col focus:outline-none">

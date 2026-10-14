@@ -741,6 +741,46 @@ button {
 	contain-intrinsic-size: auto 120px;
 }
 
+/* 气泡下方复制行：悬停/聚焦显示，触屏常显；按钮点击区 ≥32px */
+.copy-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 32px;
+	opacity: 0;
+	transition: opacity 0.12s;
+}
+.chat-row:hover .copy-row,
+.copy-row:focus-within,
+.copy-row:not([data-state="idle"]) {
+	opacity: 1;
+}
+@media (hover: none) {
+	.copy-row {
+		opacity: 1;
+	}
+}
+.copy-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 32px;
+	min-height: 32px;
+	border-radius: 8px;
+	color: var(--color-ink-500);
+}
+.copy-btn:hover {
+	color: var(--color-sakura-800);
+	background: var(--color-sakura-50);
+}
+.copy-status {
+	font-size: var(--text-xs);
+	color: var(--color-ink-500);
+}
+.copy-row[data-state="failed"] .copy-status {
+	color: var(--color-sakura-800);
+}
+
 /* skip-link：默认视觉隐藏，聚焦时落到顶栏下方 */
 .skip-link {
 	position: absolute;
@@ -892,6 +932,30 @@ button {
 		height: 28px;
 		flex-shrink: 0;
 		color: var(--color-ink-500);
+	}
+	.export-btn {
+		width: auto;
+		gap: 5px;
+		padding: 0 8px;
+		font-size: var(--text-xs);
+	}
+	.export-btn:disabled {
+		opacity: 0.45;
+	}
+	.export-option .export-check {
+		display: inline-block;
+		width: 18px;
+		text-align: center;
+		color: var(--color-sakura-700);
+	}
+	@media (max-width: 48rem) {
+		.export-btn {
+			width: 28px;
+			padding: 0;
+		}
+		.export-label {
+			display: none;
+		}
 	}
 	.chrome :is(.chrome-row, .icon-btn, .workspace-trigger, .workspace-option):hover:not(:disabled) {
 		background: var(--color-sakura-50);

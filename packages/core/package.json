@@ -53,6 +53,11 @@
 			"neko-source": "./src/application-updates.ts",
 			"types": "./dist/application-updates.d.ts",
 			"import": "./dist/application-updates.js"
+		},
+		"./conversation-export": {
+			"neko-source": "./src/conversation-export.ts",
+			"types": "./dist/conversation-export.d.ts",
+			"import": "./dist/conversation-export.js"
 		}
 	},
 	"scripts": {
@@ -62,6 +67,7 @@
 		"@earendil-works/chord": "1.2.0",
 		"@earendil-works/pi-ai": "1.2.0",
 		"@earendil-works/pi-durable": "1.2.0",
+		"marked": "18.1.0",
 		"sharp": "0.35.5",
 		"yaml": "2.9.1",
 		"@earendil-works/pi-env": "1.2.0"

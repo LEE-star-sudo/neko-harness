@@ -7,6 +7,8 @@ export const commands: SlashCommand[] = [
 	{ name: "help", description: "Show keyboard shortcuts and commands" },
 	{ name: "version", description: "View versions and check for updates" },
 	{ name: "compact", description: "Compact context (/compact optional instructions)" },
+	{ name: "copy", description: "Copy the last assistant response" },
+	{ name: "export", description: "Export session (/export path.md|.html|.json [--thinking])" },
 	{ name: "exit", description: "Exit neko TUI" },
 	{ name: "new", description: "Create a new session" },
 	{ name: "sessions", description: "Switch or create a session" },
