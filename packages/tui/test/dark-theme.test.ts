@@ -104,6 +104,9 @@ it("restyles existing history, expanded content, notices and streamed text witho
 				result: "saved output",
 				durationMs: 1,
 				note: null,
+				diff: null,
+				diffAdded: null,
+				diffRemoved: null,
 			});
 			card.setExpanded(true);
 			return card;

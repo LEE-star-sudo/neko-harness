@@ -67,6 +67,10 @@ const call = Type.Object({
 	detail: nullableString,
 	phase,
 	output: nullableString,
+	diff: nullableString,
+	diffAdded: Type.Union([num, nil]),
+	diffRemoved: Type.Union([num, nil]),
+	diffTruncated: Type.Optional(bool),
 });
 export const DelegationSchema = Type.Object({
 	parentId: integer,
@@ -184,6 +188,10 @@ export const ChatViewSchema = Type.Object({
 				result: nullableString,
 				durationMs: Type.Union([num, nil]),
 				note: nullableString,
+				diff: nullableString,
+				diffAdded: Type.Union([num, nil]),
+				diffRemoved: Type.Union([num, nil]),
+				diffTruncated: Type.Optional(bool),
 			}),
 			Type.Object({ type: Type.Literal("system"), order: Type.Optional(num), key: str, id: integer, text: str }),
 		]),

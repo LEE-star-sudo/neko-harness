@@ -163,6 +163,9 @@ function decodeEntityAt(html: string, index: number): { text: string; length: nu
 
 const SPAN_CLOSE = "</span>";
 
+/** 代码段:着色槽位(plain=codeFg)与纯文本;按行切分,供整篇高亮后再按行映射(如 diff 两层高亮)。 */
+export type HighlightSegment = { readonly slot: ThemeSlotName | "plain"; readonly text: string };
+
 /** 代码块行:着色内容 + 纯文本宽度(用于块内等宽补齐)。 */
 type CodeLine = { styled: string; width: number };
 
@@ -172,9 +175,9 @@ function solidBlock(lines: CodeLine[], fullWidth?: number): string[] {
 	return lines.map((line) => theme.codeBg(line.styled + " ".repeat(Math.max(0, max - line.width))));
 }
 
-/** hljs HTML → 按 scope 着色的行数组;段内着色(scope 槽位),空白段走 codeFg,整体 codeBg 矩形。 */
-function renderHighlighted(html: string, fullWidth?: number): string[] {
-	const segments: Array<{ slot: ThemeSlotName | "plain"; text: string }> = [];
+/** hljs HTML → 行×段;跨行开标签的 token 作用域随段延续到后续行。 */
+function htmlToSegmentLines(html: string): HighlightSegment[][] {
+	const segments: HighlightSegment[] = [];
 	const scopes: Array<string | undefined> = [];
 	let textBuffer = "";
 
@@ -231,30 +234,65 @@ function renderHighlighted(html: string, fullWidth?: number): string[] {
 	flushText();
 
 	// 按行重组:段跨界时拆分,保持每行独立包底。
-	const lines: CodeLine[] = [];
-	let current = "";
-	let currentWidth = 0;
+	const lines: HighlightSegment[][] = [];
+	let current: HighlightSegment[] = [];
 	for (const segment of segments) {
 		const parts = segment.text.split("\n");
 		for (const [i, part] of parts.entries()) {
 			if (i > 0) {
-				lines.push({ styled: current, width: currentWidth });
-				current = "";
-				currentWidth = 0;
+				lines.push(current);
+				current = [];
 			}
 			if (part === "") continue;
-			currentWidth += visibleWidth(part);
-			current += segment.slot === "plain" ? theme.codeFg(part) : theme[segment.slot](part);
+			current.push({ slot: segment.slot, text: part });
 		}
 	}
-	lines.push({ styled: current, width: currentWidth });
-	return solidBlock(lines, fullWidth);
+	lines.push(current);
+	return lines;
+}
+
+/** 段 → codeFg/语法槽位着色 + 纯文本宽度。 */
+function styleSegmentLine(segments: readonly HighlightSegment[]): CodeLine {
+	return {
+		styled: segments.map((s) => (s.slot === "plain" ? theme.codeFg(s.text) : theme[s.slot](s.text))).join(""),
+		width: segments.reduce((total, s) => total + visibleWidth(s.text), 0),
+	};
+}
+
+/** hljs HTML → 按 scope 着色的行数组;段内着色(scope 槽位),空白段走 codeFg,整体 codeBg 矩形。 */
+function renderHighlighted(html: string, fullWidth?: number): string[] {
+	return solidBlock(htmlToSegmentLines(html).map(styleSegmentLine), fullWidth);
 }
 
 function normalizeLang(lang: string | undefined): string {
 	if (lang === undefined) return "";
 	const lowered = lang.trim().toLowerCase();
 	return LANG_ALIASES[lowered] ?? lowered;
+}
+
+/**
+ * 整篇代码按语言高亮并切分为行×段;语言未注册或高亮失败返回 null(调用方自行回退)。
+ * diff 两层高亮用:先对重组文档整体高亮再把段映射回各行,避免逐行高亮丢失跨行 token。
+ */
+export function highlightCodeToSegments(code: string, lang: string | undefined): HighlightSegment[][] | null {
+	const normalized = normalizeLang(lang);
+	if (normalized === "" || hljs.getLanguage(normalized) === undefined) return null;
+	try {
+		return htmlToSegmentLines(hljs.highlight(code, { language: normalized }).value);
+	} catch {
+		return null;
+	}
+}
+
+/** 文件路径扩展名 → 已注册语言名(经 hljs 别名表,如 ts/jsx/py);无扩展名或不可识别返回 undefined。 */
+export function languageForPath(path: string | undefined): string | undefined {
+	if (path === undefined) return undefined;
+	const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
+	const dot = base.lastIndexOf(".");
+	if (dot <= 0) return undefined;
+	const ext = base.slice(dot + 1);
+	if (ext === "" || hljs.getLanguage(ext) === undefined) return undefined;
+	return ext;
 }
 
 /**

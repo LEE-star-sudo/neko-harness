@@ -6,6 +6,7 @@ import {
 	ToolExecutionComponent,
 	ToolSpinnerTicker,
 } from "../src/components/tool-execution.ts";
+import { diffBackgroundAnsi, theme } from "../src/theme/slots.ts";
 
 const base: ToolCardState = {
 	name: "Bash",
@@ -17,6 +18,9 @@ const base: ToolCardState = {
 	result: null,
 	durationMs: null,
 	note: null,
+	diff: null,
+	diffAdded: null,
+	diffRemoved: null,
 };
 
 const render = (state: Partial<ToolCardState>) =>
@@ -89,4 +93,140 @@ it("shows running partial output and late results once expanded", () => {
 	expect(stripTerminalSequences(card.render(80).join("\n"))).toContain("partial…");
 	card.sync({ ...base, phase: "done", result: "final" });
 	expect(stripTerminalSequences(card.render(80).join("\n"))).toContain("final");
+});
+
+it("appends diff counts to the collapsed summary for edit and write", () => {
+	const edit = render({
+		name: "edit",
+		summary: "src/foo.ts (1 edit)",
+		phase: "done",
+		diff: "+ 1 a",
+		diffAdded: 18,
+		diffRemoved: 3,
+	});
+	expect(edit).toContain("src/foo.ts (1 edit) (+18/-3)");
+	const write = render({
+		name: "write",
+		summary: "foo.ts",
+		phase: "done",
+		diff: "+ a",
+		diffAdded: 142,
+		diffRemoved: 0,
+	});
+	expect(write).toContain("foo.ts (+142)");
+	expect(write).not.toContain("(-0)");
+	// 折叠态不渲染 diff 内容,行数提示仍指结果输出。
+	expect(write).not.toContain("---- Diff ----");
+});
+
+it("keeps the collapsed summary unchanged for tools without diff", () => {
+	const collapsed = render({ name: "read", summary: "file.ts", phase: "done", result: "x" });
+	expect(collapsed).not.toContain("(+");
+	expect(collapsed).not.toContain("---- Diff ----");
+});
+
+it("renders the expanded diff with two-layer highlight", () => {
+	const card = new ToolExecutionComponent({
+		...base,
+		name: "edit",
+		summary: "foo.ts (1 edit)",
+		phase: "done",
+		diff: ['  1 const s = "a', "+  2 b", '  3 c";'].join("\n"),
+		diffAdded: 1,
+		diffRemoved: 0,
+	});
+	card.setExpanded(true);
+	const raw = card.render(80).join("\n");
+	// 语法 token 前景色(跨行字符串延续到新增行)+ 增删行底色。
+	expect(raw).toContain(theme.syntaxString("b"));
+	expect(raw).toContain(diffBackgroundAnsi("added"));
+	const text = stripTerminalSequences(raw);
+	expect(text).toContain("---- Diff ----");
+	expect(text).toContain('const s = "a');
+	expect(text).toContain("+  2 b");
+});
+
+it("shows write content once via the diff instead of repeating the detail", () => {
+	const content = "const x = 1;";
+	const card = new ToolExecutionComponent({
+		...base,
+		name: "write",
+		summary: "foo.ts",
+		detail: `foo.ts\n${content}`,
+		phase: "done",
+		diff: `+ ${content}`,
+		diffAdded: 1,
+		diffRemoved: 0,
+	});
+	card.setExpanded(true);
+	const text = stripTerminalSequences(card.render(80).join("\n"));
+	expect(text).not.toContain("---- Arguments ----");
+	expect(text.split(content)).toHaveLength(2);
+});
+
+it("keeps the write detail when no diff data is available (historical calls)", () => {
+	const content = "const x = 1;";
+	const card = new ToolExecutionComponent({
+		...base,
+		name: "write",
+		summary: "foo.ts",
+		detail: `foo.ts\n${content}`,
+		phase: "done",
+	});
+	card.setExpanded(true);
+	const text = stripTerminalSequences(card.render(80).join("\n"));
+	expect(text).toContain("---- Arguments ----");
+	expect(text).toContain(content);
+});
+
+it("identifies truncated write previews and retains argument details", () => {
+	const card = new ToolExecutionComponent({
+		...base,
+		name: "write",
+		summary: "a.txt",
+		detail: "a.txt\nfirst\nunshown",
+		diff: "+ first",
+		diffAdded: 1,
+		diffRemoved: 0,
+		diffTruncated: true,
+	});
+	card.setExpanded(true);
+	const text = stripTerminalSequences(card.render(120).join("\n"));
+	expect(text).toContain("Diff preview truncated");
+	expect(text).toContain("---- Arguments ----");
+	expect(text).toContain("unshown");
+});
+
+it("clips expanded diffs to 50 lines with a rest hint", () => {
+	const diff = Array.from({ length: 60 }, (_, i) => `+ line ${i}`).join("\n");
+	const card = new ToolExecutionComponent({
+		...base,
+		name: "write",
+		summary: "big.txt",
+		phase: "done",
+		diff,
+		diffAdded: 60,
+		diffRemoved: 0,
+	});
+	card.setExpanded(true);
+	const text = stripTerminalSequences(card.render(120).join("\n"));
+	expect(text).toContain("line 49");
+	expect(text).not.toContain("line 50");
+	expect(text).toContain("… +10 more lines");
+});
+
+it("still renders the diff body when the target language is unknown", () => {
+	const card = new ToolExecutionComponent({
+		...base,
+		name: "edit",
+		summary: "foo.unknownext (1 edit)",
+		phase: "done",
+		diff: "- old\n+ new",
+		diffAdded: 1,
+		diffRemoved: 1,
+	});
+	card.setExpanded(true);
+	const text = stripTerminalSequences(card.render(80).join("\n"));
+	expect(text).toContain("- old");
+	expect(text).toContain("+ new");
 });

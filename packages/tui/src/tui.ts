@@ -1128,6 +1128,10 @@ class NekoTuiApp {
 				detail: item.detail,
 				phase: item.phase,
 				output: item.output,
+				diff: item.diff,
+				diffAdded: item.diffAdded,
+				diffRemoved: item.diffRemoved,
+				diffTruncated: item.diffTruncated,
 			});
 			component.sync(item);
 			this.#items.set(item.key, { kind: "tool", component });
@@ -1164,6 +1168,10 @@ class NekoTuiApp {
 		readonly detail: string | null;
 		readonly phase: "pending" | "running" | "done";
 		readonly output: string | null;
+		readonly diff: string | null;
+		readonly diffAdded: number | null;
+		readonly diffRemoved: number | null;
+		readonly diffTruncated?: boolean;
 	}): ToolExecutionComponent {
 		const existing = this.#toolCards.get(call.callId);
 		if (existing !== undefined) return existing;
@@ -1320,6 +1328,10 @@ function streamingCardState(call: {
 	readonly detail: string | null;
 	readonly phase: "pending" | "running" | "done";
 	readonly output: string | null;
+	readonly diff: string | null;
+	readonly diffAdded: number | null;
+	readonly diffRemoved: number | null;
+	readonly diffTruncated?: boolean;
 }): ToolCardState {
 	return {
 		name: call.name,
@@ -1331,6 +1343,10 @@ function streamingCardState(call: {
 		result: null,
 		durationMs: null,
 		note: null,
+		diff: call.diff,
+		diffAdded: call.diffAdded,
+		diffRemoved: call.diffRemoved,
+		diffTruncated: call.diffTruncated,
 	};
 }
 

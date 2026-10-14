@@ -61,6 +61,9 @@ const view: ChatView = {
 			result: "read failed: missing file",
 			durationMs: 12,
 			note: "[truncated]",
+			diff: null,
+			diffAdded: null,
+			diffRemoved: null,
 		},
 		{
 			type: "assistant",

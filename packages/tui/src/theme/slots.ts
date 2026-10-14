@@ -104,6 +104,15 @@ function delegate(name: ThemeSlotName): ThemeSlot {
 /** 组件使用的动态主题入口:槽位委托到当前激活主题,切换后自动生效。 */
 export const theme: NekoTheme = Object.fromEntries(SLOT_NAMES.map((name) => [name, delegate(name)])) as NekoTheme;
 
+/**
+ * diff 行底色 ANSI(TUI 两层高亮的增删行着色层,配色取 diffAdded/diffRemoved 槽位的 bg)。
+ * 语法 token 只发 39 前景重置,行底色跨段保持;gutter 的 49 重置后由调用方重铺。
+ */
+export function diffBackgroundAnsi(kind: "added" | "removed"): string {
+	const style = (activeMode === "dark" ? DARK_PALETTE : LIGHT_PALETTE)[kind === "added" ? "diffAdded" : "diffRemoved"];
+	return backgroundAnsi(parseColor(style.bg!), getTerminalColorMode());
+}
+
 // bold/italic/strikethrough/underline 是无色属性:SGR 开关不随主题变化,本地实现。
 const sgr =
 	(attrs: SlotStyle): ThemeSlot =>

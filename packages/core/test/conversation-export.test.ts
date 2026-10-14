@@ -42,6 +42,9 @@ const tool = (extra: Partial<Extract<ChatItem, { type: "tool" }>> = {}): ChatIte
 	result: "ok",
 	durationMs: 1500,
 	note: null,
+	diff: null,
+	diffAdded: null,
+	diffRemoved: null,
 	...extra,
 });
 const image = (entryId: number, bytes: number, extra: Partial<ChatImage> = {}): ChatImage => ({

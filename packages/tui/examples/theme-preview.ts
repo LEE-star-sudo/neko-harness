@@ -23,6 +23,9 @@ const toolBase: ToolCardState = {
 	result: null,
 	durationMs: null,
 	note: null,
+	diff: null,
+	diffAdded: null,
+	diffRemoved: null,
 };
 
 function section(title: string): void {
@@ -85,6 +88,32 @@ function renderAll(): void {
 			result: "src/theme.ts(1,1): error TS0000",
 		}),
 	);
+
+	section("tool cards (edit diff collapsed / expanded)");
+	show(
+		new ToolExecutionComponent({
+			...toolBase,
+			name: "edit",
+			summary: "theme/slots.ts (1 edit)",
+			phase: "done",
+			durationMs: 900,
+			diff: ["  74 \t// diff", '- 75 \t"diffAdded",', '+ 75 \t"diffAdded", // 行底色'].join("\n"),
+			diffAdded: 1,
+			diffRemoved: 1,
+		}),
+	);
+	const editCard = new ToolExecutionComponent({
+		...toolBase,
+		name: "edit",
+		summary: "theme/slots.ts (1 edit)",
+		phase: "done",
+		durationMs: 900,
+		diff: ["  74 \t// diff", '- 75 \t"diffAdded",', '+ 75 \t"diffAdded", // 行底色'].join("\n"),
+		diffAdded: 1,
+		diffRemoved: 1,
+	});
+	editCard.setExpanded(true);
+	show(editCard);
 
 	section("diff highlight");
 	show(

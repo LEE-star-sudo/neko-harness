@@ -109,6 +109,14 @@ export type ChatItem = { order?: number } & (
 			durationMs: number | null;
 			/** 补充说明（如"Not run: response interrupted."）；无则为 null。 */
 			note: string | null;
+			/** 展示型 diff（edit 透传上游 details.diff；write 由参数 content 合成全新增）；无则为 null。 */
+			diff: string | null;
+			/** diff 新增行数；无 diff 时为 null。 */
+			diffAdded: number | null;
+			/** diff 删除行数；无 diff 时为 null。 */
+			diffRemoved: number | null;
+			/** write diff 因行数或字节预算截断；缺省为 false。 */
+			diffTruncated?: boolean;
 	  }
 	| { type: "system"; key: string; id: number; text: string }
 );
@@ -128,6 +136,11 @@ export type StreamingToolCall = {
 	/** pending=排队; running=正在执行（可能有 output）; done=槽位已结束。 */
 	phase: "pending" | "running" | "done";
 	output: string | null;
+	/** 同 ChatItem tool 条目：write 由参数合成，其余为 null。 */
+	diff: string | null;
+	diffAdded: number | null;
+	diffRemoved: number | null;
+	diffTruncated?: boolean;
 };
 
 export type ToolSummary = {
@@ -205,6 +218,55 @@ export function toolResultText(content: ReadonlyArray<{ type: string; text?: str
 		.join("\n");
 }
 
+/** write 合成 diff 的行数与 UTF-8 字节上限（计数按完整展示行统计）。 */
+const WRITE_DIFF_MAX_LINES = 2000;
+const WRITE_DIFF_MAX_BYTES = 64 * 1024;
+
+/** 从展示型 diff 统计增删行（以 +/- 前缀计，排除 +++ / --- 头）。 */
+function countDiffLines(diff: string): { added: number; removed: number } {
+	let added = 0;
+	let removed = 0;
+	for (const line of diff.split("\n")) {
+		if (line.startsWith("+") && !line.startsWith("+++")) added++;
+		else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+	}
+	return { added, removed };
+}
+
+/** edit 工具结果 details 的展示型 diff；结构不符/缺失回退 null，不抛错。 */
+function editResultDiff(details: unknown): string | null {
+	if (typeof details !== "object" || details === null) return null;
+	const diff = (details as { diff?: unknown }).diff;
+	return typeof diff === "string" ? diff : null;
+}
+
+/** write 工具调用参数合成的全新增 diff（逐行 "+ " 前缀）；content 非字符串时回退 null。 */
+function synthesizedWriteDiff(
+	args: unknown,
+): { diff: string; added: number; removed: number; truncated: boolean } | null {
+	const record = (args ?? {}) as Record<string, unknown>;
+	if (typeof record.content !== "string") return null;
+	const content = record.content;
+	const shown: string[] = [];
+	let offset = 0;
+	let bytes = 0;
+	while (offset < content.length && shown.length < WRITE_DIFF_MAX_LINES) {
+		const newline = content.indexOf("\n", offset);
+		const end = newline === -1 ? content.length : newline;
+		const overhead = shown.length === 0 ? 2 : 3; // "+ " + 行间换行。
+		const remaining = WRITE_DIFF_MAX_BYTES - bytes - overhead;
+		// UTF-8 字节数至少为 UTF-16 长度，先排除巨行，避免复制整行。
+		if (end - offset > remaining) break;
+		const line = content.slice(offset, end);
+		const lineBytes = Buffer.byteLength(line, "utf8");
+		if (lineBytes > remaining) break;
+		shown.push(`+ ${line}`);
+		bytes += lineBytes + overhead;
+		offset = newline === -1 ? content.length : end + 1;
+	}
+	return { diff: shown.join("\n"), added: shown.length, removed: 0, truncated: offset < content.length };
+}
+
 /** 汇总 pi.usage 的模型与工具用量。 */
 export function totalUsage(state: UsageState): Usage {
 	const total: Usage = {
@@ -262,6 +324,8 @@ export function projectChatView(
 		for (const message of entry.model ?? []) {
 			if (message.role !== "toolResult") continue;
 			const diagnostics = (entry.data as { diagnostics?: ToolDiagnostic[] } | undefined)?.diagnostics ?? [];
+			const diff = message.toolName === "edit" ? editResultDiff(message.details) : null;
+			const counts = diff === null ? null : countDiffLines(diff);
 			results.set(message.toolCallId, {
 				type: "tool",
 				key: `t${message.toolCallId}`,
@@ -280,6 +344,9 @@ export function projectChatView(
 					.join("\n"),
 				durationMs: message.durationMs ?? null,
 				note: null,
+				diff,
+				diffAdded: counts?.added ?? null,
+				diffRemoved: counts?.removed ?? null,
 			});
 		}
 	}
@@ -357,6 +424,7 @@ export function projectChatView(
 				} else {
 					const summary = summarizeToolCall(block.name, block.arguments);
 					const slot = live.tools?.find((s) => s.callId === block.id);
+					const synthesized = block.name === "write" ? synthesizedWriteDiff(block.arguments) : null;
 					items.push({
 						type: "tool",
 						key: `t${block.id}`,
@@ -370,6 +438,10 @@ export function projectChatView(
 						result: null,
 						durationMs: null,
 						note: ran ? null : "Not run: response interrupted.",
+						diff: synthesized?.diff ?? null,
+						diffAdded: synthesized?.added ?? null,
+						diffRemoved: synthesized?.removed ?? null,
+						diffTruncated: synthesized?.truncated ?? false,
 					});
 				}
 			}
@@ -426,7 +498,18 @@ export function projectChatView(
 
 function withArgs(item: Extract<ChatItem, { type: "tool" }>, name: string, args: unknown): ChatItem {
 	const summary = summarizeToolCall(name, args);
-	return { ...item, name, summary: summary.args, detail: summary.detail ?? null };
+	// write 的 diff 只依赖参数（无上游 details），在拿到 toolCall 参数时合成；edit 已在收集结果时透传。
+	const synthesized = name === "write" ? synthesizedWriteDiff(args) : null;
+	return {
+		...item,
+		name,
+		summary: summary.args,
+		detail: summary.detail ?? null,
+		diff: synthesized?.diff ?? item.diff,
+		diffAdded: synthesized?.added ?? item.diffAdded,
+		diffRemoved: synthesized?.removed ?? item.diffRemoved,
+		diffTruncated: synthesized?.truncated ?? false,
+	};
 }
 
 function assistantItem(message: AssistantMessage, id: number): Extract<ChatItem, { type: "assistant" }> {
@@ -479,6 +562,7 @@ function projectStreaming(live: LiveState): StreamingView | null {
 		if (block.type === "toolCall") {
 			const slot = live.tools?.find((candidate) => candidate.callId === block.id) as ToolSlot | undefined;
 			const summary = summarizeToolCall(block.name, block.arguments);
+			const synthesized = block.name === "write" ? synthesizedWriteDiff(block.arguments) : null;
 			toolCalls.push({
 				callId: block.id,
 				name: block.name,
@@ -486,6 +570,10 @@ function projectStreaming(live: LiveState): StreamingView | null {
 				detail: summary.detail ?? null,
 				phase: slot === undefined || slot.status === "pending" ? "pending" : slot.status,
 				output: slot?.status === "running" ? (slot.output ?? null) : null,
+				diff: synthesized?.diff ?? null,
+				diffAdded: synthesized?.added ?? null,
+				diffRemoved: synthesized?.removed ?? null,
+				diffTruncated: synthesized?.truncated ?? false,
 			});
 		}
 	}

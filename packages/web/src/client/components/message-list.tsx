@@ -131,6 +131,10 @@ function ToolRow({ item }: { item: Extract<ChatItem, { type: "tool" }> }) {
 				result={item.result}
 				durationMs={item.durationMs}
 				note={item.note}
+				diff={item.diff}
+				diffAdded={item.diffAdded}
+				diffRemoved={item.diffRemoved}
+				diffTruncated={item.diffTruncated}
 			/>
 			{item.images && <ImageGallery images={item.images} />}
 		</div>
@@ -157,6 +161,10 @@ function StreamingRow({ streaming, busy }: { streaming: StreamingView; busy: boo
 						detail={call.detail}
 						phase={call.phase}
 						output={call.output}
+						diff={call.diff}
+						diffAdded={call.diffAdded}
+						diffRemoved={call.diffRemoved}
+						diffTruncated={call.diffTruncated}
 					/>
 				</div>
 			))}

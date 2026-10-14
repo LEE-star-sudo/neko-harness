@@ -44,6 +44,6 @@ export function renderCodeHtml(source: string, lang: string | undefined): string
 	return escapeHtml(source);
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
 	return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }

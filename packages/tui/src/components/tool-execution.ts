@@ -1,5 +1,7 @@
 import { Box, Container, MouseRegion, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import { getActiveThemeMode, theme } from "../theme/index.ts";
+import { languageForPath } from "../theme/syntax.ts";
+import { diffTargetPath, highlightDiffLines } from "./diff-view.ts";
 
 /** 运行中工具的动画帧(braille);由 ToolSpinnerTicker 推进,无 ticker 时停在首帧。 */
 
@@ -55,9 +57,26 @@ export type ToolCardState = {
 	readonly durationMs: number | null;
 	/** 补充说明(如"Not run: response interrupted.")。 */
 	readonly note: string | null;
+	/** 展示型 diff(edit 透传上游 / write 参数合成);无则为 null。 */
+	readonly diff: string | null;
+	/** diff 新增行数;无 diff 时为 null。 */
+	readonly diffAdded: number | null;
+	/** diff 删除行数;无 diff 时为 null。 */
+	readonly diffRemoved: number | null;
+	readonly diffTruncated?: boolean;
 };
 
 type Phase = ToolCardState["phase"];
+
+/** 展开区 diff 行数上限,超出截断并提示剩余行数。 */
+const DIFF_MAX_LINES = 50;
+
+/** 折叠摘要的增删计数后缀:edit ` (+18/-3)`、write ` (+142)`(删除为 0 时省略);无 diff 为 ""。 */
+function diffCountSuffix(state: ToolCardState): string {
+	if (state.diffAdded === null) return "";
+	const removed = state.diffRemoved !== null && state.diffRemoved > 0 ? `/-${state.diffRemoved}` : "";
+	return ` (+${state.diffAdded}${removed})`;
+}
 
 function clipLines(text: string, maxLines: number): { visible: string; rest: number } {
 	const lines = text.split("\n");
@@ -127,13 +146,29 @@ export class ToolExecutionComponent extends Container {
 
 	rebuild(): void {
 		const state = this.#state;
-		const parts = [`${theme.toolTitle(`⚡ ${state.name}`)}`, theme.dim(state.summary), this.#statusLine(state.phase)];
+		const parts = [
+			`${theme.toolTitle(`⚡ ${state.name}`)}`,
+			theme.dim(state.summary + diffCountSuffix(state)),
+			this.#statusLine(state.phase),
+		];
 		let text = parts.join("  ");
 
-		if (this.#expanded && state.detail !== null) {
-			const detail = clipLines(state.detail, 20);
-			text += `\n${theme.dim("---- Arguments ----")}\n${detail.visible}`;
-			if (detail.rest > 0) text += `\n${theme.dim(`... ${detail.rest} more lines`)}`;
+		if (this.#expanded) {
+			// 完整 write diff 可替代 detail;截断时仍保留参数预览。
+			const detail = state.detail;
+			if (detail !== null && !(state.diff !== null && state.name === "write" && !state.diffTruncated)) {
+				const clipped = clipLines(detail, 20);
+				text += `\n${theme.dim("---- Arguments ----")}\n${clipped.visible}`;
+				if (clipped.rest > 0) text += `\n${theme.dim(`... ${clipped.rest} more lines`)}`;
+			}
+			if (state.diff !== null) {
+				const clipped = clipLines(state.diff, DIFF_MAX_LINES);
+				const lang = languageForPath(diffTargetPath(state.name, state.summary, state.detail));
+				const format = state.name === "write" ? "write" : "edit";
+				text += `\n${theme.dim("---- Diff ----")}\n${highlightDiffLines(clipped.visible, lang, format).join("\n")}`;
+				if (state.diffTruncated) text += `\n${theme.dim("… Diff preview truncated (line or byte limit)")}`;
+				if (clipped.rest > 0) text += `\n${theme.dim(`… +${clipped.rest} more lines`)}`;
+			}
 		}
 
 		// 默认单行折叠(design D12):标题行 + 行数提示;点击展开参数详情与输出原文全文。

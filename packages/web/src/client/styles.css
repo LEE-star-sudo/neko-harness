@@ -691,6 +691,24 @@ button {
 	background-color: oklch(0.53 0.13 6.2 / 0.08);
 }
 
+/* 工具卡 diff 行：仅增删底色，语法 token 前景色由 hljs 类叠加（配色同上） */
+.diff-line-add {
+	background-color: oklch(0.5 0.1 165 / 0.08);
+}
+
+.diff-line-del {
+	background-color: oklch(0.53 0.13 6.2 / 0.08);
+}
+
+.diff-gutter {
+	display: inline-block;
+	min-width: 2.5rem;
+	padding-right: 0.75rem;
+	text-align: right;
+	color: var(--color-ink-400);
+	user-select: none;
+}
+
 .hljs-emphasis {
 	font-style: italic;
 }

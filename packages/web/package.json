@@ -16,7 +16,7 @@
 	},
 	"scripts": {
 		"build": "bun --bun run tsc -p tsconfig.client.json --noEmit && bun --bun run tsc -p tsconfig.build.json && bun --bun run vite build",
-		"check:client": "bun --bun run tsc -p tsconfig.client.json --noEmit",
+		"check:client": "bun --bun run tsc -p tsconfig.client.json --noEmit && bun --bun run tsc -p tsconfig.test.json --noEmit",
 		"dev": "bun --bun run vite"
 	},
 	"dependencies": {
