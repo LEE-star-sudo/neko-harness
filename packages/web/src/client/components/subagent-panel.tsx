@@ -1,7 +1,7 @@
 import type { ChatView, Delegation } from "@neko-harness/core";
 import { downloadImage } from "@neko-harness/core/image-transfer";
 import { mergeTranscriptItems } from "@neko-harness/core/transcript-items";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
 import { ImageReaderContext } from "./image-gallery";
@@ -9,7 +9,7 @@ import { MessageList } from "./message-list";
 
 const labels = { queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已停止" };
 function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
-	const { phase } = useNekoState();
+	const { phase, operating, view: parentView } = useNekoState();
 	const [view, setView] = useState<ChatView | null>(null);
 	const [error, setError] = useState("");
 	const [older, setOlder] = useState<ChatView["items"]>([]);
@@ -21,9 +21,12 @@ function Detail({ entry, active }: { entry: Delegation; active: boolean }) {
 		const timer = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(timer);
 	}, [active, entry.endedAt]);
+	// A ready gateway can still be attaching a different session. Cached panels must
+	// wait for that attachment and its first snapshot before acquiring child handles.
+	const ready = phase === "ready" && !operating && parentView !== null;
 	const service = useMemo(
-		() => (phase === "ready" && active ? appActions.subagent(entry.taskId) : null),
-		[phase, active, entry.taskId],
+		() => (ready && active ? appActions.subagent(entry.taskId) : null),
+		[ready, active, entry.taskId],
 	);
 	const epoch = useRef(0);
 	useEffect(() => {
@@ -122,12 +125,14 @@ export function SubagentPanel({
 	open,
 	onSelect,
 	onClose,
+	approval,
 }: {
 	entries: Delegation[];
 	selected: number | null;
 	open: boolean;
 	onSelect: (id: number) => void;
 	onClose: () => void;
+	approval?: ReactNode;
 }) {
 	const [visited, setVisited] = useState<number[]>([]);
 	const closeButton = useRef<HTMLButtonElement>(null);
@@ -214,7 +219,9 @@ export function SubagentPanel({
 						onClick={() => onSelect(entry.taskId)}
 					>
 						<span className="text-tianyi-700">{entry.role}</span> · {entry.title}
-						<span className="ml-2 text-xs text-ink-500">{labels[entry.status]}</span>
+						<span className="ml-2 text-xs text-ink-500">
+							{entry.approvalCount ? `待审批 ${entry.approvalCount}` : labels[entry.status]}
+						</span>
 					</button>
 				))}
 			</div>
@@ -222,6 +229,7 @@ export function SubagentPanel({
 				const entry = entries.find((d) => d.taskId === id);
 				return entry ? <Detail key={id} entry={entry} active={open && id === selected} /> : null;
 			})}
+			{approval}
 		</aside>
 	);
 }

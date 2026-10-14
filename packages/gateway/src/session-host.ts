@@ -78,7 +78,8 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			changes.some(
 				(change) =>
 					change.type === "document" &&
-					((change.record.kind === "app.neko.delegations" && change.conversationId === session.id) ||
+					((["app.neko.delegations", "app.neko.approvals"].includes(change.record.kind) &&
+						change.conversationId === session.id) ||
 						(change.record.kind === "pi.usage" &&
 							change.conversationId !== undefined &&
 							childIds.has(change.conversationId))),
@@ -116,6 +117,12 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 				{ models: runtime.listModels(), contextEntries: view.value.entries, compaction },
 			);
 			const subagents = await listDelegations(runtime.harness, session.id, context);
+			const approvals = await runtime.approvals.list(session.id, context);
+			for (const entry of subagents)
+				entry.approvalCount =
+					entry.historyThrough === undefined
+						? approvals.filter((a) => a.delegationTaskId === entry.taskId && a.status === "pending").length
+						: 0;
 			childIds = new Set(subagents.filter((entry) => entry.historyThrough === undefined).map((entry) => entry.childId));
 			let aggregate = await session.usage();
 			for (const child of subagents.filter((entry) => entry.historyThrough === undefined))

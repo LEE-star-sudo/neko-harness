@@ -293,3 +293,58 @@ it("stops one live child through the read-only service while its siblings contin
 		await cleanup(target);
 	}
 }, 30000);
+
+it("synchronizes approvals without an open child and scopes decisions across attachments", async () => {
+	const target = await makeGateway();
+	const command = `printf approval\n# ${"long command ".repeat(7000)}`;
+	target.faux.setResponses([
+		fauxAssistantMessage([fauxToolCall("subagent", { type: "explore", title: "Approval", task: "Inspect" })], {
+			stopReason: "toolUse",
+		}),
+		fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
+		fauxAssistantMessage("Child report"),
+		fauxAssistantMessage("Main report"),
+	]);
+	const one = await connectNekoGateway(testAddress(target)),
+		two = await connectNekoGateway(testAddress(target));
+	let stop = () => {};
+	try {
+		const parent = String(target.gateway.runtime.root.id);
+		const chat = await one.attach(parent),
+			other = await two.attach(parent);
+		await chat.submit({ content: "Investigate" });
+		await waitFor(
+			() =>
+				chat.view.value?.subagents?.[0]?.approvalCount === 1 && other.view.value?.subagents?.[0]?.approvalCount === 1,
+			"approval on both main views",
+		);
+		const entry = chat.view.value!.subagents![0]!;
+		const child = one.subagent(entry.taskId);
+		stop = child.view.subscribe(() => {});
+		await waitFor(() => !!child.view.value?.approvals?.length, "approval details");
+		const a = child.view.value!.approvals![0]!;
+		expect(a.command).toBe(command);
+		await expect(child.decideApproval({ id: a.id, version: "wrong", decision: "allowed" })).rejects.toThrow();
+		const decisions = await Promise.all([
+			child.decideApproval({ id: a.id, version: a.version, decision: "denied" }),
+			two.subagent(entry.taskId).decideApproval({ id: a.id, version: a.version, decision: "allowed" }),
+		]);
+		expect(decisions[0]).toBe(decisions[1]);
+		await waitFor(
+			() =>
+				chat.view.value?.subagents?.[0]?.status === "completed" &&
+				other.view.value?.subagents?.[0]?.approvalCount === 0,
+			"decision synchronized",
+		);
+		const fork = await target.gateway.runtime.forkConversation(target.gateway.runtime.root.id);
+		await two.attach(String(fork.id));
+		await expect(
+			two.subagent(entry.taskId).decideApproval({ id: a.id, version: a.version, decision: "allowed" }),
+		).rejects.toThrow();
+	} finally {
+		stop();
+		await one.close();
+		await two.close();
+		await cleanup(target);
+	}
+}, 30000);

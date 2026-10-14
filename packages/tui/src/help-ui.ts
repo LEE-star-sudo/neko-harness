@@ -41,6 +41,10 @@ export function helpLines(platform: string = process.platform): string[] {
 		["→", "Open agents from an empty editor; open selected task"],
 		["←", "Return to main chat"],
 		["E", "Expand or collapse tool results and thinking"],
+		["↑ / ↓", "Select Allow once / Deny when approval appears"],
+		["Enter", "Confirm selected approval option"],
+		["PgUp / PgDn", "Scroll full approval command"],
+		["[/]", "Select another pending approval"],
 		["S", "Stop active task (Enter confirms)"],
 		["Click", "Open task card or status-bar Agents entry"],
 	]);

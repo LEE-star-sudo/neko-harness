@@ -269,11 +269,25 @@ export function MessageList({
 														: child.status === "queued"
 															? "排队中"
 															: "运行中"}{" "}
-											· 查看完整过程
+											{child.approvalCount ? `· 待审批 ${child.approvalCount}` : "· 查看完整过程"}
 										</span>
 									</button>
 								) : (
-									<ToolRow key={item.key} item={item} />
+									<div key={item.key}>
+										<ToolRow item={item} />
+										{view?.approvals
+											?.filter((a) => a.callId === item.callId && a.status !== "pending")
+											.map((a) => (
+												<p key={a.id} className="chat-row text-xs text-ink-500">
+													审批 ·{" "}
+													{
+														{ allowed: "已允许本次", denied: "已拒绝", cancelled: "已取消" }[
+															a.status as "allowed" | "denied" | "cancelled"
+														]
+													}
+												</p>
+											))}
+									</div>
 								);
 							}
 							case "system":

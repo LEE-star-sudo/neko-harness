@@ -7,7 +7,7 @@ import { openVersion, versionNotice, versionOverview } from "../src/version-ui.t
 const state: UpdateState = {
 	runningVersion: "1.0.0",
 	installedVersion: "1.0.0",
-	protocolVersion: 2,
+	protocolVersion: 3,
 	checkState: "ok",
 	latestVersion: "1.0.0",
 	checkedAt: 1,
@@ -58,7 +58,7 @@ it("shows only the necessary action and never suggests a downgrade", () => {
 	const ahead = { ...state, runningVersion: "1.2.0", latestVersion: "1.1.0" };
 	expect(versionOverview(ahead, "1.0.0", { ...options, runningVersion: "1.2.0" })).not.toContain("Update available");
 	expect(versionNotice(ahead, "1.0.0", { ...options, runningVersion: "1.2.0" })).toBe("");
-	expect(versionOverview({ ...state, protocolVersion: 3 }, "1.0.0", options)).toContain("Protocol incompatible");
+	expect(versionOverview({ ...state, protocolVersion: 4 }, "1.0.0", options)).toContain("Protocol incompatible");
 	expect(versionNotice(null, null, options)).toBe("");
 });
 

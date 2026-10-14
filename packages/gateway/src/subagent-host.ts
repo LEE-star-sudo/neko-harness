@@ -19,6 +19,7 @@ import { Owner } from "./session-host.ts";
 async function openReader(
 	runtime: NekoRuntime,
 	childId: number,
+	parentId: number,
 	context: Context,
 	through?: number,
 	historyUsage?: ChatView["usage"],
@@ -84,10 +85,29 @@ async function openReader(
 		return token;
 	};
 	return {
-		subscribe: (fn: (event: null) => void) => (through === undefined ? native.subscribe(() => fn(null)) : () => {}),
+		subscribe: (fn: (event: null) => void) => {
+			if (through !== undefined) return () => {};
+			const stop = native.subscribe(() => fn(null));
+			const stopApprovals = runtime.harness.subscribeCommits(({ changes }) => {
+				if (
+					changes.some(
+						(c) => c.type === "document" && c.record.kind === "app.neko.approvals" && c.conversationId === parentId,
+					)
+				)
+					fn(null);
+			});
+			return () => {
+				stop();
+				stopApprovals();
+			};
+		},
 		async refresh() {
 			const page = await pageAt();
-			revision = remember({ ...project(page.entries), historyBefore: page.next });
+			const approvals =
+				through === undefined
+					? (await runtime.approvals.list(parentId as ConversationId, context)).filter((a) => a.childId === childId)
+					: [];
+			revision = remember({ ...project(page.entries), approvals, historyBefore: page.next });
 			return revision;
 		},
 		async chunk(input: { kind: "view" | "history"; before?: number; token?: number; offset: number }) {
@@ -150,7 +170,14 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 						(d) => d.taskId === input.taskId,
 					);
 					if (!entry) throw new ChordError("gone", "Subagent unavailable");
-					const r = await openReader(runtime, entry.childId, context, entry.historyThrough, entry.historyUsage);
+					const r = await openReader(
+						runtime,
+						entry.childId,
+						input.parentId,
+						context,
+						entry.historyThrough,
+						entry.historyUsage,
+					);
 					try {
 						const initial = await r.refresh();
 						await host.root((ctx) => revision.replace(ctx, initial));
@@ -215,6 +242,18 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 			getImage: async ({ entryId, contentIndex, offset }) => {
 				await check();
 				return shared.reader!.image(entryId, contentIndex, offset);
+			},
+			decideApproval: async ({ id, version, decision }) => {
+				const entry = await check();
+				if (entry.historyThrough !== undefined) throw new ChordError("forbidden", "Fork history is read-only");
+				return runtime.approvals.decide(
+					Number(input.sessionId) as ConversationId,
+					entry.taskId,
+					id,
+					version,
+					decision,
+					context,
+				);
 			},
 			stop: async () => {
 				const entry = await check();

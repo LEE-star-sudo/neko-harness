@@ -60,5 +60,6 @@ export {
 export { mergeUsage } from "./session-metadata.ts";
 export type { SkillInvocation } from "./skill-invocation.ts";
 export { type Delegation, DelegationsDoc, listDelegations, SubagentDoc } from "./subagents.ts";
+export { ApprovalsDoc, type ToolApproval, ToolApprovals } from "./tool-approvals.ts";
 export { mergeTranscriptItems } from "./transcript-items.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

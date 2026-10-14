@@ -214,3 +214,5 @@ function deadline<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
 		signal?.removeEventListener("abort", abort);
 	});
 }
+
+export { ApprovalQueue, type PendingApproval } from "./approval-queue.ts";

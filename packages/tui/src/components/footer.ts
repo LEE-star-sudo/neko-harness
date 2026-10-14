@@ -7,6 +7,7 @@ import { theme } from "../theme/index.ts";
 export type FooterStats = {
 	readonly contextUsage?: { tokens: number | null; window: number; percent: number | null };
 	readonly subagentCount?: number;
+	readonly approvalCount?: number;
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;
@@ -97,7 +98,11 @@ export class StatusFooter implements Component {
 		const first = ` ${left}${" ".repeat(gap)}${statusStyled}`;
 
 		// —— 副行:度量 + 键位(候选逐级退化)——
-		const agentHint = s.subagentCount ? (this.panelOpen ? "" : `→ Agents ${s.subagentCount}`) : "";
+		const agentHint = s.subagentCount
+			? this.panelOpen
+				? ""
+				: `→ Agents ${s.subagentCount}${s.approvalCount ? ` · Approval ${s.approvalCount}` : ""}`
+			: "";
 		const hints = this.panelOpen
 			? ""
 			: s.canAbort && !s.busy

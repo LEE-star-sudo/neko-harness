@@ -21,6 +21,7 @@ export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string
  */
 export type PickerDetail = {
 	close?(): void;
+	handleMouse?(event: TuiMouseEvent): boolean;
 	backCloses?: boolean;
 	scroll?(delta: number): void;
 	/** Body lines for the current width/height budget. */
@@ -222,6 +223,10 @@ export class PickerPanel implements Component {
 	}
 	handleMouse(event: TuiMouseEvent) {
 		if (!this.open) return;
+		if (this.#detail?.handleMouse?.({ ...event, x: event.x - 1, y: event.y - 1 })) {
+			this.changed();
+			return { handled: true };
+		}
 		if (event.type === "click" && event.button === "left" && this.pointerSelection && !this.detailOpen) {
 			const index = this.#pointerRows.get(event.y);
 			if (index === undefined) return;

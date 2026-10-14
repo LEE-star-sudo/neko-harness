@@ -21,6 +21,7 @@ import { normalizeWorkspace } from "@neko-harness/core";
 import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import type { NekoChat } from "@neko-harness/gateway/contract";
+import { ApprovalDock } from "./approval-dock.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BoundedEditor } from "./components/editor.ts";
 import { StatusFooter, usageText } from "./components/footer.ts";
@@ -95,6 +96,7 @@ class NekoTuiApp {
 	#versionTimer?: ReturnType<typeof setInterval>;
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
+	readonly #approval: ApprovalDock;
 	readonly #login: LoginPanel;
 	#thinkingModel: string | undefined;
 	#imageWarningModel: string | undefined;
@@ -153,6 +155,10 @@ class NekoTuiApp {
 		setActiveTheme(themePreference === "auto" ? (detectColorFgBgMode() ?? "light") : themePreference);
 		this.#ui = new TuiAltScreen(this.#terminal);
 		this.#footer.onOpenAgents = () => this.#showAgents();
+		this.#approval = new ApprovalDock(
+			(id) => this.#gateway.client.subagent(id),
+			() => this.#ui.requestRender(),
+		);
 		this.#busyLoader = new Loader(this.#ui, theme.accent, theme.muted);
 		this.#editor = new BoundedEditor(this.#ui, getEditorTheme(), { paddingX: 1, autocompleteMaxVisible: 3 });
 		this.#panel = new PickerPanel(
@@ -169,6 +175,10 @@ class NekoTuiApp {
 		// scrolling entry point to the visible detail (agents, skill previews or help).
 		const scrollMain = this.#ui.scrollBy.bind(this.#ui);
 		this.#ui.scrollBy = (lines) => {
+			if (this.#approval.focused) {
+				this.#approval.scroll(lines);
+				return;
+			}
 			if (this.#panel.open) {
 				// The hidden main ScrollView has no viewport; use the visible panel's page.
 				this.#panel.scrollDetail(Math.sign(lines) * Math.max(1, this.#panel.height - 3));
@@ -247,6 +257,7 @@ class NekoTuiApp {
 				if (matchesKey(data, "ctrl+c")) this.exit();
 				return { consume: true };
 			}
+			if (this.#approval.handleInput(data)) return { consume: true };
 			if (this.#panel.open || this.#login.open) {
 				// Let focused-component dispatch filter key releases before handling panel input.
 				return undefined;
@@ -344,6 +355,8 @@ class NekoTuiApp {
 					handleMouse: (event) => (this.#login.open ? undefined : this.#panel.handleMouse(event)),
 					invalidate: () => {},
 				},
+				approval: this.#approval,
+				approvalVisible: () => this.#approval.visible,
 				editor: this.#editor,
 				footer: this.#footer,
 				notices,
@@ -614,6 +627,7 @@ class NekoTuiApp {
 	exit(): void {
 		if (this.#exitStarted) return;
 		this.#exitStarted = true;
+		this.#approval.close();
 		for (const detail of this.#agentDetails.values()) detail.close();
 		this.#resolveExit();
 	}
@@ -622,6 +636,8 @@ class NekoTuiApp {
 
 	/** 切换 attach 的会话：重建转录（提交后的状态为准，重连即取最新快照）。 */
 	async switchSession(id: string): Promise<void> {
+		this.#approval.close();
+		this.#chat = undefined;
 		if (this.#sessionId) this.#texts.set(this.#sessionId, this.#editor.getText());
 		this.#viewUnsubscribe?.();
 		this.#viewUnsubscribe = undefined;
@@ -891,6 +907,8 @@ class NekoTuiApp {
 
 	applyView(view: ChatView): void {
 		this.#lastView = view;
+		if (this.#chat) this.#approval.update(view.subagents ?? []);
+		else this.#approval.close();
 		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? []));
 		for (const entry of view.subagents ?? []) {
 			const detail = this.#agentDetails.get(entry.taskId);
@@ -1135,6 +1153,7 @@ class NekoTuiApp {
 		const usage = view.taskUsage ?? view.usage;
 		this.#footer.setStats({
 			subagentCount: view.subagents?.length ?? 0,
+			approvalCount: view.subagents?.reduce((n, d) => n + (d.approvalCount ?? 0), 0) ?? 0,
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,
 			busy: this.#busyText,

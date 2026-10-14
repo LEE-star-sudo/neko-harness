@@ -17,7 +17,7 @@ export const subagentItems = (entries: readonly Delegation[]) =>
 		value: String(d.taskId),
 		label: `${d.role} · ${d.title}`,
 		description: `${d.historyThrough !== undefined ? "Snapshot · " : ""}${labels[d.status]}`,
-		rightLabel: labels[d.status],
+		rightLabel: d.approvalCount ? `Approval ${d.approvalCount}` : labels[d.status],
 	}));
 export class SubagentDetail implements PickerDetail {
 	get help() {
@@ -191,7 +191,17 @@ export class SubagentDetail implements PickerDetail {
 			);
 		const imageRows: { image: HistoryImage; start: number; end: number }[] = [];
 		for (const item of [...this.#entries.values()].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))) {
-			rows.push(...this.#component(item).render(width), "");
+			rows.push(...this.#component(item).render(width));
+			if (item.type === "tool") {
+				for (const approval of this.#view?.approvals ?? [])
+					if (approval.callId === item.callId && approval.status !== "pending")
+						rows.push(
+							theme.dim(
+								`Approval: ${approval.status === "allowed" ? "Allowed once" : approval.status === "denied" ? "Denied" : "Cancelled"}`,
+							),
+						);
+			}
+			rows.push("");
 			if (item.type === "user" || item.type === "tool")
 				for (const image of item.images ?? []) {
 					const key = `${image.entryId}:${image.contentIndex}`;

@@ -7,6 +7,7 @@ export type SubagentClient = {
 	history(input: { before?: number }): Promise<{ items: ChatView["items"]; next: number | null }>;
 	getImage: NekoSubagent["getImage"];
 	stop: NekoSubagent["stop"];
+	decideApproval: NekoSubagent["decideApproval"];
 };
 /** JSON travels in bounded Chord RPC chunks; renderers receive the ordinary shared ChatView. */
 export function subagentClient(connect: () => NekoSubagent): SubagentClient {
@@ -116,6 +117,13 @@ export function subagentClient(connect: () => NekoSubagent): SubagentClient {
 		getImage: async (input, ctx) => {
 			try {
 				return await acquire().getImage(input, ctx);
+			} finally {
+				if (!listeners.size) release();
+			}
+		},
+		decideApproval: async (input, ctx) => {
+			try {
+				return await acquire().decideApproval(input, ctx);
 			} finally {
 				if (!listeners.size) release();
 			}

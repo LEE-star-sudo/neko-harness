@@ -13,7 +13,7 @@ it("delegates in an owned conversation, restricts tools and returns the final re
 		}),
 		(context) => {
 			const prompt = JSON.stringify(context.messages.filter((message) => message.role === "system"));
-			expect(prompt).toContain("read-only exploration subagent");
+			expect(prompt).toContain("exploration subagent");
 			expect(prompt).toContain("Skills never expand your allowed tools");
 			expect(prompt).not.toContain("You are an expert coding assistant");
 			return fauxAssistantMessage([fauxText("Evidence report")]);
@@ -38,8 +38,7 @@ it("delegates in an owned conversation, restricts tools and returns the final re
 		const child = await runtime.harness.conversation(records[0]!.childId as never, runtime.context);
 		const agent = await child!.agent(runtime.context);
 		expect(agent.tools.map((tool) => tool.name)).toContain("search_text");
-		for (const name of ["write", "edit", "bash", "subagent"])
-			expect(agent.tools.map((tool) => tool.name)).not.toContain(name);
+		for (const name of ["write", "edit", "subagent"]) expect(agent.tools.map((tool) => tool.name)).not.toContain(name);
 		expect(await runtime.listConversations()).toHaveLength(1);
 		const view = await child!.viewState(runtime.context);
 		expect(JSON.stringify(view.value.entries)).not.toContain("Investigate using explore");

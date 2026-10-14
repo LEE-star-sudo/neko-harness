@@ -80,6 +80,7 @@ export const DelegationSchema = Type.Object({
 	endedAt: Type.Union([num, nil]),
 	status: Type.Enum(["queued", "running", "completed", "failed", "cancelled"]),
 	report: nullableString,
+	approvalCount: Type.Optional(integer),
 	historyThrough: Type.Optional(integer),
 	historyUsage: Type.Optional(usage),
 });
@@ -270,6 +271,10 @@ export const NekoSubagent = contract("neko.subagent", {
 					Type.Object({ token: integer, data: str, next: Type.Union([integer, nil]) }),
 				),
 				getImage: rpc(Type.Object({ entryId: integer, contentIndex: integer, offset: integer }), imageChunk),
+				decideApproval: rpc(
+					Type.Object({ id: integer, version: str, decision: Type.Enum(["allowed", "denied"]) }),
+					Type.Enum(["pending", "allowed", "denied", "cancelled"]),
+				),
 				stop: rpc(nil, nil),
 			},
 		},

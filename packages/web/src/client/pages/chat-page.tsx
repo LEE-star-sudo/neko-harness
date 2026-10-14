@@ -1,5 +1,6 @@
 import type { Delegation } from "@neko-harness/core";
 import { useEffect, useState } from "react";
+import { ApprovalInbox } from "../components/approval-inbox";
 import { Composer } from "../components/composer";
 import { MessageList } from "../components/message-list";
 import { folderName, useMobile } from "../components/primitives";
@@ -13,6 +14,13 @@ import { useNekoState } from "../lib/store";
 export function ChatPage() {
 	const { view, phase, notice, operating, workspaceRoot, currentSessionId } = useNekoState();
 	const mobile = useMobile();
+	const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 1023px)").matches);
+	useEffect(() => {
+		const query = window.matchMedia("(max-width: 1023px)");
+		const update = () => setNarrow(query.matches);
+		query.addEventListener("change", update);
+		return () => query.removeEventListener("change", update);
+	}, []);
 	const [panels, setPanels] = useState<
 		Record<string, { open: boolean; selected: number | null; entries: Delegation[] }>
 	>({});
@@ -39,6 +47,7 @@ export function ChatPage() {
 	useEffect(() => {
 		setSidebarOpen(!mobile);
 	}, [mobile]);
+	const approvalInPanel = narrow && !!panels[currentSessionId ?? ""]?.open;
 	const busy = view?.busy ?? false;
 	const status = view?.status ?? null;
 
@@ -90,6 +99,9 @@ export function ChatPage() {
 										onClick={() => selectAgent(panels[currentSessionId ?? ""]?.selected ?? agentEntries![0]!.taskId)}
 									>
 										子智能体 · {agentEntries!.length} 个任务
+										{agentEntries!.some((d) => d.approvalCount)
+											? ` · 待审批 ${agentEntries!.reduce((n, d) => n + (d.approvalCount ?? 0), 0)}`
+											: ""}
 										{agentEntries!.some((d) => d.historyThrough === undefined && d.status === "running")
 											? ` · ${agentEntries!.filter((d) => d.historyThrough === undefined && d.status === "running").length} 运行中`
 											: ""}
@@ -98,6 +110,7 @@ export function ChatPage() {
 							}
 						/>
 					)}
+					{!approvalInPanel && <ApprovalInbox />}
 					<Composer disabled={phase !== "ready" || operating} busy={busy} status={status} />
 				</main>
 			</div>
@@ -105,6 +118,7 @@ export function ChatPage() {
 				<SubagentPanel
 					key={sessionId}
 					entries={sessionId === currentSessionId ? (agentEntries ?? panel.entries) : panel.entries}
+					approval={approvalInPanel && sessionId === currentSessionId ? <ApprovalInbox /> : undefined}
 					selected={panel.selected}
 					open={sessionId === currentSessionId && panel.open}
 					onSelect={selectAgent}

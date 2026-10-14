@@ -55,6 +55,7 @@ import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import { createSubagentExtension, DelegationsDoc, refreshDelegations } from "./subagents.ts";
+import { createApprovalExtension, prepareApprovalConversations, ToolApprovals } from "./tool-approvals.ts";
 import { createWebSearchTools } from "./web-search.ts";
 import {
 	accessibleWorkspace,
@@ -237,6 +238,7 @@ export type NekoRuntime = {
 	readonly context: Context;
 	/** The underlying pi-durable Harness, for callers that need more. */
 	readonly harness: Harness;
+	readonly approvals: ToolApprovals;
 	/** The root conversation. */
 	readonly conversation: Conversation;
 	/** The root session: same conversation, bundled per-session operations. */
@@ -367,6 +369,9 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		}, resourceSnapshots.discard),
 	);
 	for (const extension of options.extensions ?? []) registry.install(extension);
+	let approvals!: ToolApprovals;
+	const approvalExtension = createApprovalExtension(() => approvals);
+	registry.install(approvalExtension);
 
 	const harness = await Harness.open(
 		storage,
@@ -392,8 +397,16 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			} while (cursor);
 			return records;
 		}, context);
+	approvals = new ToolApprovals(harness, context);
 	const existing = await scanConversations();
+
 	try {
+		await prepareApprovalConversations(
+			harness,
+			existing.map((r) => r.id),
+			approvalExtension,
+			context,
+		);
 		for (const record of existing) {
 			const target = await harness.conversation(record.id, context);
 			if (target) {
@@ -730,6 +743,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return makeSession(child);
 		},
 		harness,
+		approvals,
 		closed: harness.closed,
 		workspaceFiles,
 		conversation,

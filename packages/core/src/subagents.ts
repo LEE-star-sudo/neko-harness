@@ -29,6 +29,7 @@ export type Delegation = {
 	status: "queued" | "running" | "completed" | "failed" | "cancelled";
 	report: string | null;
 	/** A user fork can browse only entries at or before this watermark. */
+	approvalCount?: number;
 	historyThrough?: number;
 	historyUsage?: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
 };
@@ -58,7 +59,7 @@ const SlotsDoc = defineDoc<{ items: { taskId: number; parentId: number; cwd: str
 
 export const ROLE_PROMPTS: Record<SubagentRole, string> = {
 	explore:
-		"You are neko's read-only exploration subagent. Discover files, search and read evidence. Do not modify files or execute commands. Return findings with paths and line numbers.",
+		"You are neko's exploration subagent. Read and search by default. Bash requires explicit user approval for each call and may have side effects. Respect the assigned constraints. After denial use another approach or report the limitation; do not bypass or repeatedly request denied operations. Return findings with paths and line numbers.",
 	plan: "You are neko's read-only planning subagent. Read evidence and propose implementation steps, trade-offs and verification. Do not modify files or execute commands.",
 	coder:
 		"You are neko's coding subagent. Implement only the assigned scope and verify it. Coordinate through the main agent; do not overwrite unrelated changes. Report changed files and verification results.",
@@ -129,7 +130,7 @@ export function createSubagentExtension(
 			defineTool({
 				name: "subagent",
 				description:
-					"Delegate a self-contained task to an independent foreground subagent. explore: read-only investigation; plan: read-only implementation planning; coder: scoped changes and verification. Include all needed context, constraints and expected delivery. Use only when isolation or parallel independent work helps; handle simple tasks directly. Returns the final report; the main agent waits and must verify/integrate it.",
+					"Delegate a self-contained task to an independent foreground subagent. explore: investigation, Bash requires user approval; plan: read-only implementation planning; coder: scoped changes and verification. Include all needed context, constraints and expected delivery. Use only when isolation or parallel independent work helps; handle simple tasks directly. Returns the final report; the main agent waits and must verify/integrate it.",
 				parameters: Type.Object({
 					type: Type.Union([Type.Literal("explore"), Type.Literal("plan"), Type.Literal("coder")]),
 					title: Type.String({ minLength: 1, maxLength: 80 }),
@@ -152,7 +153,11 @@ export function createSubagentExtension(
 							cwd: agent.cwd,
 							extensions: agent.extensions.filter((e) => e.name !== extension.name),
 							tools: agent.tools.filter(
-								(tool) => tool.name !== "subagent" && (args.type === "coder" || READ_TOOLS.has(tool.name)),
+								(tool) =>
+									tool.name !== "subagent" &&
+									(args.type === "coder" ||
+										READ_TOOLS.has(tool.name) ||
+										(args.type === "explore" && tool.name === "bash")),
 							),
 						});
 						Object.assign(await tx.doc(SubagentDoc, child.id), { role: args.type, parentId: api.conversationId });

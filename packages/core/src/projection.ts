@@ -8,6 +8,7 @@ import { type InputData, NekoInput } from "./input.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import type { SkillInvocation } from "./skill-invocation.ts";
 import type { Delegation } from "./subagents.ts";
+import type { ToolApproval } from "./tool-approvals.ts";
 import { savedWorkspace } from "./workspace.ts";
 
 /**
@@ -30,6 +31,7 @@ export type UsageTotals = {
 /** 前端渲染所需的会话视图投影。 */
 export type ChatView = {
 	historyBefore?: number | null;
+	approvals?: ToolApproval[];
 	subagents?: Delegation[];
 	taskUsage?: UsageTotals;
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
@@ -345,6 +347,7 @@ export function projectChatView(
 					items.push(withArgs(result, block.name, block.arguments));
 				} else {
 					const summary = summarizeToolCall(block.name, block.arguments);
+					const slot = live.tools?.find((s) => s.callId === block.id);
 					items.push({
 						type: "tool",
 						key: `t${block.id}`,
@@ -352,9 +355,9 @@ export function projectChatView(
 						name: block.name,
 						summary: summary.args,
 						detail: summary.detail ?? null,
-						phase: "done",
+						phase: slot?.status ?? "done",
 						isError: false,
-						output: null,
+						output: slot?.output ?? null,
 						result: null,
 						durationMs: null,
 						note: ran ? null : "Not run: response interrupted.",
