@@ -24,7 +24,14 @@ HTML 按原文显示。
 代码结构：`lib/core`（网络指纹绑定、配对、RPC、存储、API 模型）、`lib/features`（连接、会话、聊天、审批、子 agent、电脑设置）、
 `lib/ui`（主题 tokens 与共用组件）。
 
-## 发布签名
+## TLS 信任与发版
+
+App 不内置任何 CA 或服务器证书（无 assets、无 `network_security_config`）：电脑端的自签名证书由 gateway 在本机生成，
+手机经二维码/配对文本取得其 SHA-256 指纹，之后的 HTTPS/WSS 连接只信任该指纹（`lib/core/net/pinned_client.dart`，
+`SecurityContext(withTrustedRoots: false)`）。因此发版不需要携带任何证书材料；电脑重新生成证书后需要重新配对。
+`test/fixtures/tls/` 里的证书仅供单元测试使用，不会进入 APK。
+
+## 发布签名（APK 签名，与 TLS 无关）
 
 release 签名读取 `android/key.properties`（已 gitignore）；缺失时退回 debug 签名，只用于编译验证。本机生成并备份 keystore：
 
