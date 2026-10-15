@@ -1,0 +1,13 @@
+{
+	"description": "chat.history 请求：以 historyBefore 游标向上翻页，每页 ≤ pageItems 条；游标不存在返回 stale_ref。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 21,
+		"method": "chat.history",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"before": "u-1026",
+			"limit": 50
+		}
+	}
+}

@@ -1,0 +1,11 @@
+{
+	"description": "approvals.changed 通知：当前订阅的待决集合变化，App 重新调用 approvals.list。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "approvals.changed",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"revision": 3
+		}
+	}
+}

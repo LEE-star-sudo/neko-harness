@@ -23,6 +23,7 @@ it.skipIf(IS_WINDOWS)(
 		faux.setResponses([fauxAssistantMessage([fauxText("A blue image")])]);
 		const gateway = await startGateway({
 			storage: "memory",
+			storagePath: join(dir, "neko.sqlite"),
 			providers: [faux.provider],
 			model: { provider: "faux", modelId: "vision" },
 			socketPath: testSocketPath(dir),

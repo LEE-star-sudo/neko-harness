@@ -1,0 +1,12 @@
+{
+	"description": "subagents.open 请求：按 agentId（连续身份，含全部轮次）或 taskId（分叉历史只读轮次）打开子详情；同一连接同时只开一个。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 40,
+		"method": "subagents.open",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"agentId": "agent-12"
+		}
+	}
+}

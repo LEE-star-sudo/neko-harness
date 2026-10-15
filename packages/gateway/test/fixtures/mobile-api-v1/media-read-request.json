@@ -1,0 +1,14 @@
+{
+	"description": "media.read 请求：读取主会话（缺省 agentId）或已打开子详情中的图片分块。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 50,
+		"method": "media.read",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"entryId": 1029,
+			"contentIndex": 1,
+			"offset": 0
+		}
+	}
+}

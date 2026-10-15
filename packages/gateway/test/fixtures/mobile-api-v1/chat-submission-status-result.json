@@ -1,0 +1,10 @@
+{
+	"description": "chat.submissionStatus 结果：已受理。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 24,
+		"result": {
+			"status": "accepted"
+		}
+	}
+}

@@ -1,0 +1,12 @@
+{
+	"description": "subagents.stop 请求：只停止精确的活动轮次；已结束轮次返回 gone，不影响新轮。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 43,
+		"method": "subagents.stop",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"taskId": 7
+		}
+	}
+}

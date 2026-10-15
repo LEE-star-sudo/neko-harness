@@ -1,0 +1,12 @@
+{
+	"description": "server.hello 请求：连接后第一个请求必须握手，apiVersions 与服务端 [1] 取交集。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "server.hello",
+		"params": {
+			"apiVersions": [1],
+			"app": { "version": "1.4.0", "platform": "android", "build": "release" }
+		}
+	}
+}

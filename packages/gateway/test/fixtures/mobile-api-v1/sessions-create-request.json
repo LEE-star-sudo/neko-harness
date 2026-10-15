@@ -1,0 +1,9 @@
+{
+	"description": "sessions.create 请求：cwd 必须是已登记工作区（不落回启动目录、不解析任意路径）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 12,
+		"method": "sessions.create",
+		"params": { "workspace": "/Users/kirineko/code/neko-harness" }
+	}
+}

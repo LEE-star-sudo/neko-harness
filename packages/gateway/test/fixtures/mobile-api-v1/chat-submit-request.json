@@ -1,0 +1,13 @@
+{
+	"description": "chat.submit 请求：业务幂等由持久 requestId 承载；mode 缺省=忙碌时持久排队，steer=显式引导当前运行。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 23,
+		"method": "chat.submit",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"requestId": "req-7f1c9b2a",
+			"text": "把测试结果总结一下"
+		}
+	}
+}

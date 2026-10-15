@@ -1,0 +1,11 @@
+{
+	"description": "chat.attach 请求：附着到会话；同一连接同时只有一个主会话订阅，再次 attach 会使旧订阅失效。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 20,
+		"method": "chat.attach",
+		"params": {
+			"sessionId": "42"
+		}
+	}
+}

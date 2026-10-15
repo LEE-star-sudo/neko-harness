@@ -1,0 +1,12 @@
+{
+	"description": "subagents.history 请求。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 41,
+		"method": "subagents.history",
+		"params": {
+			"subagentSubscriptionId": "agent-1a2b3c4d-2",
+			"before": "entry:3"
+		}
+	}
+}

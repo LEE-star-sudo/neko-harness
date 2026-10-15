@@ -15,6 +15,7 @@ it("shares private credential state and Pi configuration across Unix and WebSock
 	delete process.env.TAVILY_API_KEY;
 	const options = {
 		storage: "memory" as const,
+		storagePath: join(dir, "neko.sqlite"),
 		credentialsPath: join(dir, "credentials.json"),
 		socketPath: testSocketPath(dir),
 		port: 0,

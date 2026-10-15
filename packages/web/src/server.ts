@@ -8,6 +8,7 @@ import { installedVersion } from "@neko-harness/core/application-updates";
 import { ApplicationProtocolError, RUNNING_VERSION } from "@neko-harness/core/application-version";
 import { connectNekoGateway, readGatewayPortFile } from "@neko-harness/gateway";
 import { ensureNekoGateway, type GatewayEnsureOptions, type GatewayHandle } from "./gateway-spawn.ts";
+import { createMobileAdminContext, handleMobileAdminRequest, type MobileAdminProxyContext } from "./mobile-admin.ts";
 
 /**
  * neko web 服务器（静态托管形态）：确保 gateway 在运行（不在则 spawn 子进程），
@@ -55,18 +56,27 @@ const MIME: Readonly<Record<string, string>> = {
 export async function startWebServer(options: NekoWebOptions = {}): Promise<NekoWebServer> {
 	const staticDir = resolve(options.staticDir ?? DEFAULT_STATIC_DIR);
 	const workspaceRoot = normalizeWorkspace(options.gateway?.cwd ?? process.cwd());
+	const storagePath = options.gateway?.storagePath ?? DEFAULT_STORAGE_PATH;
 	const gateway = await ensureNekoGateway({
 		...(options.gateway ?? {}),
-		storagePath: options.gateway?.storagePath ?? DEFAULT_STORAGE_PATH,
+		storagePath,
 	});
 
+	let mobileAdmin: MobileAdminProxyContext | undefined;
 	const server: Server = createServer((request, response) => {
+		const context = mobileAdmin;
+		if (context === undefined) {
+			response.writeHead(503, { "cache-control": "no-store" });
+			response.end("web server starting");
+			return;
+		}
 		void handleHttp(request, response, {
 			staticDir,
 			gateway,
 			workspaceRoot,
-			storagePath: options.gateway?.storagePath ?? DEFAULT_STORAGE_PATH,
+			storagePath,
 			versionOptions: options.versionOptions,
+			mobileAdmin: context,
 		}).catch((error: unknown) => {
 			if (!response.headersSent) response.writeHead(500);
 			response.end(error instanceof Error ? error.message : String(error));
@@ -80,6 +90,12 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 	});
 	const address = server.address();
 	const actualPort = typeof address === "object" && address !== null ? address.port : port;
+	mobileAdmin = createMobileAdminContext({
+		gateway,
+		nekoDir: dirname(storagePath),
+		webHost: host,
+		webPort: actualPort,
+	});
 
 	return {
 		url: `http://${host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "[::1]" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${actualPort}`,
@@ -103,8 +119,10 @@ async function handleHttp(
 		workspaceRoot: string;
 		storagePath: string;
 		versionOptions?: { runningVersion?: string; manifest?: string };
+		mobileAdmin: MobileAdminProxyContext;
 	},
 ): Promise<void> {
+	if (await handleMobileAdminRequest(request, response, info.mobileAdmin)) return;
 	const url = new URL(request.url ?? "/", "http://localhost");
 	if (url.pathname === "/api/info") {
 		const wsUrl =
@@ -137,6 +155,7 @@ async function handleHttp(
 				workspaceRoot: info.workspaceRoot,
 				serverId: info.gateway.serverId,
 				socketPath: info.gateway.socketPath,
+				gatewaySpawned: info.gateway.spawned !== null,
 			}),
 		);
 		return;

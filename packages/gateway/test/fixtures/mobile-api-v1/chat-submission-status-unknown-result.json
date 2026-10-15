@@ -1,0 +1,10 @@
+{
+	"description": "chat.submissionStatus 结果：电脑无记录；unknown 不推断为失败，App 保留待确认。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 25,
+		"result": {
+			"status": "unknown"
+		}
+	}
+}

@@ -1,0 +1,13 @@
+{
+	"description": "subagents.patch 通知：与 chat.patch 相同的补丁体。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "subagents.patch",
+		"params": {
+			"subagentSubscriptionId": "agent-1a2b3c4d-2",
+			"seq": 5,
+			"upserts": [],
+			"streaming": null
+		}
+	}
+}

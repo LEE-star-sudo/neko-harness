@@ -1,0 +1,17 @@
+{
+	"description": "subagents.history 结果。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 41,
+		"result": {
+			"items": [
+				{
+					"key": "u-1",
+					"type": "user",
+					"text": "上一轮任务"
+				}
+			],
+			"historyBefore": null
+		}
+	}
+}

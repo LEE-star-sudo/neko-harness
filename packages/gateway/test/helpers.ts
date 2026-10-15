@@ -46,6 +46,7 @@ export async function makeGateway(): Promise<TestGateway> {
 	const socketPath = testSocketPath(dir);
 	const gateway = await startGateway({
 		storage: "memory",
+		storagePath: join(dir, "neko.sqlite"),
 		socketPath,
 		port: 0,
 		serverId,

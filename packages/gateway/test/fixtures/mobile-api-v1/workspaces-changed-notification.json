@@ -1,0 +1,8 @@
+{
+	"description": "workspaces.changed 通知：工作区登记变化时推送 revision。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "workspaces.changed",
+		"params": { "revision": 7 }
+	}
+}

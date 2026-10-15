@@ -42,6 +42,7 @@ describe("skills over the gateway", () => {
 		faux.setResponses([fauxAssistantMessage([fauxText("pong")])]);
 		const gateway = await startGateway({
 			storage: "memory",
+			storagePath: join(dir, "neko.sqlite"),
 			socketPath: testSocketPath(dir),
 			port: 0,
 			serverId: randomUUID(),

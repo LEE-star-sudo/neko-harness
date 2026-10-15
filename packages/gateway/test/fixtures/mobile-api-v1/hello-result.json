@@ -1,0 +1,22 @@
+{
+	"description": "server.hello 结果：apiVersion/身份/版本/能力/精确限制；capabilities 随实现追加。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 1,
+		"result": {
+			"apiVersion": 1,
+			"serverId": "9f2c1b7a-3d4e-4c5a-9b8d-2e7f6a5c4b3a",
+			"serverName": "kirinekoMacBook-Pro.local",
+			"gatewayVersion": "0.3.3",
+			"capabilities": ["workspaces", "sessions", "chat"],
+			"limits": {
+				"maxFrameBytes": 262144,
+				"maxPayloadBytes": 131072,
+				"pageItems": 50,
+				"chunkBytes": 65536,
+				"maxConcurrentRequests": 8,
+				"maxSendBufferBytes": 2097152
+			}
+		}
+	}
+}

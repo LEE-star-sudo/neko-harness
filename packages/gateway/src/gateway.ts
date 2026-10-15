@@ -5,7 +5,7 @@ import type { Context } from "@earendil-works/chord";
 import { createHost, type Link } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ModelThinkingLevel, Provider } from "@earendil-works/pi-ai";
-import type { Extension } from "@earendil-works/pi-durable";
+import type { ConversationId, Extension } from "@earendil-works/pi-durable";
 import {
 	createNekoRuntime,
 	DEFAULT_MODEL,
@@ -17,6 +17,8 @@ import {
 } from "@neko-harness/core";
 import type { UpdateCheckerOptions } from "@neko-harness/core/application-updates";
 import { isServerId } from "./identity.ts";
+import { createMobileAdminFactory, NekoMobileAdmin } from "./mobile/admin.ts";
+import { MobileGateway } from "./mobile/listener.ts";
 import { removeGatewayPortFile, writeGatewayPortFile } from "./port-file.ts";
 import { createNekoServerServices } from "./server-services.ts";
 import { createUnixListener } from "./unix-link.ts";
@@ -49,6 +51,8 @@ export type NekoGatewayOptions = {
 	readonly socketPath?: string | null;
 	/** 逻辑服务器身份（pi 握手校验）；默认读取/生成 <数据目录>/gateway-server-id。 */
 	readonly serverId?: string;
+	/** 移动配对显示的电脑名；默认安全截断的 os.hostname()。 */
+	readonly mobileServerName?: string;
 	readonly updates?: UpdateCheckerOptions;
 	readonly updateIntervalMs?: number;
 	readonly onError?: (error: Error) => void;
@@ -60,6 +64,8 @@ export type NekoGateway = {
 	readonly wsUrl: string | undefined;
 	readonly port: number | undefined;
 	readonly runtime: NekoRuntime;
+	/** 移动入口（design D2）；状态机与启停见 mobile/listener.ts，关闭时最先释放。 */
+	readonly mobile: MobileGateway;
 	close(): Promise<void>;
 };
 
@@ -125,6 +131,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			promptHome: options.promptHome,
 			updates: options.updates,
 			updateIntervalMs: options.updateIntervalMs,
+			mobileServerName: options.mobileServerName,
 			onError: options.onError,
 		});
 	} catch (error) {
@@ -145,6 +152,7 @@ type BindOptions = {
 	readonly model: NekoModelRef;
 	readonly marketUrl: string;
 	readonly promptHome: string | undefined;
+	readonly mobileServerName: string | undefined;
 	readonly onError: ((error: Error) => void) | undefined;
 };
 
@@ -154,6 +162,7 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		name: serverId,
 		dev: true,
 		onError: (error) => options.onError?.(error instanceof Error ? error : new Error(String(error))),
+		principalKey: gatewayPrincipalKey,
 	});
 	const serverServices = await createNekoServerServices({
 		host: chord,
@@ -187,6 +196,32 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		await writeGatewayPortFile(portFile.nekoDir, portFile.serverId, `ws://${host}:${wsListener.port}`);
 	}
 
+	// 移动入口（design D2）：恢复失败只进入 error 状态，不阻断本地传输与 gateway 启动。
+	const mobile = await MobileGateway.create({
+		nekoDir,
+		serverId,
+		serverName: options.mobileServerName,
+		onError: options.onError,
+		chord: {
+			accept: (link, acceptOptions) => chord.accept(link, acceptOptions),
+			invalidatePrincipal: (match) => chord.invalidatePrincipal(match),
+		},
+		runtime: {
+			listApprovals: (sessionId) => runtime.approvals.list(Number(sessionId) as ConversationId, context),
+			async submissionAccepted(sessionId, requestId) {
+				const session = await runtime.getConversation(Number(sessionId) as ConversationId);
+				if (session === undefined) return false;
+				const record = await session.conversation.commit(
+					(tx) => tx.submissionByRequest(session.id, requestId),
+					context,
+				);
+				return record !== undefined && record !== null;
+			},
+		},
+	});
+	// 本机移动管理（design D5）：仅持 admin token 的服务端专用客户端可 get；不进入 createGatewayConnection。
+	chord.serve(NekoMobileAdmin, createMobileAdminFactory({ mobile, store: mobile.store }));
+
 	let closing: Promise<void> | undefined;
 	const gateway: NekoGateway = {
 		serverId,
@@ -194,9 +229,11 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		wsUrl: wsListener === undefined ? undefined : `ws://${host}:${wsListener.port}`,
 		port: wsListener?.port,
 		runtime,
+		mobile,
 		async close() {
 			if (closing) return closing;
 			closing = (async () => {
+				await mobile.close();
 				if (portFile !== undefined) await removeGatewayPortFile(portFile.nekoDir, portFile.serverId).catch(() => {});
 				await Promise.all(listeners.map((listener) => listener.close()));
 				await chord.close();
@@ -215,6 +252,18 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		})
 		.catch((error) => options.onError?.(error instanceof Error ? error : new Error(String(error))));
 	return gateway;
+}
+
+/** 移动 principal 的记录键携带 deviceId/grantRevision/connectionId；其余 principal 沿用 canonical JSON（桌面行为不变）。 */
+function gatewayPrincipalKey(principal: unknown): string {
+	if (typeof principal === "object" && principal !== null) {
+		const record = principal as Record<string, unknown>;
+		if (record.kind === "mobile" && typeof record.deviceId === "string" && typeof record.grantRevision === "number") {
+			const connectionId = typeof record.connectionId === "string" ? record.connectionId : "";
+			return `mobile:${record.deviceId}:${record.grantRevision}:${connectionId}`;
+		}
+	}
+	return JSON.stringify(principal) ?? "unknown";
 }
 
 /** 活跃实例占用/stale 识别由 Chord Unix listener 负责；此处把错误翻译为可操作的提示。 */

@@ -25,6 +25,7 @@ describe.skipIf(IS_WINDOWS)("single-instance constraint", () => {
 		try {
 			await startGateway({
 				storage: "memory",
+				storagePath: join(target.dir, "contender.sqlite"),
 				socketPath: target.socketPath,
 				port: 0,
 				serverId: randomUUID(),
@@ -47,6 +48,7 @@ describe.skipIf(IS_WINDOWS)("single-instance constraint", () => {
 		const livePath = join(shortDir, `${liveServerId}.sock`);
 		const live = await startGateway({
 			storage: "memory",
+			storagePath: join(shortDir, "neko.sqlite"),
 			socketPath: livePath,
 			port: 0,
 			serverId: randomUUID(),
@@ -58,6 +60,7 @@ describe.skipIf(IS_WINDOWS)("single-instance constraint", () => {
 			try {
 				await startGateway({
 					storage: "memory",
+					storagePath: join(shortDir, "contender.sqlite"),
 					socketPath: livePath,
 					port: 0,
 					serverId: randomUUID(),
@@ -82,6 +85,7 @@ describe.skipIf(IS_WINDOWS)("single-instance constraint", () => {
 		try {
 			await startGateway({
 				storage: "memory",
+				storagePath: join(target.dir, "ws-contender.sqlite"),
 				socketPath: `${target.dir}/other.sock`,
 				port,
 				serverId: randomUUID(),

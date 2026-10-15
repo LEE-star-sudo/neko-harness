@@ -1,0 +1,14 @@
+{
+	"description": "media.read 结果：≤ chunkBytes 原始字节的 base64。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 50,
+		"result": {
+			"data": "iVBORw0KGgo=",
+			"nextOffset": 8,
+			"total": 482113,
+			"done": false,
+			"mimeType": "image/png"
+		}
+	}
+}

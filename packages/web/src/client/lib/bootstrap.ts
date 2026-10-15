@@ -21,6 +21,8 @@ export type GatewayInfo = {
 	serverId: string;
 	/** Unix socket 路径；Windows（无 Unix 传输）不存在。 */
 	socketPath?: string;
+	/** 本 Web 进程 spawn 的 gateway；接入既有 gateway 时为 false（生命周期随 Web 退出）。 */
+	gatewaySpawned?: boolean;
 };
 
 let infoGeneration = 0;
@@ -43,6 +45,7 @@ export async function fetchGatewayInfo(): Promise<GatewayInfo> {
 			serverId: info.serverId,
 			webVersion: info.webVersion,
 			installedVersion: info.installedVersion,
+			gatewaySpawned: info.gatewaySpawned === true,
 		});
 	return info;
 }

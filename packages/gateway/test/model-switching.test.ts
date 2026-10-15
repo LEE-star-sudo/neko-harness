@@ -39,6 +39,7 @@ beforeEach(async () => {
 	socketPath = testSocketPath(dir) ?? undefined;
 	gateway = await startGateway({
 		storage: "memory",
+		storagePath: join(dir, "neko.sqlite"),
 		socketPath,
 		port: 0,
 		serverId,

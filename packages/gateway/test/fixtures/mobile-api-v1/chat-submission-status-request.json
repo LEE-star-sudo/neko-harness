@@ -1,0 +1,12 @@
+{
+	"description": "chat.submissionStatus 请求：回执丢失或重启后按 requestId 查询受理状态。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 24,
+		"method": "chat.submissionStatus",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"requestId": "req-7f1c9b2a"
+		}
+	}
+}

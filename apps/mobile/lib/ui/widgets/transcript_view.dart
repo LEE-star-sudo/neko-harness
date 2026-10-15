@@ -1,0 +1,719 @@
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:neko_mobile/core/api/models.dart';
+import 'package:neko_mobile/features/chat/transcript.dart';
+import 'package:neko_mobile/ui/theme.dart';
+import 'package:neko_mobile/ui/widgets/markdown_view.dart';
+
+/// 主会话与子详情共用的转录操作面。
+abstract class TranscriptActions {
+  Transcript get transcript;
+
+  bool get loadingOlder;
+
+  Future<void> loadOlder();
+
+  Future<void> expand(ChatItem item, ContentRef ref);
+
+  Future<Uint8List> image(ImageRef image);
+}
+
+/// 有界转录列表：以 center sliver 分隔已加载历史与新增内容，
+/// 向上翻页不跳动，新输出仅在用户位于底部时自动跟随（design D10）。
+class TranscriptView extends StatefulWidget {
+  const TranscriptView({
+    super.key,
+    required this.actions,
+    this.onOpenSubagent,
+    this.emptyText = '还没有消息',
+  });
+
+  final TranscriptActions actions;
+  final void Function(SubagentRound round)? onOpenSubagent;
+  final String emptyText;
+
+  @override
+  State<TranscriptView> createState() => _TranscriptViewState();
+}
+
+class _TranscriptViewState extends State<TranscriptView> {
+  final ScrollController _scroll = ScrollController();
+  final Key _center = UniqueKey();
+
+  /// center sliver 的锚点：当前快照的第一条。更早的历史页插入到锚点之前（center 之上），
+  /// 不改变可视位置；锚点之后是快照与新增内容，整体自上而下排布，内容不足一屏时不会出现上方空白。
+  String? _anchorKey;
+  bool _atBottom = true;
+  bool _wasLoaded = false;
+
+  Transcript get _t => widget.actions.transcript;
+
+  @override
+  void initState() {
+    super.initState();
+    _t.addListener(_onChanged);
+    _scroll.addListener(_onScroll);
+    _resetAnchor();
+    _followBottomNextFrame();
+  }
+
+  @override
+  void didUpdateWidget(covariant TranscriptView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.actions.transcript, _t)) {
+      oldWidget.actions.transcript.removeListener(_onChanged);
+      _t.addListener(_onChanged);
+      _resetAnchor();
+      _followBottomNextFrame();
+    }
+  }
+
+  @override
+  void dispose() {
+    _t.removeListener(_onChanged);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _resetAnchor() {
+    _anchorKey = _t.items.isEmpty ? null : _t.items.first.key;
+    _wasLoaded = _t.loaded;
+    _atBottom = true;
+  }
+
+  void _followBottomNextFrame() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scroll.hasClients) {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      }
+    });
+  }
+
+  void _onChanged() {
+    if (!mounted) return;
+    // 新快照（attach/reset）或锚点条目消失：重新以第一条为锚并回到底部。
+    if (_t.loaded != _wasLoaded ||
+        (_anchorKey != null && !_t.items.any((e) => e.key == _anchorKey))) {
+      _resetAnchor();
+    }
+    // 空会话收到第一条内容：以它为锚。
+    _anchorKey ??= _t.items.isEmpty ? null : _t.items.first.key;
+    final follow = _atBottom;
+    setState(() {});
+    if (follow) _followBottomNextFrame();
+  }
+
+  void _onScroll() {
+    final position = _scroll.position;
+    final atBottom = position.pixels >= position.maxScrollExtent - 48;
+    if (atBottom != _atBottom) setState(() => _atBottom = atBottom);
+    if (position.pixels <= position.minScrollExtent + 200 &&
+        _t.hasOlder &&
+        !widget.actions.loadingOlder) {
+      widget.actions.loadOlder();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _t.items;
+    if (!_t.loaded) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final anchor = _anchorKey == null
+        ? 0
+        : items.indexWhere((e) => e.key == _anchorKey).clamp(0, items.length);
+    final before = items.sublist(0, anchor);
+    final after = items.sublist(anchor);
+    final streaming = _t.streaming;
+    final rounds = _t.status.subagents;
+    Widget tile(ChatItem item) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: ChatItemView(
+        item: item,
+        actions: widget.actions,
+        transcript: _t,
+        round: item.tool == null
+            ? null
+            : rounds.where((r) => r.callId == item.tool!.callId).firstOrNull,
+        onOpenSubagent: widget.onOpenSubagent,
+      ),
+    );
+    return Stack(
+      children: <Widget>[
+        CustomScrollView(
+          controller: _scroll,
+          center: _center,
+          slivers: <Widget>[
+            // 反向排列：最近的更早条目紧贴 center，历史提示位于最上方。
+            SliverList.builder(
+              itemCount: before.length + 1,
+              itemBuilder: (context, index) {
+                if (index == before.length) {
+                  return _HistoryHeader(
+                    loading: widget.actions.loadingOlder,
+                    hasOlder: _t.hasOlder,
+                  );
+                }
+                return tile(before[before.length - 1 - index]);
+              },
+            ),
+            SliverList.builder(
+              key: _center,
+              itemCount: after.length + 1,
+              itemBuilder: (context, index) {
+                if (index < after.length) return tile(after[index]);
+                if (items.isEmpty && streaming == null) {
+                  return Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Center(
+                      child: Text(
+                        widget.emptyText,
+                        style: TextStyle(
+                          color: NekoTokens.of(context).textFaint,
+                        ),
+                      ),
+                    ),
+                  );
+                }
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                  child: streaming == null
+                      ? const SizedBox.shrink()
+                      : StreamingView(streaming: streaming),
+                );
+              },
+            ),
+          ],
+        ),
+        if (!_atBottom)
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton.small(
+              key: const Key('transcript-to-bottom'),
+              tooltip: '回到底部',
+              onPressed: () => _scroll.animateTo(
+                _scroll.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOut,
+              ),
+              child: const Icon(Icons.arrow_downward),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _HistoryHeader extends StatelessWidget {
+  const _HistoryHeader({required this.loading, required this.hasOlder});
+
+  final bool loading;
+  final bool hasOlder;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      );
+    }
+    return SizedBox(height: hasOlder ? 32 : 8);
+  }
+}
+
+/// 正在生成的回答（只携带尾部时以省略号提示）。
+class StreamingView extends StatelessWidget {
+  const StreamingView({super.key, required this.streaming});
+
+  final Streaming streaming;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = NekoTokens.of(context);
+    return Column(
+      key: const Key('streaming-view'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        if (streaming.thinking.isNotEmpty)
+          _Collapsible(
+            title: '思考中…',
+            initiallyExpanded: false,
+            child: Text(
+              (streaming.thinkingOmitted > 0 ? '…' : '') + streaming.thinking,
+              style: TextStyle(color: tokens.textMuted),
+            ),
+          ),
+        if (streaming.text.isNotEmpty)
+          NekoMarkdown((streaming.textOmitted > 0 ? '…' : '') + streaming.text),
+        for (final call in streaming.toolCalls)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              children: <Widget>[
+                SizedBox.square(
+                  dimension: 14,
+                  child: call.done
+                      ? Icon(Icons.check, size: 14, color: tokens.success)
+                      : const CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${call.name} ${call.summary}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: tokens.textMuted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class ChatItemView extends StatelessWidget {
+  const ChatItemView({
+    super.key,
+    required this.item,
+    required this.actions,
+    required this.transcript,
+    this.round,
+    this.onOpenSubagent,
+  });
+
+  final ChatItem item;
+  final TranscriptActions actions;
+  final Transcript transcript;
+  final SubagentRound? round;
+  final void Function(SubagentRound round)? onOpenSubagent;
+
+  String _full(String field, String preview) =>
+      transcript.expanded(item.key, field) ?? preview;
+
+  Widget? _expandButton(String field) {
+    final ref = item.refFor(field);
+    if (ref == null || transcript.expanded(item.key, field) != null) {
+      return null;
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        key: Key('expand-${item.key}-$field'),
+        onPressed: () => actions.expand(item, ref),
+        icon: const Icon(Icons.unfold_more, size: 18),
+        label: Text('展开全文（${(ref.bytes / 1024).ceil()} KB）'),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = NekoTokens.of(context);
+    switch (item.type) {
+      case ChatItemType.user:
+        return Align(
+          alignment: Alignment.centerRight,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.85,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: tokens.userBubble,
+                borderRadius: BorderRadius.circular(NekoTokens.radiusBubble),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  if (item.skill != null)
+                    Text(
+                      '/skill:${item.skill}',
+                      style: TextStyle(color: tokens.accent, fontSize: 12),
+                    ),
+                  if (item.text.isNotEmpty)
+                    SelectableText(
+                      _full('text', item.text),
+                      style: TextStyle(color: tokens.onUserBubble),
+                    ),
+                  ?_expandButton('text'),
+                  if (item.images.isNotEmpty)
+                    _ImageStrip(images: item.images, actions: actions),
+                ],
+              ),
+            ),
+          ),
+        );
+      case ChatItemType.assistant:
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            if (item.thinking.isNotEmpty)
+              _Collapsible(
+                title: '思考过程',
+                initiallyExpanded: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    SelectableText(
+                      _full('thinking', item.thinking),
+                      style: TextStyle(color: tokens.textMuted),
+                    ),
+                    ?_expandButton('thinking'),
+                  ],
+                ),
+              ),
+            if (item.text.isNotEmpty) NekoMarkdown(_full('text', item.text)),
+            ?_expandButton('text'),
+            if (item.note != null)
+              Text(item.note!, style: TextStyle(color: tokens.textFaint)),
+            if (item.error != null)
+              _Banner(text: item.error!, color: tokens.danger),
+          ],
+        );
+      case ChatItemType.tool:
+        return ToolCard(
+          item: item,
+          tool: item.tool!,
+          full: _full,
+          expandButton: _expandButton,
+          actions: actions,
+          round: round,
+          onOpenSubagent: onOpenSubagent,
+        );
+      case ChatItemType.system:
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Center(
+            child: Text(
+              _full('text', item.text),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: tokens.textFaint, fontSize: 12),
+            ),
+          ),
+        );
+    }
+  }
+}
+
+class ToolCard extends StatelessWidget {
+  const ToolCard({
+    super.key,
+    required this.item,
+    required this.tool,
+    required this.full,
+    required this.expandButton,
+    required this.actions,
+    this.round,
+    this.onOpenSubagent,
+  });
+
+  final ChatItem item;
+  final ToolInfo tool;
+  final String Function(String field, String preview) full;
+  final Widget? Function(String field) expandButton;
+  final TranscriptActions actions;
+  final SubagentRound? round;
+  final void Function(SubagentRound round)? onOpenSubagent;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = NekoTokens.of(context);
+    final (IconData icon, Color color) = switch (tool.status) {
+      ToolStatus.running => (Icons.more_horiz, tokens.primary),
+      ToolStatus.done => (Icons.check_circle_outline, tokens.success),
+      ToolStatus.error => (Icons.error_outline, tokens.danger),
+    };
+    Widget mono(String field, String value) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: tokens.codeBackground,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SelectableText(
+              full('tool.$field', value),
+              style: const TextStyle(
+                fontFamily: NekoTokens.monoFamily,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ),
+        ?expandButton('tool.$field'),
+      ],
+    );
+    final linked = round;
+    return Card(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          // 故意不设 PageStorageKey：Expansible 会把展开布尔值按祖先
+          // PageStorageKey 链写入 PageStorage，而 mono() 内的横向
+          // SingleChildScrollView 按同一键链恢复滚动偏移（double），
+          // 两者撞键导致展开时 TypeError、内容黑屏。
+          leading: Icon(icon, color: color, semanticLabel: tool.status.name),
+          title: Text(
+            linked != null ? '子 agent · ${linked.title}' : tool.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            linked != null ? '${linked.role} · ${linked.status}' : tool.summary,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: tokens.textMuted, fontSize: 12),
+          ),
+          trailing: linked != null && onOpenSubagent != null
+              ? IconButton(
+                  key: Key('open-subagent-${linked.taskId}'),
+                  tooltip: '查看子 agent',
+                  icon: Badge(
+                    isLabelVisible: linked.approvalCount > 0,
+                    label: Text('${linked.approvalCount}'),
+                    child: const Icon(Icons.open_in_new),
+                  ),
+                  onPressed: () => onOpenSubagent!(linked),
+                )
+              : null,
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            if (tool.detail != null) mono('detail', tool.detail!),
+            if (tool.result != null)
+              mono('result', tool.result!)
+            else if (tool.output != null)
+              mono('output', tool.output!),
+            if (tool.diff != null) ...<Widget>[
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '+${tool.diffAdded ?? 0} −${tool.diffRemoved ?? 0}'
+                  '${tool.diffTruncated ? '（diff 已截断）' : ''}',
+                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                ),
+              ),
+              mono('diff', tool.diff!),
+            ],
+            if (tool.note != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  tool.note!,
+                  style: TextStyle(color: tokens.textFaint),
+                ),
+              ),
+            if (tool.durationMs != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '${(tool.durationMs! / 1000).toStringAsFixed(1)} s',
+                  style: TextStyle(color: tokens.textFaint, fontSize: 12),
+                ),
+              ),
+            if (item.images.isNotEmpty)
+              _ImageStrip(images: item.images, actions: actions),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Collapsible extends StatefulWidget {
+  const _Collapsible({
+    required this.title,
+    required this.child,
+    required this.initiallyExpanded,
+  });
+
+  final String title;
+  final Widget child;
+  final bool initiallyExpanded;
+
+  @override
+  State<_Collapsible> createState() => _CollapsibleState();
+}
+
+class _CollapsibleState extends State<_Collapsible> {
+  late bool _open = widget.initiallyExpanded;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = NekoTokens.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 48),
+            child: Row(
+              children: <Widget>[
+                Icon(
+                  _open ? Icons.expand_less : Icons.expand_more,
+                  color: tokens.textFaint,
+                ),
+                Text(widget.title, style: TextStyle(color: tokens.textFaint)),
+              ],
+            ),
+          ),
+        ),
+        if (_open) widget.child,
+      ],
+    );
+  }
+}
+
+class _Banner extends StatelessWidget {
+  const _Banner({required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
+      ),
+      child: SelectableText(text, style: TextStyle(color: color)),
+    );
+  }
+}
+
+class _ImageStrip extends StatelessWidget {
+  const _ImageStrip({required this.images, required this.actions});
+
+  final List<ImageRef> images;
+  final TranscriptActions actions;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: <Widget>[
+          for (final image in images)
+            ImageThumb(image: image, actions: actions),
+        ],
+      ),
+    );
+  }
+}
+
+/// 图片缩略：按需分块读取，点击全屏预览。
+class ImageThumb extends StatefulWidget {
+  const ImageThumb({super.key, required this.image, required this.actions});
+
+  final ImageRef image;
+  final TranscriptActions actions;
+
+  @override
+  State<ImageThumb> createState() => _ImageThumbState();
+}
+
+class _ImageThumbState extends State<ImageThumb> {
+  late Future<Uint8List> _bytes = widget.actions.image(widget.image);
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = NekoTokens.of(context);
+    return Semantics(
+      label: '图片 ${widget.image.name}',
+      button: true,
+      child: FutureBuilder<Uint8List>(
+        future: _bytes,
+        builder: (context, snapshot) {
+          Widget child;
+          if (snapshot.hasData) {
+            child = Image.memory(
+              snapshot.data!,
+              width: 96,
+              height: 96,
+              fit: BoxFit.cover,
+              gaplessPlayback: true,
+            );
+          } else if (snapshot.hasError) {
+            child = IconButton(
+              tooltip: '重新加载图片',
+              icon: Icon(Icons.broken_image_outlined, color: tokens.danger),
+              onPressed: () => setState(() {
+                _bytes = widget.actions.image(widget.image);
+              }),
+            );
+          } else {
+            child = const Center(
+              child: SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            );
+          }
+          return InkWell(
+            onTap: snapshot.hasData
+                ? () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _ImageViewer(
+                        name: widget.image.name,
+                        bytes: snapshot.data!,
+                      ),
+                    ),
+                  )
+                : null,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                width: 96,
+                height: 96,
+                color: tokens.surfaceMuted,
+                child: child,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _ImageViewer extends StatelessWidget {
+  const _ImageViewer({required this.name, required this.bytes});
+
+  final String name;
+  final Uint8List bytes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+      body: InteractiveViewer(
+        maxScale: 6,
+        child: Center(child: Image.memory(bytes)),
+      ),
+    );
+  }
+}

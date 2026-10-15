@@ -1,0 +1,12 @@
+{
+	"description": "server.hello 无版本交集：App 只支持 [2]（高于服务端）→ needs=computer，返回错误后关闭连接（4402）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 1,
+		"error": {
+			"code": -32000,
+			"message": "no common api version",
+			"data": { "code": "incompatible", "needs": "computer" }
+		}
+	}
+}

@@ -1,0 +1,11 @@
+{
+	"description": "subagents.close 请求。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 42,
+		"method": "subagents.close",
+		"params": {
+			"subagentSubscriptionId": "agent-1a2b3c4d-2"
+		}
+	}
+}

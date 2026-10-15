@@ -1,0 +1,8 @@
+{
+	"description": "sessions.changed 通知：会话目录变化（新建/更新/归档）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "sessions.changed",
+		"params": { "revision": 19 }
+	}
+}

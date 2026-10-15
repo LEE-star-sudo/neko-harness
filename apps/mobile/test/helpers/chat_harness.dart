@@ -1,0 +1,122 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:neko_mobile/core/rpc/connection_manager.dart';
+import 'package:neko_mobile/core/rpc/rpc_client.dart';
+import 'package:neko_mobile/core/storage/key_value_store.dart';
+import 'package:neko_mobile/core/storage/prefs_store.dart';
+import 'package:neko_mobile/features/app_controller.dart';
+import 'package:neko_mobile/features/chat/chat_controller.dart';
+import 'package:neko_mobile/features/chat/chat_page.dart';
+import 'package:neko_mobile/features/sessions/sessions_controller.dart';
+import 'package:neko_mobile/ui/theme.dart';
+
+import 'fake_api.dart';
+
+/// 已绑定假 API 的会话页夹具（连接管理器保持空闲，不发起真实连接）。
+class ChatHarness {
+  ChatHarness() {
+    manager = ConnectionManager(
+      store: InMemoryKeyValueStore(),
+      rpcFactory: (_) => throw UnimplementedError(),
+    );
+    app = AppController(
+      manager: manager,
+      sessions: SessionsController(prefs: prefs),
+      chat: ChatController(prefs: prefs),
+      prefs: prefs,
+    );
+    api
+      ..on(
+        'workspaces.list',
+        (_) => <String, dynamic>{
+          'workspaces': <Object>[
+            <String, dynamic>{'root': '/a/neko', 'name': 'neko'},
+            <String, dynamic>{'root': '/b/neko', 'name': 'neko'},
+          ],
+        },
+      )
+      ..on(
+        'sessions.list',
+        (_) => <String, dynamic>{
+          'sessions': <Object>[
+            <String, dynamic>{
+              'id': '7',
+              'workspace': '/a/neko',
+              'title': '修复登录页',
+              'preview': '登录页按钮错位',
+              'lastUsedAt': 0,
+              'archived': false,
+            },
+          ],
+        },
+      )
+      ..on('approvals.list', (_) => <String, dynamic>{'approvals': approvals})
+      ..on(
+        'chat.attach',
+        (params) => <String, dynamic>{
+          'subscriptionId': 'chat-${++attachCount}',
+          'sessionId': params!['sessionId'],
+          'snapshot': snapshot,
+        },
+      );
+  }
+
+  final FakeMobileApi api = FakeMobileApi();
+  final InMemoryPrefsStore prefs = InMemoryPrefsStore();
+  late final ConnectionManager manager;
+  late final AppController app;
+  int attachCount = 0;
+  List<Object> approvals = <Object>[];
+  Map<String, dynamic> snapshot = snapshotOf(<Map<String, dynamic>>[
+    userItem('u-1', '你好'),
+    assistantItem('a-2', '**你好**，有什么可以帮忙？'),
+  ]);
+
+  ChatController get chat => app.chat;
+
+  Future<void> bind({String? attach = '7'}) async {
+    await app.sessions.bind(api, 'srv');
+    await app.chat.bind(api, 'srv');
+    if (attach != null) await app.chat.attach(attach);
+  }
+
+  Widget build({
+    ThemeMode mode = ThemeMode.light,
+    double textScale = 1,
+    Widget home = const ChatPage(),
+  }) {
+    return ProviderScope(
+      overrides: [
+        connectionManagerProvider.overrideWithValue(manager),
+        appControllerOrNullProvider.overrideWithValue(app),
+      ],
+      child: MaterialApp(
+        theme: buildNekoTheme(Brightness.light),
+        darkTheme: buildNekoTheme(Brightness.dark),
+        themeMode: mode,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: TextScaler.linear(textScale)),
+          child: child!,
+        ),
+        home: home,
+      ),
+    );
+  }
+
+  void dispose() {
+    app.chat.dispose();
+    app.sessions.dispose();
+    manager.dispose();
+  }
+}
+
+/// 让 RPC 回调与 ListenableBuilder 稳定下来（含 300 ms 草稿防抖）。
+Future<void> settle(WidgetTester tester) async {
+  for (var i = 0; i < 5; i++) {
+    await tester.pump(const Duration(milliseconds: 120));
+  }
+}
+
+const RpcNetworkException kOffline = RpcNetworkException();

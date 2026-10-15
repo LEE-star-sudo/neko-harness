@@ -1,0 +1,23 @@
+{
+	"description": "chat.history 结果：before 之前的条目（升序）；historyBefore 为 null 表示已到最早。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 21,
+		"result": {
+			"items": [
+				{
+					"key": "u-1001",
+					"type": "user",
+					"text": "先看一下 pairing.ts"
+				},
+				{
+					"key": "a-1002",
+					"type": "assistant",
+					"text": "好的。",
+					"thinking": "读一下文件。"
+				}
+			],
+			"historyBefore": null
+		}
+	}
+}

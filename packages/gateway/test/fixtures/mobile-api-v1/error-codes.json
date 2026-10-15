@@ -1,0 +1,104 @@
+{
+	"description": "稳定错误码全集示例（data.code）：每个错误一个 JSON-RPC error 信封，业务拒绝与协议拒绝共用此形状。",
+	"messages": [
+		{
+			"jsonrpc": "2.0",
+			"id": 2,
+			"error": {
+				"code": -32602,
+				"message": "invalid hello params",
+				"data": {
+					"code": "invalid_params"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 3,
+			"error": {
+				"code": -32601,
+				"message": "method not found",
+				"data": {
+					"code": "not_found"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 4,
+			"error": {
+				"code": -32001,
+				"message": "attachment is gone",
+				"data": {
+					"code": "gone"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 5,
+			"error": {
+				"code": -32002,
+				"message": "history cursor is stale",
+				"data": {
+					"code": "stale_ref"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 6,
+			"error": {
+				"code": -32003,
+				"message": "content digest changed",
+				"data": {
+					"code": "content_changed"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 7,
+			"error": {
+				"code": -32004,
+				"message": "too many concurrent requests",
+				"data": {
+					"code": "busy_limit"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 8,
+			"error": {
+				"code": -32603,
+				"message": "internal",
+				"data": {
+					"code": "internal"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 9,
+			"error": {
+				"code": -32000,
+				"message": "DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.",
+				"data": {
+					"code": "rejected"
+				}
+			}
+		},
+		{
+			"jsonrpc": "2.0",
+			"id": 10,
+			"error": {
+				"code": -32000,
+				"message": "device authorization was revoked",
+				"data": {
+					"code": "revoked"
+				}
+			}
+		}
+	]
+}

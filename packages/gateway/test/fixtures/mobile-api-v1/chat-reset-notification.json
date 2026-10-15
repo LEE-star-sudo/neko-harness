@@ -1,0 +1,11 @@
+{
+	"description": "chat.reset 通知：窗口条目消失/重排或补丁超限；App 丢弃本订阅缓存并重新 attach。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "chat.reset",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"seq": 42
+		}
+	}
+}

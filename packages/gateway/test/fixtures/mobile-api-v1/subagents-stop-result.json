@@ -1,0 +1,10 @@
+{
+	"description": "subagents.stop 结果。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 43,
+		"result": {
+			"stopped": true
+		}
+	}
+}

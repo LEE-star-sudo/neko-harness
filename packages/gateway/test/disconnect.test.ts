@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createServer } from "node:net";
+import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
@@ -118,6 +119,7 @@ describe("stale socket takeover", () => {
 
 			const revived = await startGateway({
 				storage: "memory",
+				storagePath: join(target.dir, "revived.sqlite"),
 				socketPath,
 				port: 0,
 				serverId: target.serverId,

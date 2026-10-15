@@ -1,0 +1,11 @@
+{
+	"description": "chat.abort 请求：显式停止当前运行（断线绝不映射为 abort）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 26,
+		"method": "chat.abort",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1"
+		}
+	}
+}

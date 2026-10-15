@@ -1,0 +1,28 @@
+{
+	"description": "sessions.list 结果：按 lastUsedAt 倒序、每页 ≤ pageItems，nextCursor 为 undefined 表示没有更多。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 11,
+		"result": {
+			"sessions": [
+				{
+					"id": "42",
+					"workspace": "/Users/kirineko/code/neko-harness",
+					"title": "修复登录页样式",
+					"preview": "用户反馈 375px 下按钮被遮挡……",
+					"lastUsedAt": 1730100000000,
+					"archived": false
+				},
+				{
+					"id": "38",
+					"workspace": "/Users/kirineko/code/neko-harness",
+					"title": "重构会话存储",
+					"preview": "把 session metadata 拆到独立表……",
+					"lastUsedAt": 1730000000000,
+					"archived": false
+				}
+			],
+			"nextCursor": "100"
+		}
+	}
+}

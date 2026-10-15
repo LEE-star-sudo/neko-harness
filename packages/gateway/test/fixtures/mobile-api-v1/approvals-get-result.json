@@ -1,0 +1,18 @@
+{
+	"description": "approvals.get 结果：仍待决的单个审批；已结算返回 not_found。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 31,
+		"result": {
+			"id": 311,
+			"version": "6d0f3e8a-2a1b-4c55-9d1e-0a7f5b9c2e11",
+			"taskId": 7,
+			"agentId": "agent-12",
+			"title": "探索 pairing 模块",
+			"command": "bun run test:package",
+			"cwd": "/Users/kirineko/code/neko-harness",
+			"timeoutSeconds": 300,
+			"requestedAt": 1730100006000
+		}
+	}
+}

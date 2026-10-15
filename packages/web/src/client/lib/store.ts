@@ -12,7 +12,7 @@ export type NekoState = {
 	/** 网关连接阶段；error = /api/info 获取失败（不会自动恢复，需刷新页面）。 */
 	phase: ConnPhase;
 	updates: UpdateState | null;
-	webInfo: { webVersion: string; installedVersion: string | null; serverId: string } | null;
+	webInfo: { webVersion: string; installedVersion: string | null; serverId: string; gatewaySpawned: boolean } | null;
 	credentials: NekoCredentialState | null;
 	workspaceRoot: string;
 	workspaces: readonly NekoWorkspaceSummary[];

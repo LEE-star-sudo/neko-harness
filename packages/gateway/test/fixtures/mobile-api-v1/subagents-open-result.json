@@ -1,0 +1,72 @@
+{
+	"description": "subagents.open 结果：与主会话相同 DTO 的有界快照；更早历史游标形如 entry:<id>。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 40,
+		"result": {
+			"subagentSubscriptionId": "agent-1a2b3c4d-2",
+			"agentId": "agent-12",
+			"snapshot": {
+				"busy": true,
+				"status": "运行 bash…",
+				"usage": {
+					"input": 840,
+					"output": 220,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 1060,
+					"cost": 0.0003
+				},
+				"agent": {
+					"model": "deepseek/deepseek-chat",
+					"thinkingLevel": "high"
+				},
+				"subagents": [
+					{
+						"taskId": 7,
+						"callId": "call_7",
+						"agentId": "agent-12",
+						"round": 1,
+						"role": "explore",
+						"title": "探索 pairing 模块",
+						"status": "running",
+						"approvalCount": 1,
+						"readonly": false,
+						"createdAt": 1730100000000,
+						"endedAt": null,
+						"usage": {
+							"input": 840,
+							"output": 220,
+							"cacheRead": 0,
+							"cacheWrite": 0,
+							"totalTokens": 1060,
+							"cost": 0.0003
+						}
+					}
+				],
+				"agents": [],
+				"approvalCount": 1,
+				"readonly": false,
+				"items": [
+					{
+						"key": "u-3",
+						"type": "user",
+						"text": "Inspect files"
+					},
+					{
+						"key": "t-call_1",
+						"type": "tool",
+						"tool": {
+							"callId": "call_1",
+							"name": "bash",
+							"summary": "bun run test:package",
+							"status": "running"
+						}
+					}
+				],
+				"historyBefore": "entry:3",
+				"streaming": null
+			}
+		}
+	}
+}

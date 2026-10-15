@@ -1,0 +1,11 @@
+{
+	"description": "chat.detach 请求：释放当前订阅；旧订阅 id 无效时也返回 null。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 29,
+		"method": "chat.detach",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1"
+		}
+	}
+}

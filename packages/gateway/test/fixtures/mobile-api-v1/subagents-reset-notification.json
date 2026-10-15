@@ -1,0 +1,11 @@
+{
+	"description": "subagents.reset 通知：App 重新 subagents.open。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "subagents.reset",
+		"params": {
+			"subagentSubscriptionId": "agent-1a2b3c4d-2",
+			"seq": 6
+		}
+	}
+}

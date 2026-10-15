@@ -1,0 +1,13 @@
+{
+	"description": "chat.content 结果：≤ chunkBytes 原始字节的 base64；done=false 时以 nextOffset 续读。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 22,
+		"result": {
+			"data": "5rWL6K+V6L6T5Ye6",
+			"nextOffset": 12,
+			"total": 9216,
+			"done": false
+		}
+	}
+}

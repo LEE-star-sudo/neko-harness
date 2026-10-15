@@ -1,0 +1,11 @@
+{
+	"description": "chat.submit 结果：电脑已持久受理；queued=true 表示提交时 Agent 忙碌、输入已排队。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 23,
+		"result": {
+			"accepted": true,
+			"queued": true
+		}
+	}
+}

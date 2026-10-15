@@ -1,0 +1,11 @@
+{
+	"description": "approvals.list 请求：当前主会话订阅下全部子 agent 的待决审批。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 30,
+		"method": "approvals.list",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1"
+		}
+	}
+}

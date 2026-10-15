@@ -14,6 +14,7 @@ it("queries a registered workspace and imports images with attachment ownership"
 	const faux = fauxProvider({ models: [{ id: "vision", input: ["text", "image"] }] });
 	const gateway = await startGateway({
 		storage: "memory",
+		storagePath: join(root, "neko.sqlite"),
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "vision" },
 		socketPath: testSocketPath(root),

@@ -1,0 +1,15 @@
+{
+	"description": "sessions.create 结果：新会话使用电脑默认模型，桌面目录即时可见。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 12,
+		"result": {
+			"id": "43",
+			"workspace": "/Users/kirineko/code/neko-harness",
+			"title": "",
+			"preview": "",
+			"lastUsedAt": 1730200000000,
+			"archived": false
+		}
+	}
+}

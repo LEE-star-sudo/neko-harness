@@ -1,0 +1,13 @@
+{
+	"description": "workspaces.list 结果：已登记工作区列表（不含未登记目录）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 10,
+		"result": {
+			"workspaces": [
+				{ "root": "/Users/kirineko/code/neko-harness", "name": "neko-harness" },
+				{ "root": "/Users/kirineko/code/playground", "name": "playground" }
+			]
+		}
+	}
+}

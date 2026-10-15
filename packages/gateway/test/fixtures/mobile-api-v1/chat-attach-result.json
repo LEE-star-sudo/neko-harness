@@ -1,0 +1,138 @@
+{
+	"description": "chat.attach 结果：订阅 id + 有界快照（状态 + 尾部 ≤ pageItems 条且 ≤ 128 KiB 的条目 + historyBefore 游标 + 流式区）；含 contentRef 与图片描述示例。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 20,
+		"result": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"sessionId": "42",
+			"snapshot": {
+				"busy": true,
+				"status": "运行 bash…",
+				"usage": {
+					"input": 12040,
+					"output": 3210,
+					"cacheRead": 8000,
+					"cacheWrite": 0,
+					"totalTokens": 23250,
+					"cost": 0.0042
+				},
+				"taskUsage": {
+					"input": 840,
+					"output": 220,
+					"cacheRead": 0,
+					"cacheWrite": 0,
+					"totalTokens": 1060,
+					"cost": 0.0003
+				},
+				"contextUsage": {
+					"tokens": 15250,
+					"window": 200000,
+					"percent": 7.6
+				},
+				"agent": {
+					"model": "deepseek/deepseek-chat",
+					"thinkingLevel": "high"
+				},
+				"subagents": [
+					{
+						"taskId": 7,
+						"callId": "call_7",
+						"agentId": "agent-12",
+						"round": 1,
+						"role": "explore",
+						"title": "探索 pairing 模块",
+						"status": "running",
+						"approvalCount": 1,
+						"readonly": false,
+						"createdAt": 1730100000000,
+						"endedAt": null
+					}
+				],
+				"agents": [
+					{
+						"agentId": "agent-12",
+						"role": "explore",
+						"title": "探索 pairing 模块",
+						"status": "running",
+						"activeRoundId": 7,
+						"lastRoundId": 7,
+						"roundCount": 1,
+						"approvalCount": 1
+					}
+				],
+				"approvalCount": 1,
+				"compaction": {
+					"phase": "nothing",
+					"at": 1730099990000
+				},
+				"items": [
+					{
+						"key": "u-1026",
+						"type": "user",
+						"text": "把这次改动的测试跑一遍"
+					},
+					{
+						"key": "a-1027",
+						"type": "assistant",
+						"text": "测试输出太长，前 2 KiB 预览：FAIL packages/gateway/test/mobile/store.test.ts …",
+						"thinking": "",
+						"refs": [
+							{
+								"sessionId": "42",
+								"key": "a-1027",
+								"field": "text",
+								"digest": "3f6a9c1d2b8e4f70a5c61d3e9b2f84710c6d5a90b8e7f324156098abc7def012",
+								"bytes": 9216
+							}
+						]
+					},
+					{
+						"key": "t-call_9",
+						"type": "tool",
+						"tool": {
+							"callId": "call_9",
+							"name": "bash",
+							"summary": "bun test packages/gateway/test/mobile",
+							"status": "done",
+							"detail": "bun test packages/gateway/test/mobile",
+							"result": "131 pass, 0 fail",
+							"durationMs": 5120
+						}
+					},
+					{
+						"key": "u-1029",
+						"type": "user",
+						"text": "顺便看看这张截图",
+						"images": [
+							{
+								"name": "screenshot.png",
+								"mimeType": "image/png",
+								"width": 1170,
+								"height": 2532,
+								"bytes": 482113,
+								"entryId": 1029,
+								"contentIndex": 1
+							}
+						]
+					}
+				],
+				"historyBefore": "u-1026",
+				"streaming": {
+					"text": "正在汇总测试结果",
+					"thinking": "",
+					"textOmitted": 0,
+					"thinkingOmitted": 0,
+					"toolCalls": [
+						{
+							"callId": "call_10",
+							"name": "read",
+							"summary": "README.md",
+							"status": "running"
+						}
+					]
+				}
+			}
+		}
+	}
+}

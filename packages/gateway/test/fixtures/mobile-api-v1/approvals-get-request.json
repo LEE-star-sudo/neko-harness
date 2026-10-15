@@ -1,0 +1,12 @@
+{
+	"description": "approvals.get 请求。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 31,
+		"method": "approvals.get",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"id": 311
+		}
+	}
+}

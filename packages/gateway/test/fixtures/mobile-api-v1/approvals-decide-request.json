@@ -1,0 +1,15 @@
+{
+	"description": "approvals.decide 请求：taskId/id/version 精确匹配才生效。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 32,
+		"method": "approvals.decide",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"taskId": 7,
+			"id": 311,
+			"version": "6d0f3e8a-2a1b-4c55-9d1e-0a7f5b9c2e11",
+			"decision": "allow"
+		}
+	}
+}

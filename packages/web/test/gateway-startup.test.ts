@@ -15,6 +15,7 @@ describe.skipIf(IS_WINDOWS)("POSIX Web gateway readiness", () => {
 		await target.gateway.close();
 		const unixOnly = await startGateway({
 			storage: "memory",
+			storagePath: join(target.dir, "unix-only.sqlite"),
 			socketPath: target.socketPath!,
 			serverId: target.serverId,
 			port: null,

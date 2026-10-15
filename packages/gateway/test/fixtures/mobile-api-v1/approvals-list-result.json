@@ -1,0 +1,32 @@
+{
+	"description": "approvals.list 结果：完整命令、目录、显式超时、所属轮次与决定版本。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 30,
+		"result": {
+			"approvals": [
+				{
+					"id": 311,
+					"version": "6d0f3e8a-2a1b-4c55-9d1e-0a7f5b9c2e11",
+					"taskId": 7,
+					"agentId": "agent-12",
+					"title": "探索 pairing 模块",
+					"command": "bun run test:package",
+					"cwd": "/Users/kirineko/code/neko-harness",
+					"timeoutSeconds": 300,
+					"requestedAt": 1730100006000
+				},
+				{
+					"id": 318,
+					"version": "b3c1e2d4-5f60-4a7b-8c9d-0e1f2a3b4c5d",
+					"taskId": 7,
+					"agentId": "agent-12",
+					"title": "探索 pairing 模块",
+					"command": "git status --short",
+					"cwd": "/Users/kirineko/code/neko-harness",
+					"requestedAt": 1730100007000
+				}
+			]
+		}
+	}
+}

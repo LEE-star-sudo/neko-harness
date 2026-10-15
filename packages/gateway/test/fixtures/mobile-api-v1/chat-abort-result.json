@@ -1,0 +1,10 @@
+{
+	"description": "chat.abort 结果。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 26,
+		"result": {
+			"accepted": true
+		}
+	}
+}

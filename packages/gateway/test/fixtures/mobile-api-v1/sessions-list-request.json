@@ -1,0 +1,9 @@
+{
+	"description": "sessions.list 请求：按工作区过滤，query 标题/首条预览搜索，cursor 分页（可选）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 11,
+		"method": "sessions.list",
+		"params": { "workspace": "/Users/kirineko/code/neko-harness", "query": "登录", "cursor": "50" }
+	}
+}

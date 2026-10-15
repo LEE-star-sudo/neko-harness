@@ -1,0 +1,10 @@
+{
+	"description": "approvals.decide 结果：实际终态；被其他前端抢先时返回对方结果，子任务已停止为 cancelled。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 32,
+		"result": {
+			"status": "allowed"
+		}
+	}
+}

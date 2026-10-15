@@ -2,10 +2,11 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Icon } from "./primitives";
 
-export type SettingsSection = "credentials" | "about";
+export type SettingsSection = "credentials" | "mobile" | "about";
 
-const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "info"; to: string }[] = [
+const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "phone" | "info"; to: string }[] = [
 	{ key: "credentials", label: "密钥", icon: "key", to: "/settings" },
+	{ key: "mobile", label: "手机配对", icon: "phone", to: "/settings/mobile" },
 	{ key: "about", label: "关于与更新", icon: "info", to: "/about" },
 ];
 

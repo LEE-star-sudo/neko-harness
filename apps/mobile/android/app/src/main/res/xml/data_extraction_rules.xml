@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- design D11：Keystore 密钥不随备份/迁移，凭据在恢复设备上不可用，
+     与其解密失败不如整体排除。五个 domain（root/file/database/sharedpref/external）
+     在 cloud-backup 与 device-transfer 两节全部排除。 -->
+<data-extraction-rules xmlns:tools="http://schemas.android.com/tools"
+    tools:targetApi="31">
+    <cloud-backup>
+        <exclude domain="root" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
+        <exclude domain="external" path="."/>
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="."/>
+        <exclude domain="file" path="."/>
+        <exclude domain="database" path="."/>
+        <exclude domain="sharedpref" path="."/>
+        <exclude domain="external" path="."/>
+    </device-transfer>
+</data-extraction-rules>
