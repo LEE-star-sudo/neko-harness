@@ -6,6 +6,7 @@ import 'package:neko_mobile/features/app_controller.dart';
 import 'package:neko_mobile/features/approvals/approval_sheet.dart';
 import 'package:neko_mobile/features/chat/chat_page.dart';
 import 'package:neko_mobile/features/subagents/subagent_controller.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 import 'package:neko_mobile/ui/widgets/transcript_view.dart';
 
@@ -72,6 +73,7 @@ class _SubagentPageState extends ConsumerState<SubagentPage> {
         final rounds = _controller.rounds;
         return Scaffold(
           appBar: AppBar(
+            toolbarHeight: nekoToolbarHeight(context),
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -86,7 +88,7 @@ class _SubagentPageState extends ConsumerState<SubagentPage> {
                       : status.busy
                       ? (status.status ?? '运行中…')
                       : '空闲',
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: context.meta(tokens.textMuted),
                 ),
               ],
             ),
@@ -98,7 +100,7 @@ class _SubagentPageState extends ConsumerState<SubagentPage> {
                   onPressed: _controller.canControl
                       ? () => _stop(active)
                       : null,
-                  icon: Icon(Icons.stop_circle_outlined, color: tokens.danger),
+                  icon: NekoIcon(NekoIcons.stop, color: tokens.danger),
                 ),
             ],
           ),
@@ -106,25 +108,24 @@ class _SubagentPageState extends ConsumerState<SubagentPage> {
             top: false,
             child: Column(
               children: <Widget>[
-                ConnectionBanner(manager: ref.watch(connectionManagerProvider)),
-                if (_controller.error != null)
-                  ErrorBanner(
-                    text: _controller.error!,
-                    onClose: _controller.clearError,
-                  ),
                 if (rounds.isNotEmpty)
                   SizedBox(
-                    height: 56,
+                    height:
+                        MediaQuery.textScalerOf(context).scale(28) +
+                        NekoSpace.md,
                     child: ListView(
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
+                        horizontal: NekoSpace.md,
+                        vertical: NekoSpace.sm,
                       ),
                       children: <Widget>[
                         Padding(
-                          padding: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.only(right: NekoSpace.sm),
                           child: Chip(
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                             label: Text(
                               '累计 ${formatTokens(status.usage.totalTokens)} tokens',
                             ),
@@ -132,8 +133,11 @@ class _SubagentPageState extends ConsumerState<SubagentPage> {
                         ),
                         for (final round in rounds)
                           Padding(
-                            padding: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.only(right: NekoSpace.sm),
                             child: Chip(
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
                               key: Key('round-${round.taskId}'),
                               avatar: round.active
                                   ? const SizedBox.square(
@@ -172,6 +176,11 @@ class _SubagentPageState extends ConsumerState<SubagentPage> {
                   approvals: _controller.approvals,
                   onDecide: chat.decide,
                   enabled: chat.canControl,
+                ),
+                StatusStrip(
+                  manager: ref.watch(connectionManagerProvider),
+                  error: _controller.error,
+                  onCloseError: _controller.clearError,
                 ),
               ],
             ),

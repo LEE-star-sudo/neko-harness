@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:neko_mobile/core/api/models.dart';
 import 'package:neko_mobile/features/chat/transcript.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 import 'package:neko_mobile/ui/widgets/markdown_view.dart';
 
@@ -129,7 +130,10 @@ class _TranscriptViewState extends State<TranscriptView> {
     final streaming = _t.streaming;
     final rounds = _t.status.subagents;
     Widget tile(ChatItem item) => Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.symmetric(
+        horizontal: NekoSpace.md,
+        vertical: NekoSpace.xs,
+      ),
       child: ChatItemView(
         item: item,
         actions: widget.actions,
@@ -166,7 +170,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                 if (index < after.length) return tile(after[index]);
                 if (items.isEmpty && streaming == null) {
                   return Padding(
-                    padding: const EdgeInsets.all(32),
+                    padding: const EdgeInsets.all(NekoSpace.xl),
                     child: Center(
                       child: Text(
                         widget.emptyText,
@@ -178,7 +182,12 @@ class _TranscriptViewState extends State<TranscriptView> {
                   );
                 }
                 return Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+                  padding: const EdgeInsets.fromLTRB(
+                    NekoSpace.md,
+                    NekoSpace.xs,
+                    NekoSpace.md,
+                    NekoSpace.md,
+                  ),
                   child: streaming == null
                       ? const SizedBox.shrink()
                       : StreamingView(streaming: streaming),
@@ -199,7 +208,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOut,
               ),
-              child: const Icon(Icons.arrow_downward),
+              child: const NekoIcon(NekoIcons.down),
             ),
           ),
       ],
@@ -217,7 +226,7 @@ class _HistoryHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     if (loading) {
       return const Padding(
-        padding: EdgeInsets.all(12),
+        padding: EdgeInsets.all(NekoSpace.md),
         child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
@@ -244,29 +253,33 @@ class StreamingView extends StatelessWidget {
             initiallyExpanded: false,
             child: Text(
               (streaming.thinkingOmitted > 0 ? '…' : '') + streaming.thinking,
-              style: TextStyle(color: tokens.textMuted),
+              style: context.small(tokens.textMuted),
             ),
           ),
         if (streaming.text.isNotEmpty)
           NekoMarkdown((streaming.textOmitted > 0 ? '…' : '') + streaming.text),
         for (final call in streaming.toolCalls)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
+            padding: const EdgeInsets.only(top: NekoSpace.xs),
             child: Row(
               children: <Widget>[
                 SizedBox.square(
                   dimension: 14,
                   child: call.done
-                      ? Icon(Icons.check, size: 14, color: tokens.success)
+                      ? NekoIcon(
+                          NekoIcons.check,
+                          size: 14,
+                          color: tokens.success,
+                        )
                       : const CircularProgressIndicator(strokeWidth: 2),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: NekoSpace.sm),
                 Expanded(
                   child: Text(
                     '${call.name} ${call.summary}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: tokens.textMuted),
+                    style: context.small(tokens.textMuted),
                   ),
                 ),
               ],
@@ -306,7 +319,7 @@ class ChatItemView extends StatelessWidget {
       child: TextButton.icon(
         key: Key('expand-${item.key}-$field'),
         onPressed: () => actions.expand(item, ref),
-        icon: const Icon(Icons.unfold_more, size: 18),
+        icon: const NekoIcon(NekoIcons.unfold, size: 18),
         label: Text('展开全文（${(ref.bytes / 1024).ceil()} KB）'),
       ),
     );
@@ -324,7 +337,10 @@ class ChatItemView extends StatelessWidget {
               maxWidth: MediaQuery.sizeOf(context).width * 0.85,
             ),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                horizontal: NekoSpace.md,
+                vertical: NekoSpace.sm,
+              ),
               decoration: BoxDecoration(
                 color: tokens.userBubble,
                 borderRadius: BorderRadius.circular(NekoTokens.radiusBubble),
@@ -335,7 +351,7 @@ class ChatItemView extends StatelessWidget {
                   if (item.skill != null)
                     Text(
                       '/skill:${item.skill}',
-                      style: TextStyle(color: tokens.accent, fontSize: 12),
+                      style: context.small(tokens.accent),
                     ),
                   if (item.text.isNotEmpty)
                     SelectableText(
@@ -363,13 +379,17 @@ class ChatItemView extends StatelessWidget {
                   children: <Widget>[
                     SelectableText(
                       _full('thinking', item.thinking),
-                      style: TextStyle(color: tokens.textMuted),
+                      style: context.small(tokens.textMuted),
                     ),
                     ?_expandButton('thinking'),
                   ],
                 ),
               ),
-            if (item.text.isNotEmpty) NekoMarkdown(_full('text', item.text)),
+            if (item.text.isNotEmpty)
+              SizedBox(
+                width: double.infinity,
+                child: NekoMarkdown(_full('text', item.text)),
+              ),
             ?_expandButton('text'),
             if (item.note != null)
               Text(item.note!, style: TextStyle(color: tokens.textFaint)),
@@ -389,12 +409,12 @@ class ChatItemView extends StatelessWidget {
         );
       case ChatItemType.system:
         return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: NekoSpace.xs),
           child: Center(
             child: Text(
               _full('text', item.text),
               textAlign: TextAlign.center,
-              style: TextStyle(color: tokens.textFaint, fontSize: 12),
+              style: context.small(tokens.textFaint),
             ),
           ),
         );
@@ -402,7 +422,7 @@ class ChatItemView extends StatelessWidget {
   }
 }
 
-class ToolCard extends StatelessWidget {
+class ToolCard extends StatefulWidget {
   const ToolCard({
     super.key,
     required this.item,
@@ -423,32 +443,45 @@ class ToolCard extends StatelessWidget {
   final void Function(SubagentRound round)? onOpenSubagent;
 
   @override
+  State<ToolCard> createState() => _ToolCardState();
+}
+
+class _ToolCardState extends State<ToolCard> {
+  bool _open = false;
+
+  @override
   Widget build(BuildContext context) {
+    final ToolCard(
+      :item,
+      :tool,
+      :full,
+      :expandButton,
+      :actions,
+      :round,
+      :onOpenSubagent,
+    ) = widget;
     final tokens = NekoTokens.of(context);
-    final (IconData icon, Color color) = switch (tool.status) {
-      ToolStatus.running => (Icons.more_horiz, tokens.primary),
-      ToolStatus.done => (Icons.check_circle_outline, tokens.success),
-      ToolStatus.error => (Icons.error_outline, tokens.danger),
+    final (NekoIconData icon, Color color) = switch (tool.status) {
+      ToolStatus.running => (NekoIcons.more, tokens.primary),
+      ToolStatus.done => (NekoIcons.checkCircle, tokens.success),
+      ToolStatus.error => (NekoIcons.alert, tokens.danger),
     };
     Widget mono(String field, String value) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Container(
           width: double.infinity,
-          margin: const EdgeInsets.only(top: 6),
-          padding: const EdgeInsets.all(8),
+          margin: const EdgeInsets.only(top: NekoSpace.xs),
+          padding: const EdgeInsets.all(NekoSpace.sm),
           decoration: BoxDecoration(
             color: tokens.codeBackground,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
           ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: SelectableText(
               full('tool.$field', value),
-              style: const TextStyle(
-                fontFamily: NekoTokens.monoFamily,
-                fontSize: 12,
-              ),
+              style: NekoTokens.code,
             ),
           ),
         ),
@@ -456,77 +489,113 @@ class ToolCard extends StatelessWidget {
       ],
     );
     final linked = round;
-    return Card(
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          // 故意不设 PageStorageKey：Expansible 会把展开布尔值按祖先
-          // PageStorageKey 链写入 PageStorage，而 mono() 内的横向
-          // SingleChildScrollView 按同一键链恢复滚动偏移（double），
-          // 两者撞键导致展开时 TypeError、内容黑屏。
-          leading: Icon(icon, color: color, semanticLabel: tool.status.name),
-          title: Text(
-            linked != null ? '子 agent · ${linked.title}' : tool.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+    final details = <Widget>[
+      if (tool.detail != null) mono('detail', tool.detail!),
+      if (tool.result != null)
+        mono('result', tool.result!)
+      else if (tool.output != null)
+        mono('output', tool.output!),
+      if (tool.diff != null) ...<Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: NekoSpace.xs),
+          child: Text(
+            '+${tool.diffAdded ?? 0} −${tool.diffRemoved ?? 0}'
+            '${tool.diffTruncated ? '（diff 已截断）' : ''}',
+            style: context.small(tokens.textMuted),
           ),
-          subtitle: Text(
-            linked != null ? '${linked.role} · ${linked.status}' : tool.summary,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: tokens.textMuted, fontSize: 12),
-          ),
-          trailing: linked != null && onOpenSubagent != null
-              ? IconButton(
-                  key: Key('open-subagent-${linked.taskId}'),
-                  tooltip: '查看子 agent',
-                  icon: Badge(
-                    isLabelVisible: linked.approvalCount > 0,
-                    label: Text('${linked.approvalCount}'),
-                    child: const Icon(Icons.open_in_new),
-                  ),
-                  onPressed: () => onOpenSubagent!(linked),
-                )
-              : null,
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          expandedCrossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            if (tool.detail != null) mono('detail', tool.detail!),
-            if (tool.result != null)
-              mono('result', tool.result!)
-            else if (tool.output != null)
-              mono('output', tool.output!),
-            if (tool.diff != null) ...<Widget>[
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '+${tool.diffAdded ?? 0} −${tool.diffRemoved ?? 0}'
-                  '${tool.diffTruncated ? '（diff 已截断）' : ''}',
-                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
-                ),
-              ),
-              mono('diff', tool.diff!),
-            ],
-            if (tool.note != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  tool.note!,
-                  style: TextStyle(color: tokens.textFaint),
-                ),
-              ),
-            if (tool.durationMs != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  '${(tool.durationMs! / 1000).toStringAsFixed(1)} s',
-                  style: TextStyle(color: tokens.textFaint, fontSize: 12),
-                ),
-              ),
-            if (item.images.isNotEmpty)
-              _ImageStrip(images: item.images, actions: actions),
-          ],
         ),
+        mono('diff', tool.diff!),
+      ],
+      if (tool.note != null)
+        Padding(
+          padding: const EdgeInsets.only(top: NekoSpace.xs),
+          child: Text(tool.note!, style: context.small(tokens.textFaint)),
+        ),
+      if (tool.durationMs != null)
+        Padding(
+          padding: const EdgeInsets.only(top: NekoSpace.xs),
+          child: Text(
+            '${(tool.durationMs! / 1000).toStringAsFixed(1)} s',
+            style: context.meta(tokens.textFaint),
+          ),
+        ),
+      if (item.images.isNotEmpty)
+        _ImageStrip(images: item.images, actions: actions),
+    ];
+    // 一行式摘要 + 左侧状态色条；展开才显示参数与结果。故意不使用
+    // ExpansionTile/PageStorageKey：展开布尔值与 mono() 内横向滚动偏移
+    // 会按同一键链写入 PageStorage 而撞键，展开时 TypeError、内容黑屏。
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(left: BorderSide(color: color, width: 2)),
+      ),
+      padding: const EdgeInsets.only(left: NekoSpace.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: NekoSpace.touch),
+              child: Row(
+                children: <Widget>[
+                  NekoIcon(
+                    icon,
+                    size: 16,
+                    color: color,
+                    semanticLabel: tool.status.name,
+                  ),
+                  const SizedBox(width: NekoSpace.sm),
+                  Text(
+                    linked != null ? '子 agent · ${linked.title}' : tool.name,
+                    style: context.text.titleSmall,
+                  ),
+                  const SizedBox(width: NekoSpace.sm),
+                  Expanded(
+                    child: Text(
+                      linked != null
+                          ? '${linked.role} · ${linked.status}'
+                          : tool.summary,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.small(tokens.textMuted),
+                    ),
+                  ),
+                  if (linked != null && onOpenSubagent != null)
+                    IconButton(
+                      key: Key('open-subagent-${linked.taskId}'),
+                      tooltip: '查看子 agent',
+                      icon: Badge(
+                        isLabelVisible: linked.approvalCount > 0,
+                        label: Text('${linked.approvalCount}'),
+                        child: const NekoIcon(NekoIcons.external),
+                      ),
+                      onPressed: () => onOpenSubagent(linked),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: NekoSpace.sm,
+                      ),
+                      child: NekoIcon(
+                        _open ? NekoIcons.chevronUp : NekoIcons.chevronDown,
+                        size: 16,
+                        color: tokens.textFaint,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.only(bottom: NekoSpace.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: details,
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -562,11 +631,11 @@ class _CollapsibleState extends State<_Collapsible> {
             constraints: const BoxConstraints(minHeight: 48),
             child: Row(
               children: <Widget>[
-                Icon(
-                  _open ? Icons.expand_less : Icons.expand_more,
+                NekoIcon(
+                  _open ? NekoIcons.chevronUp : NekoIcons.chevronDown,
                   color: tokens.textFaint,
                 ),
-                Text(widget.title, style: TextStyle(color: tokens.textFaint)),
+                Text(widget.title, style: context.small(tokens.textFaint)),
               ],
             ),
           ),
@@ -587,8 +656,8 @@ class _Banner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(top: NekoSpace.xs),
+      padding: const EdgeInsets.all(NekoSpace.sm),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
@@ -607,7 +676,7 @@ class _ImageStrip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.only(top: NekoSpace.xs),
       child: Wrap(
         spacing: 6,
         runSpacing: 6,
@@ -655,7 +724,7 @@ class _ImageThumbState extends State<ImageThumb> {
           } else if (snapshot.hasError) {
             child = IconButton(
               tooltip: '重新加载图片',
-              icon: Icon(Icons.broken_image_outlined, color: tokens.danger),
+              icon: NekoIcon(NekoIcons.imageOff, color: tokens.danger),
               onPressed: () => setState(() {
                 _bytes = widget.actions.image(widget.image);
               }),

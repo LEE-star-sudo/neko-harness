@@ -6,14 +6,15 @@ import 'package:neko_mobile/core/rpc/connection_manager.dart';
 import 'package:neko_mobile/features/app_controller.dart';
 import 'package:neko_mobile/features/approvals/approval_sheet.dart';
 import 'package:neko_mobile/features/chat/chat_controller.dart';
-import 'package:neko_mobile/features/computers/computers_page.dart';
-import 'package:neko_mobile/features/sessions/session_list_page.dart';
+import 'package:neko_mobile/features/chat/neko_drawer.dart';
+import 'package:neko_mobile/features/sessions/session_picker.dart';
 import 'package:neko_mobile/features/sessions/sessions_controller.dart';
 import 'package:neko_mobile/features/subagents/subagent_page.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 import 'package:neko_mobile/ui/widgets/transcript_view.dart';
 
-/// 主会话页：抽屉导航工作区/会话，单列转录 + 审批条 + 输入区（design D10）。
+/// 主会话页：标题打开会话切换器，抽屉只放电脑/配对，单列转录 + 审批条 + 输入区（design D10）。
 class ChatPage extends ConsumerWidget {
   const ChatPage({super.key});
 
@@ -29,47 +30,82 @@ class ChatPage extends ConsumerWidget {
         chat.transcript,
       ]),
       builder: (context, _) {
-        final session = sessions.sessions
-            .where((s) => s.id == chat.sessionId)
-            .firstOrNull;
+        final session = sessions.known(chat.sessionId);
         final status = chat.transcript.status;
         return Scaffold(
-          drawer: NekoDrawer(sessions: sessions, chat: chat, manager: manager),
+          drawer: NekoDrawer(manager: manager),
           appBar: AppBar(
-            title: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  chat.sessionId == null
-                      ? 'Neko'
-                      : (session?.title.isNotEmpty ?? false)
-                      ? session!.title
-                      : '会话 ${chat.sessionId}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  key: const Key('chat-title'),
+            toolbarHeight: nekoToolbarHeight(context),
+            title: InkWell(
+              key: const Key('open-switcher'),
+              borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
+              onTap: () => showSessionSwitcher(context),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: NekoSpace.touch),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: NekoSpace.xs),
+                  child: Row(
+                    children: <Widget>[
+                      Flexible(
+                        child: Semantics(
+                          label: '切换会话',
+                          button: true,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                chat.sessionId == null
+                                    ? 'NekoAI'
+                                    : (session?.title.isNotEmpty ?? false)
+                                    ? session!.title
+                                    : '新会话',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                key: const Key('chat-title'),
+                              ),
+                              Text(
+                                status.busy
+                                    ? (status.status ?? '运行中…')
+                                    : (sessions.currentWorkspace?.name ?? ''),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.meta(
+                                  NekoTokens.of(context).textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: NekoSpace.xs),
+                      NekoIcon(
+                        NekoIcons.chevronDown,
+                        size: 16,
+                        color: NekoTokens.of(context).textFaint,
+                      ),
+                    ],
+                  ),
                 ),
-                Text(
-                  status.busy
-                      ? (status.status ?? '运行中…')
-                      : (sessions.currentWorkspace?.name ?? ''),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
+              ),
             ),
             actions: <Widget>[
               const ConnectionIndicator(),
               IconButton(
-                key: const Key('open-sessions'),
-                tooltip: '会话列表',
-                icon: const Icon(Icons.forum_outlined),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const SessionListPage(),
-                  ),
-                ),
+                key: const Key('sessions-new'),
+                tooltip: '新建会话',
+                onPressed:
+                    !sessions.ready ||
+                        sessions.creating ||
+                        sessions.currentWorkspace == null
+                    ? null
+                    : () => createAndOpenSession(sessions, chat),
+                icon: sessions.creating
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const NekoIcon(NekoIcons.plus),
               ),
             ],
           ),
@@ -77,9 +113,6 @@ class ChatPage extends ConsumerWidget {
             top: false,
             child: Column(
               children: <Widget>[
-                ConnectionBanner(manager: manager),
-                if (chat.error != null)
-                  ErrorBanner(text: chat.error!, onClose: chat.clearError),
                 Expanded(
                   child: chat.sessionId == null
                       ? _EmptySession(sessions: sessions, chat: chat)
@@ -97,7 +130,12 @@ class ChatPage extends ConsumerWidget {
                   onDecide: chat.decide,
                   enabled: chat.canControl,
                 ),
-                PendingTray(chat: chat),
+                StatusStrip(
+                  manager: manager,
+                  error: chat.error,
+                  onCloseError: chat.clearError,
+                  pending: PendingTray(chat: chat),
+                ),
                 if (chat.sessionId != null) Composer(chat: chat),
               ],
             ),
@@ -130,7 +168,7 @@ class _EmptySession extends StatelessWidget {
     final tokens = NekoTokens.of(context);
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(NekoSpace.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
@@ -141,17 +179,14 @@ class _EmptySession extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: tokens.textMuted),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: NekoSpace.md),
             if (sessions.workspaces.isNotEmpty)
               FilledButton.icon(
                 key: const Key('empty-new-session'),
                 onPressed: !sessions.ready || sessions.creating
                     ? null
-                    : () async {
-                        final created = await sessions.create();
-                        if (created != null) await chat.attach(created.id);
-                      },
-                icon: const Icon(Icons.add),
+                    : () => createAndOpenSession(sessions, chat),
+                icon: const NekoIcon(NekoIcons.plus),
                 label: const Text('新建会话'),
               ),
           ],
@@ -180,7 +215,7 @@ class _AttachError extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(color: tokens.textMuted),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: NekoSpace.md),
           FilledButton.tonal(
             key: const Key('attach-retry'),
             onPressed: chat.api != null
@@ -209,29 +244,39 @@ class ConnectionIndicator extends ConsumerWidget {
       builder: (context, snapshot) {
         final state = snapshot.data ?? const NekoConnIdle();
         final (
-          IconData icon,
+          NekoIconData icon,
           Color color,
           String label,
           bool spinning,
         ) = switch (state) {
-          NekoConnReady() => (Icons.circle, tokens.success, '在线', false),
-          NekoConnConnecting() => (Icons.sync, tokens.warning, '连接中', true),
-          NekoConnRestoring() => (Icons.sync, tokens.warning, '重连中', true),
-          NekoConnOffline() => (Icons.cloud_off, tokens.danger, '离线', false),
-          NekoConnRevoked() => (Icons.block, tokens.danger, '授权已撤销', false),
+          NekoConnReady() => (NekoIcons.dot, tokens.success, '在线', false),
+          NekoConnConnecting() => (
+            NekoIcons.spinner,
+            tokens.warning,
+            '连接中',
+            true,
+          ),
+          NekoConnRestoring() => (
+            NekoIcons.spinner,
+            tokens.warning,
+            '重连中',
+            true,
+          ),
+          NekoConnOffline() => (NekoIcons.cloudOff, tokens.danger, '离线', false),
+          NekoConnRevoked() => (NekoIcons.block, tokens.danger, '授权已撤销', false),
           NekoConnTrustChanged() => (
-            Icons.gpp_maybe,
+            NekoIcons.shieldAlert,
             tokens.danger,
             '证书已变更',
             false,
           ),
           NekoConnIncompatible() => (
-            Icons.error_outline,
+            NekoIcons.alert,
             tokens.danger,
             '版本不兼容',
             false,
           ),
-          NekoConnIdle() => (Icons.circle, tokens.textFaint, '未连接', false),
+          NekoConnIdle() => (NekoIcons.dot, tokens.textFaint, '未连接', false),
         };
         final retryable =
             state is NekoConnOffline ||
@@ -241,40 +286,58 @@ class ConnectionIndicator extends ConsumerWidget {
             state is NekoConnRevoked ||
             state is NekoConnTrustChanged ||
             state is NekoConnIncompatible;
+        final ready = state is NekoConnReady;
         return Tooltip(
           message: label,
-          child: InkWell(
-            key: const Key('connection-indicator'),
-            borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
-            onTap: retryable
-                ? manager.onForeground
-                : terminal
-                ? () {
-                    manager.stopToScan();
-                    context.go('/scan');
-                  }
-                : null,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  SizedBox.square(
-                    dimension: 16,
-                    child: spinning
-                        ? CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: color,
-                          )
-                        : Icon(icon, size: 14, color: color),
+          child: Semantics(
+            label: label,
+            button: retryable || terminal,
+            child: InkWell(
+              key: const Key('connection-indicator'),
+              borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
+              onTap: retryable
+                  ? manager.onForeground
+                  : terminal
+                  ? () {
+                      manager.stopToScan();
+                      context.go('/scan');
+                    }
+                  : null,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  minWidth: NekoSpace.touch,
+                  minHeight: NekoSpace.touch,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: NekoSpace.sm),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: <Widget>[
+                      ExcludeSemantics(
+                        child: SizedBox.square(
+                          dimension: 14,
+                          child: spinning
+                              ? CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: color,
+                                )
+                              : NekoIcon(icon, size: 14, color: color),
+                        ),
+                      ),
+                      if (!ready) ...<Widget>[
+                        const SizedBox(width: NekoSpace.xs),
+                        ExcludeSemantics(
+                          child: Text(
+                            label,
+                            key: const Key('connection-indicator-label'),
+                            style: context.small(color),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                  const SizedBox(width: 4),
-                  Text(
-                    label,
-                    key: const Key('connection-indicator-label'),
-                    style: TextStyle(color: color, fontSize: 12),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -322,7 +385,7 @@ class ConnectionBanner extends StatelessWidget {
           ),
           NekoConnRevoked() => (
             '设备授权已被电脑撤销，请重新扫码配对',
-            Icon(Icons.block, size: 18, color: tokens.danger),
+            NekoIcon(NekoIcons.block, size: 18, color: tokens.danger),
             TextButton(
               key: const Key('banner-rescan'),
               onPressed: () {
@@ -334,7 +397,7 @@ class ConnectionBanner extends StatelessWidget {
           ),
           NekoConnTrustChanged() => (
             '电脑证书已变更，请重新扫码配对',
-            Icon(Icons.gpp_maybe, size: 18, color: tokens.danger),
+            NekoIcon(NekoIcons.shieldAlert, size: 18, color: tokens.danger),
             TextButton(
               key: const Key('banner-rescan'),
               onPressed: () {
@@ -346,7 +409,7 @@ class ConnectionBanner extends StatelessWidget {
           ),
           NekoConnIncompatible() => (
             '应用与电脑协议版本不兼容，请升级后重试',
-            Icon(Icons.error_outline, size: 18, color: tokens.danger),
+            NekoIcon(NekoIcons.alert, size: 18, color: tokens.danger),
             null,
           ),
           _ => (null, null, null),
@@ -356,14 +419,21 @@ class ConnectionBanner extends StatelessWidget {
           key: const Key('connection-banner'),
           color: tokens.surfaceMuted,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: NekoSpace.md),
             child: Row(
               children: <Widget>[
                 leading ??
-                    Icon(Icons.cloud_off, size: 18, color: tokens.textMuted),
-                const SizedBox(width: 8),
+                    NekoIcon(
+                      NekoIcons.cloudOff,
+                      size: 16,
+                      color: tokens.textMuted,
+                    ),
+                const SizedBox(width: NekoSpace.sm),
                 Expanded(
-                  child: Text(text, style: TextStyle(color: tokens.textMuted)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: NekoSpace.xs),
+                    child: Text(text, style: context.small(tokens.textMuted)),
+                  ),
                 ),
                 ?action,
               ],
@@ -389,17 +459,50 @@ class ErrorBanner extends StatelessWidget {
       color: tokens.danger.withValues(alpha: 0.1),
       child: Row(
         children: <Widget>[
-          const SizedBox(width: 16),
+          const SizedBox(width: NekoSpace.md),
           Expanded(
-            child: Text(text, style: TextStyle(color: tokens.danger)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: NekoSpace.xs),
+              child: Text(text, style: context.small(tokens.danger)),
+            ),
           ),
           IconButton(
             tooltip: '关闭',
             onPressed: onClose,
-            icon: const Icon(Icons.close),
+            icon: const NekoIcon(NekoIcons.close),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 输入区上方的紧凑状态条：连接提示、错误、待确认发送各自保留原 Key 与操作，
+/// 不合并成单一状态机；无内容时不占空间。
+class StatusStrip extends StatelessWidget {
+  const StatusStrip({
+    super.key,
+    required this.manager,
+    this.error,
+    this.onCloseError,
+    this.pending,
+  });
+
+  final ConnectionManager manager;
+  final String? error;
+  final VoidCallback? onCloseError;
+  final Widget? pending;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        ConnectionBanner(manager: manager),
+        if (error != null)
+          ErrorBanner(text: error!, onClose: onCloseError ?? () {}),
+        ?pending,
+      ],
     );
   }
 }
@@ -422,7 +525,7 @@ class PendingTray extends StatelessWidget {
             key: Key('pending-${record.requestId}'),
             color: tokens.surfaceMuted,
             child: Padding(
-              padding: const EdgeInsets.only(left: 16),
+              padding: const EdgeInsets.only(left: NekoSpace.md),
               child: Row(
                 children: <Widget>[
                   Expanded(
@@ -430,6 +533,7 @@ class PendingTray extends StatelessWidget {
                       '待确认：${record.text}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
+                      style: context.small(tokens.textMuted),
                     ),
                   ),
                   TextButton(
@@ -475,21 +579,15 @@ class _ComposerState extends State<Composer> {
     return Material(
       color: tokens.base,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+        padding: const EdgeInsets.fromLTRB(
+          NekoSpace.sm,
+          NekoSpace.xs,
+          NekoSpace.sm,
+          NekoSpace.sm,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            if (busy && can)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: FilterChip(
-                  key: const Key('composer-steer'),
-                  label: const Text('引导当前运行'),
-                  tooltip: '关闭时消息在当前回答结束后排队处理',
-                  selected: _steer,
-                  onSelected: (value) => setState(() => _steer = value),
-                ),
-              ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
@@ -501,7 +599,24 @@ class _ComposerState extends State<Composer> {
                     maxLines: 6,
                     textInputAction: TextInputAction.newline,
                     decoration: InputDecoration(
-                      isDense: true,
+                      prefixIcon: busy && can
+                          ? IconButton(
+                              key: const Key('composer-steer'),
+                              isSelected: _steer,
+                              tooltip: _steer
+                                  ? '引导当前运行（点按改为排队）'
+                                  : '排队处理（点按改为引导当前运行）',
+                              icon: NekoIcon(
+                                NekoIcons.bolt,
+                                color: tokens.textFaint,
+                              ),
+                              selectedIcon: NekoIcon(
+                                NekoIcons.bolt,
+                                color: tokens.primary,
+                              ),
+                              onPressed: () => setState(() => _steer = !_steer),
+                            )
+                          : null,
                       hintText: !can
                           ? '未连接，可继续编辑草稿'
                           : busy
@@ -515,10 +630,7 @@ class _ComposerState extends State<Composer> {
                     key: const Key('composer-stop'),
                     tooltip: '停止当前运行',
                     onPressed: can ? chat.abort : null,
-                    icon: Icon(
-                      Icons.stop_circle_outlined,
-                      color: tokens.danger,
-                    ),
+                    icon: NekoIcon(NekoIcons.stop, color: tokens.danger),
                   ),
                 ListenableBuilder(
                   listenable: chat.input,
@@ -536,134 +648,12 @@ class _ComposerState extends State<Composer> {
                             dimension: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.arrow_upward),
+                        : const NekoIcon(NekoIcons.up, size: 18),
                   ),
                 ),
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 抽屉：电脑、工作区（同名显示完整路径）与当前工作区最近会话。
-class NekoDrawer extends StatelessWidget {
-  const NekoDrawer({
-    super.key,
-    required this.sessions,
-    required this.chat,
-    required this.manager,
-  });
-
-  final SessionsController sessions;
-  final ChatController chat;
-  final ConnectionManager manager;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = NekoTokens.of(context);
-    final names = <String, int>{};
-    for (final w in sessions.workspaces) {
-      names[w.name] = (names[w.name] ?? 0) + 1;
-    }
-    return Drawer(
-      child: SafeArea(
-        child: ListenableBuilder(
-          listenable: sessions,
-          builder: (context, _) => ListView(
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.computer),
-                title: Text(manager.computer?.serverName ?? '未连接'),
-                subtitle: const Text('电脑与设置'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const ComputersPage(),
-                    ),
-                  );
-                },
-              ),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text('工作区', style: TextStyle(color: tokens.textFaint)),
-              ),
-              for (final w in sessions.workspaces)
-                ListTile(
-                  key: Key('workspace-${w.root}'),
-                  selected: w.root == sessions.workspace,
-                  title: Text(
-                    w.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  subtitle:
-                      (names[w.name] ?? 0) > 1 || w.root == sessions.workspace
-                      ? Text(
-                          w.root,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        )
-                      : null,
-                  onTap: () => sessions.selectWorkspace(w.root),
-                ),
-              const Divider(),
-              ListTile(
-                key: const Key('drawer-new-session'),
-                leading: const Icon(Icons.add),
-                title: const Text('新建会话'),
-                enabled: sessions.ready && !sessions.creating,
-                onTap: () async {
-                  final navigator = Navigator.of(context);
-                  final created = await sessions.create();
-                  if (created != null) {
-                    navigator.pop();
-                    await chat.attach(created.id);
-                  }
-                },
-              ),
-              for (final s in sessions.sessions.take(10))
-                ListTile(
-                  key: Key('drawer-session-${s.id}'),
-                  selected: s.id == chat.sessionId,
-                  title: Text(
-                    s.title.isEmpty ? '新会话' : s.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () {
-                    Navigator.of(context).pop();
-                    chat.attach(s.id);
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.list),
-                title: const Text('全部会话'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const SessionListPage(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.qr_code_scanner),
-                title: const Text('扫码配对新电脑'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  manager.stopToScan();
-                  context.go('/scan');
-                },
-              ),
-            ],
-          ),
         ),
       ),
     );

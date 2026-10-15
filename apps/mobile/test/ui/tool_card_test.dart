@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neko_mobile/core/api/models.dart';
 import 'package:neko_mobile/features/chat/transcript.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/widgets/transcript_view.dart';
 
 import '../helpers/fake_api.dart';
@@ -143,5 +144,74 @@ void main() {
     await tester.tap(find.text('展开全文（13 KB）'));
     await tester.pumpAndSettle();
     expect(find.textContaining('全文内容'), findsOneWidget);
+  });
+
+  testWidgets('一行式摘要：热区 >=44dp，折叠只显示名称与摘要，点击展开/收起', (tester) async {
+    final transcript = Transcript()
+      ..applySnapshot(
+        snapshotOf(<Map<String, dynamic>>[_bashItem(result: 'RESULT-BODY')]),
+      );
+    await _pump(tester, transcript, _Actions(transcript));
+
+    expect(find.text('bash'), findsOneWidget);
+    expect(find.text('ls -la'), findsOneWidget);
+    expect(find.textContaining('RESULT-BODY'), findsNothing);
+    final row = find.ancestor(
+      of: find.text('bash'),
+      matching: find.byType(InkWell),
+    );
+    expect(tester.getSize(row.first).height, greaterThanOrEqualTo(44));
+
+    await tester.tap(find.text('bash'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('RESULT-BODY'), findsOneWidget);
+    await tester.tap(find.text('bash'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('RESULT-BODY'), findsNothing);
+  });
+
+  testWidgets('运行/成功/失败以不同图形区分，不只靠颜色', (tester) async {
+    Map<String, dynamic> item(String key, String status) => <String, dynamic>{
+      'key': key,
+      'type': 'tool',
+      'refs': <Map<String, dynamic>>[],
+      'tool': <String, dynamic>{
+        'callId': key,
+        'name': 'bash-$key',
+        'summary': 's',
+        'status': status,
+      },
+    };
+    final transcript = Transcript()
+      ..applySnapshot(
+        snapshotOf(<Map<String, dynamic>>[
+          item('a', 'running'),
+          item('b', 'done'),
+          item('c', 'error'),
+        ]),
+      );
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await _pump(tester, transcript, _Actions(transcript));
+
+    NekoIconData iconOf(String name) => tester
+        .widget<NekoIcon>(
+          find
+              .descendant(
+                of: find.ancestor(
+                  of: find.text(name),
+                  matching: find.byType(Row),
+                ),
+                matching: find.byType(NekoIcon),
+              )
+              .first,
+        )
+        .icon;
+    final icons = <NekoIconData>{
+      iconOf('bash-a'),
+      iconOf('bash-b'),
+      iconOf('bash-c'),
+    };
+    expect(icons, hasLength(3));
   });
 }

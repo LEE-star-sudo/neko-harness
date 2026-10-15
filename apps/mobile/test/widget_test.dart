@@ -35,7 +35,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Neko'), findsOneWidget);
+    expect(find.text('NekoAI'), findsOneWidget);
     expect(find.byKey(const Key('home-idle-text')), findsOneWidget);
     expect(find.byKey(const Key('home-go-scan')), findsOneWidget);
     manager.dispose();

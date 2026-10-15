@@ -1,5 +1,5 @@
 {
-	"description": "sessions.create 结果：新会话使用电脑默认模型，桌面目录即时可见。",
+	"description": "sessions.create 结果：新会话使用电脑默认模型，桌面目录即时可见；无消息时 lastMessageAt 为创建时间。",
 	"message": {
 		"jsonrpc": "2.0",
 		"id": 12,
@@ -9,6 +9,7 @@
 			"title": "",
 			"preview": "",
 			"lastUsedAt": 1730200000000,
+			"lastMessageAt": 1730200000000,
 			"archived": false
 		}
 	}

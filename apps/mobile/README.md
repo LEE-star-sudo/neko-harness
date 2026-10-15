@@ -1,4 +1,4 @@
-# neko_mobile
+# NekoAI（neko_mobile）
 
 neko 的 Android 手机端（Flutter），通过局域网 HTTPS/WSS 控制电脑上的 Agent。协议见
 `docs/mobile-api-v1.md`，设计见 `openspec/changes/add-flutter-mobile-control/design.md`。
@@ -22,11 +22,34 @@ flutter build apk --release --split-per-abi   # 产物：build/app/outputs/flutt
 HTML 按原文显示。
 
 代码结构：`lib/core`（网络指纹绑定、配对、RPC、存储、API 模型）、`lib/features`（连接、会话、聊天、审批、子 agent、电脑设置）、
-`lib/ui`（主题 tokens 与共用组件）。
+`lib/ui`（主题 tokens、自有图标集与共用组件）。
+
+## 界面、导航与图标
+
+- 紧凑设计 tokens 集中在 `lib/ui/theme.dart`：字阶（正文 14 / 次要 12.5 / 元信息 11 / 代码 12）、间距阶梯 `NekoSpace`、
+  收窄的圆角与 `VisualDensity.compact`；页面只引用 tokens，不直接写字号。视觉紧凑但点击热区保持 >=44dp。
+- 导航：点击顶栏标题打开会话切换器（工作区芯片 + 搜索 + 会话列表，`lib/features/sessions/session_picker.dart`）；
+  顶栏 `+` 是唯一新建入口；左侧抽屉只放电脑与设置、扫码配对。会话列表顺序完全来自服务端（最近消息时间，仅打开不改变顺序）。
+- 图标：`lib/ui/neko_icons.dart` 的 `NekoIcon`/`NekoIcons` 是与 Web 一致的 24 栅格线性图标（路径数据经 `path_drawing` 绘制），
+  `lib` 内不得使用 Material 的 `Icons.*`（`test/ui/no_material_icons_test.dart` 守护）。新增图标按同一栅格与 1.6 线宽补绘。
+- 启动图标：源图在 `assets/brand/*.svg`（不随 APK 打包），Android 自适应前景矢量在
+  `android/app/src/main/res/drawable/ic_launcher_foreground.xml`（需与 SVG 路径保持一致）。改图标后运行
+  `tool/generate_brand_icons.sh`（依赖 `rsvg-convert` 与 macOS 自带 `sips`）重新生成 Android 旧版位图与 iOS AppIcon。
+
+## 测试版 APK 与 CI 发版
+
+应用名 NekoAI（applicationId 仍为 `dev.neko.harness.mobile`，改名不影响已配对数据）。发布 GitHub Release（标签 `vX.Y.Z`，须与根
+`package.json` 版本一致）时，`.github/workflows/release.yml` 的 `android` 任务会构建 `--release --split-per-abi` 并把
+`NekoAI-vX.Y.Z-<abi>.apk`（arm64-v8a / armeabi-v7a / x86_64）附到该 Release；`versionName` 取自根版本，`versionCode` 为
+`major*10000 + minor*100 + patch`。
+
+当前是**测试版**：没有签名资料时用 debug 签名构建，每次 CI 构建的签名不同，不能覆盖升级，新版本需卸载重装并重新扫码配对；也没有应用内升级机制。
+后续在 `android` 任务中用 CI secret 生成 `android/key.properties`（见下文「发布签名」）并接入升级机制。`mobile.yml` 仍在 PR/main 上做
+格式、分析、测试和 release 变体编译验证。
 
 ## TLS 信任与发版
 
-App 不内置任何 CA 或服务器证书（无 assets、无 `network_security_config`）：电脑端的自签名证书由 gateway 在本机生成，
+App 不内置任何 CA 或服务器证书（无打包 assets、无 `network_security_config`）：电脑端的自签名证书由 gateway 在本机生成，
 手机经二维码/配对文本取得其 SHA-256 指纹，之后的 HTTPS/WSS 连接只信任该指纹（`lib/core/net/pinned_client.dart`，
 `SecurityContext(withTrustedRoots: false)`）。因此发版不需要携带任何证书材料；电脑重新生成证书后需要重新配对。
 `test/fixtures/tls/` 里的证书仅供单元测试使用，不会进入 APK。

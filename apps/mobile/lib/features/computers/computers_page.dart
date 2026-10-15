@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:neko_mobile/core/pairing/pairing_models.dart';
 import 'package:neko_mobile/core/rpc/connection_manager.dart';
 import 'package:neko_mobile/features/app_controller.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 
 /// 已保存电脑（切换/忘记）与外观设置。
@@ -61,7 +62,12 @@ class _ComputersPageState extends ConsumerState<ComputersPage> {
           return ListView(
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                padding: const EdgeInsets.fromLTRB(
+                  NekoSpace.md,
+                  NekoSpace.md,
+                  NekoSpace.md,
+                  NekoSpace.xs,
+                ),
                 child: Text(
                   '已配对的电脑',
                   style: TextStyle(color: tokens.textFaint),
@@ -70,10 +76,10 @@ class _ComputersPageState extends ConsumerState<ComputersPage> {
               for (final computer in computers)
                 ListTile(
                   key: Key('computer-${computer.serverId}'),
-                  leading: Icon(
+                  leading: NekoIcon(
                     computer.serverId == manager.computer?.serverId
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_unchecked,
+                        ? NekoIcons.radioOn
+                        : NekoIcons.radioOff,
                   ),
                   title: Text(computer.serverName),
                   subtitle: Text(Uri.parse(computer.endpoint).host),
@@ -87,12 +93,12 @@ class _ComputersPageState extends ConsumerState<ComputersPage> {
                   trailing: IconButton(
                     key: Key('forget-${computer.serverId}'),
                     tooltip: '忘记这台电脑',
-                    icon: const Icon(Icons.delete_outline),
+                    icon: const NekoIcon(NekoIcons.trash),
                     onPressed: () => _forget(computer),
                   ),
                 ),
               ListTile(
-                leading: const Icon(Icons.qr_code_scanner),
+                leading: const NekoIcon(NekoIcons.scan),
                 title: const Text('扫码配对新电脑'),
                 onTap: () {
                   manager.stopToScan();
@@ -101,8 +107,13 @@ class _ComputersPageState extends ConsumerState<ComputersPage> {
               ),
               const Divider(),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text('外观', style: TextStyle(color: tokens.textFaint)),
+                padding: const EdgeInsets.fromLTRB(
+                  NekoSpace.md,
+                  NekoSpace.sm,
+                  NekoSpace.md,
+                  NekoSpace.xs,
+                ),
+                child: Text('外观', style: context.meta(tokens.textFaint)),
               ),
               ValueListenableBuilder<ThemeMode>(
                 valueListenable: app.themeMode,

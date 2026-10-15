@@ -249,6 +249,7 @@ export const MobileSessionSummarySchema = Type.Object({
 	title: str,
 	preview: str,
 	lastUsedAt: Type.Integer(),
+	lastMessageAt: Type.Integer(),
 	archived: Type.Boolean(),
 });
 

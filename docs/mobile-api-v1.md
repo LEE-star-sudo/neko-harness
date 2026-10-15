@@ -53,8 +53,9 @@
 ### sessions
 
 - `sessions.list { workspace, query?, cursor? } → { sessions, nextCursor? }`
-  （`sessions-list-request.json` / `sessions-list-result.json`）：按工作区过滤、`lastUsedAt` 倒序、
+  （`sessions-list-request.json` / `sessions-list-result.json`）：按工作区过滤、按最近消息时间倒序（无消息时用创建时间，同值按会话 ID 倒序，与 Web 一致；仅打开/attach 不改变顺序）、
   每页 ≤ `pageItems`、`query` 搜索标题/首条预览；`cwd` 必须是已登记工作区（未知工作区拒绝为 `invalid_params`，不落回启动目录）。
+- 会话摘要 `{ id, workspace, title, preview, lastUsedAt, lastMessageAt, archived }`：`lastMessageAt` 为排序/展示用的最近消息时间（无消息时 = 创建时间）；`lastUsedAt` 为最近使用（含打开）时间，仅作回退。`lastMessageAt` 是 v1 内的新增字段：旧 App 忽略它，新 App 连接缺少该字段的旧网关时回退为 `lastUsedAt`。
 - `sessions.create { workspace } → session`（`sessions-create-request.json` / `sessions-create-result.json`）：新会话用电脑默认模型。
 - 通知 `sessions.changed { revision }`（`sessions-changed-notification.json`）。
 

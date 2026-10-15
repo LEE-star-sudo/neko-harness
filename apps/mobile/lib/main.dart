@@ -79,7 +79,7 @@ class NekoApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final app = ref.watch(appControllerOrNullProvider);
     Widget build(ThemeMode mode) => MaterialApp.router(
-      title: 'Neko',
+      title: 'NekoAI',
       theme: buildNekoTheme(Brightness.light),
       darkTheme: buildNekoTheme(Brightness.dark),
       themeMode: mode,

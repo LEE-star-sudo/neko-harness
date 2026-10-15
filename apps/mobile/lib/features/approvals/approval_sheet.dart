@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:neko_mobile/core/api/models.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 
 typedef ApprovalDecider = Future<String?> Function(
@@ -37,18 +38,18 @@ class ApprovalBar extends StatelessWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 48),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: NekoSpace.md),
             child: Row(
               children: <Widget>[
-                Icon(Icons.gpp_maybe_outlined, color: tokens.warning),
-                const SizedBox(width: 8),
+                NekoIcon(NekoIcons.shieldAlert, color: tokens.warning),
+                const SizedBox(width: NekoSpace.sm),
                 Expanded(
                   child: Text(
                     '${approvals.length} 个命令等待审批',
                     style: TextStyle(color: tokens.text),
                   ),
                 ),
-                const Icon(Icons.expand_less),
+                const NekoIcon(NekoIcons.chevronUp),
               ],
             ),
           ),
@@ -121,16 +122,21 @@ class _ApprovalListState extends State<_ApprovalList> {
     final tokens = NekoTokens.of(context);
     return ListView.separated(
       controller: widget.scroll,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      padding: const EdgeInsets.fromLTRB(
+        NekoSpace.md,
+        0,
+        NekoSpace.md,
+        NekoSpace.lg,
+      ),
       itemCount: _items.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      separatorBuilder: (_, _) => const SizedBox(height: NekoSpace.md),
       itemBuilder: (context, index) {
         final approval = _items[index];
         final result = _results[approval.id];
         return Card(
           key: Key('approval-${approval.id}'),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NekoSpace.md),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
@@ -138,11 +144,11 @@ class _ApprovalListState extends State<_ApprovalList> {
                   approval.title ?? '子 agent #${approval.taskId}',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: NekoSpace.sm),
                 Container(
                   width: double.infinity,
                   constraints: const BoxConstraints(maxHeight: 240),
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(NekoSpace.sm),
                   decoration: BoxDecoration(
                     color: tokens.codeBackground,
                     borderRadius: BorderRadius.circular(8),
@@ -150,24 +156,21 @@ class _ApprovalListState extends State<_ApprovalList> {
                   child: SingleChildScrollView(
                     child: SelectableText(
                       approval.command,
-                      style: const TextStyle(
-                        fontFamily: NekoTokens.monoFamily,
-                        fontSize: 12,
-                      ),
+                      style: NekoTokens.code,
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: NekoSpace.xs),
                 Text(
                   '目录：${approval.cwd}',
-                  style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                  style: context.small(tokens.textMuted),
                 ),
                 if (approval.timeoutSeconds != null)
                   Text(
                     '超时：${approval.timeoutSeconds!.round()} 秒',
-                    style: TextStyle(color: tokens.textMuted, fontSize: 12),
+                    style: context.small(tokens.textMuted),
                   ),
-                const SizedBox(height: 8),
+                const SizedBox(height: NekoSpace.sm),
                 if (result != null)
                   Text(
                     switch (result) {
@@ -191,7 +194,7 @@ class _ApprovalListState extends State<_ApprovalList> {
                             : () => _decide(approval, false),
                         child: const Text('拒绝'),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: NekoSpace.sm),
                       FilledButton(
                         key: Key('approval-allow-${approval.id}'),
                         onPressed:

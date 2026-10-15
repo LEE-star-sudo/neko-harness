@@ -46,3 +46,49 @@ jobs:
           node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
       - run: npm publish ./artifacts/*.tgz --access public --tag latest --provenance
+  # NekoAI Android 测试版：发版时构建 release 变体并附到该 GitHub Release。
+  # 暂无签名资料时 Gradle 退回 debug 签名，只用于测试安装，不同次构建的签名不一致，不能覆盖升级；
+  # 后续接入 keystore（android/key.properties 由 CI secret 生成）与升级机制时在此处扩展。
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify stable release tag
+        working-directory: .
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$GITHUB_REF_NAME" == "v$VERSION" ]] || { echo "tag $GITHUB_REF_NAME does not match package version $VERSION"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+      - run: flutter pub get --enforce-lockfile
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze
+      - run: flutter test
+      - name: Build release APKs
+        run: |
+          IFS=. read -r MAJOR MINOR PATCH <<< "$VERSION"
+          flutter build apk --release --split-per-abi \
+            --build-name="$VERSION" \
+            --build-number="$((MAJOR * 10000 + MINOR * 100 + PATCH))"
+      - name: Upload APKs to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "build/app/outputs/flutter-apk/app-$abi-release.apk" "dist/NekoAI-v$VERSION-$abi.apk"
+          done
+          gh release upload "$GITHUB_REF_NAME" dist/*.apk --clobber --repo "$GITHUB_REPOSITORY"

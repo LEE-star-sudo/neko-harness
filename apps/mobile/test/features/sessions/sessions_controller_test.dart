@@ -100,6 +100,49 @@ void main() {
     expect(chat.canControl, isTrue);
   });
 
+  test('会话顺序以服务端为准，时间取最近消息时间，缺字段回退最近使用', () async {
+    final api = FakeMobileApi()
+      ..on(
+        'workspaces.list',
+        (_) => <String, dynamic>{
+          'workspaces': <Object>[
+            <String, dynamic>{'root': '/a', 'name': 'a'},
+          ],
+        },
+      )
+      ..on(
+        'sessions.list',
+        (_) => <String, dynamic>{
+          'sessions': <Object>[
+            <String, dynamic>{
+              'id': '1',
+              'workspace': '/a',
+              'title': 'old-msg-recently-opened',
+              'preview': '',
+              'lastUsedAt': 900,
+              'lastMessageAt': 100,
+            },
+            <String, dynamic>{
+              'id': '2',
+              'workspace': '/a',
+              'title': 'legacy',
+              'preview': '',
+              'lastUsedAt': 50,
+            },
+          ],
+        },
+      );
+    final sessions = SessionsController(prefs: InMemoryPrefsStore());
+    addTearDown(sessions.dispose);
+    await sessions.bind(api, 'srv');
+    await sessions.selectWorkspace('/a');
+    expect(sessions.sessions.map((s) => s.id), <String>['1', '2']);
+    expect(sessions.sessions.first.messageAt, 100);
+    expect(sessions.sessions.last.messageAt, 50);
+    await sessions.refresh();
+    expect(sessions.sessions.map((s) => s.id), <String>['1', '2']);
+  });
+
   test('已保存电脑：配对加入索引，可切换与忘记', () async {
     final store = InMemoryKeyValueStore();
     final manager = ConnectionManager(

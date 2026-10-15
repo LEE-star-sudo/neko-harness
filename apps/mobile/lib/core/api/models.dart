@@ -37,6 +37,7 @@ class SessionSummary {
     required this.title,
     required this.preview,
     required this.lastUsedAt,
+    this.lastMessageAt,
   });
 
   factory SessionSummary.fromJson(Json json) => SessionSummary(
@@ -45,6 +46,7 @@ class SessionSummary {
     title: _str(json['title']),
     preview: _str(json['preview']),
     lastUsedAt: _int(json['lastUsedAt']),
+    lastMessageAt: _intOrNull(json['lastMessageAt']),
   );
 
   final String id;
@@ -52,6 +54,12 @@ class SessionSummary {
   final String title;
   final String preview;
   final int lastUsedAt;
+
+  /// 旧网关不返回该字段，此时回退到最近使用时间。
+  final int? lastMessageAt;
+
+  /// 列表排序与展示用的时间：最近消息时间（无消息为创建时间），由服务端决定顺序。
+  int get messageAt => lastMessageAt ?? lastUsedAt;
 }
 
 class ContentRef {

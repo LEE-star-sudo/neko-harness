@@ -20,6 +20,7 @@ class SessionsController extends ChangeNotifier {
   List<Workspace> _workspaces = <Workspace>[];
   String? _workspace;
   List<SessionSummary> _sessions = <SessionSummary>[];
+  final Map<String, SessionSummary> _known = <String, SessionSummary>{};
   String? _nextCursor;
   String _query = '';
   bool _loading = false;
@@ -40,6 +41,18 @@ class SessionsController extends ChangeNotifier {
 
   List<SessionSummary> get sessions => _sessions;
 
+  /// 见过的会话摘要（含搜索过滤/翻页之外的）：顶栏标题据此显示，不受列表筛选影响。
+  SessionSummary? known(String? id) => id == null ? null : _known[id];
+
+  /// 当前工作区最近使用（含打开）的会话，用于切换工作区后的默认会话（与 Web 一致）。
+  SessionSummary? get mostRecentlyUsed {
+    SessionSummary? best;
+    for (final s in _sessions) {
+      if (best == null || s.lastUsedAt > best.lastUsedAt) best = s;
+    }
+    return best;
+  }
+
   bool get hasMore => _nextCursor != null;
 
   String get query => _query;
@@ -58,6 +71,7 @@ class SessionsController extends ChangeNotifier {
       _serverId = serverId;
       _workspace = null;
       _sessions = <SessionSummary>[];
+      _known.clear();
       _query = '';
     }
     await _notifications?.cancel();
@@ -152,6 +166,9 @@ class SessionsController extends ChangeNotifier {
           .map(SessionSummary.fromJson)
           .toList();
       _sessions = reset ? page : <SessionSummary>[..._sessions, ...page];
+      for (final item in page) {
+        _known[item.id] = item;
+      }
       _nextCursor = result['nextCursor'] as String?;
       _error = null;
     } catch (error) {
@@ -189,6 +206,7 @@ class SessionsController extends ChangeNotifier {
           }),
         ),
       );
+      _known[created.id] = created;
       _sessions = <SessionSummary>[
         created,
         ..._sessions.where((s) => s.id != created.id),

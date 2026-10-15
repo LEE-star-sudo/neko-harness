@@ -136,8 +136,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(service.calls, 1);
-    expect(find.byKey(const Key('done-title')), findsOneWidget);
-    expect(find.textContaining('已配对 工作机'), findsOneWidget);
+    // 不再有"已配对"中间页：直接离开扫码页。
+    expect(find.byKey(const Key('done-title')), findsNothing);
+    expect(find.byKey(const Key('done-home-button')), findsNothing);
+    expect(find.text('home-root'), findsOneWidget);
   });
 
   testWidgets('重复扫码回调只触发一次受理，不会重复 POST', (tester) async {
@@ -184,11 +186,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(handedOff?.serverId, 'srv-1');
-    expect(find.byKey(const Key('done-home-button')), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('done-home-button')));
-    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('done-home-button')), findsNothing);
     expect(find.byKey(const Key('done-title')), findsNothing);
+    expect(find.text('home-root'), findsOneWidget);
   });
 
   testWidgets('配对中出现非配对类异常时进入失败页而不是一直转圈', (tester) async {

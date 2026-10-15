@@ -1,5 +1,5 @@
 name: neko_mobile
-description: "A new Flutter project."
+description: "NekoAI：neko 的手机端，通过局域网控制电脑上的 Agent。"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -47,6 +47,7 @@ dependencies:
   flutter_markdown_plus: ">=1.0.12 <1.0.13"
   crypto: ">=3.0.7 <3.0.8"
   uuid: ">=4.6.0 <4.6.1"
+  path_drawing: ">=1.0.1 <1.0.2"
 
 dev_dependencies:
   flutter_test:

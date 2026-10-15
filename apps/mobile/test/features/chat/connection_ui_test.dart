@@ -159,14 +159,32 @@ void main() {
   testWidgets('在线：指示器显示在线，无状态条', (tester) async {
     await h.pump(tester);
     await h.ready(tester);
-    expect(find.text('在线'), findsOneWidget);
+    expect(find.byTooltip('在线'), findsOneWidget);
     expect(find.byKey(const Key('connection-banner')), findsNothing);
+    // 在线只显示小圆点，不占文字；点击热区仍 >=44dp。
+    expect(find.byKey(const Key('connection-indicator-label')), findsNothing);
+    final size = tester.getSize(find.byKey(const Key('connection-indicator')));
+    expect(size.width, greaterThanOrEqualTo(44));
+    expect(size.height, greaterThanOrEqualTo(44));
+  });
+
+  testWidgets('异常态显示文字并保留语义标签', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await h.pump(tester);
+    await h.ready(tester);
+    expect(find.bySemanticsLabel('在线'), findsOneWidget);
+
+    h.clients.single.simulateClose(null);
+    await tester.pump();
+    expect(find.byKey(const Key('connection-indicator-label')), findsOneWidget);
+    expect(find.bySemanticsLabel('离线'), findsWidgets);
+    semantics.dispose();
   });
 
   testWidgets('断线：指示器与状态条即时变离线，点指示器立即重连', (tester) async {
     await h.pump(tester);
     await h.ready(tester);
-    expect(find.text('在线'), findsOneWidget);
+    expect(find.byTooltip('在线'), findsOneWidget);
 
     h.clients.single.simulateClose(null);
     await tester.pump();
@@ -178,7 +196,7 @@ void main() {
     await tester.tap(find.byKey(const Key('connection-indicator')));
     await tester.pump();
     expect(h.clients, hasLength(2));
-    expect(find.text('在线'), findsOneWidget);
+    expect(find.byTooltip('在线'), findsOneWidget);
   });
 
   testWidgets('重连中：指示器显示重连中，状态条可立即重连', (tester) async {
@@ -202,7 +220,7 @@ void main() {
     // 放行后恢复在线。
     reconnectGate.complete(h.clients[1]);
     await h.settle(tester);
-    expect(find.text('在线'), findsOneWidget);
+    expect(find.byTooltip('在线'), findsOneWidget);
   });
 
   testWidgets('终态 revoked：显示引导页且不再重试', (tester) async {
@@ -234,6 +252,6 @@ void main() {
 
     connectGate.complete(h.clients.single);
     await h.settle(tester);
-    expect(find.text('在线'), findsOneWidget);
+    expect(find.byTooltip('在线'), findsOneWidget);
   });
 }

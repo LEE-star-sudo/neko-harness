@@ -5,9 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:neko_mobile/core/pairing/pairing_models.dart';
 import 'package:neko_mobile/core/pairing/pairing_text.dart';
 import 'package:neko_mobile/features/connect/scan_controller.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
+import 'package:neko_mobile/ui/theme.dart';
 
 /// 1.2 MainActivity 提供的系统设置通道。
 const MethodChannel kSettingsChannel = MethodChannel(
@@ -86,6 +87,11 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     if (!mounted) {
       return;
     }
+    // 配对成功不再停留在中间页：直接回首页，由首页展示连接进度并进入会话。
+    if (state is ScanPairingDone) {
+      context.go('/');
+      return;
+    }
     setState(() {
       final active = state is ScanCamera && state.cameraActive;
       if (active && !_lastCameraActive) {
@@ -113,7 +119,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
         ScanCamera() => _buildCamera(_controller, scannerBuilder, state),
         ScanConfirm() => _buildConfirm(state.target),
         ScanPairing() => const Center(child: CircularProgressIndicator()),
-        ScanPairingDone() => _buildDone(state.computer),
+        ScanPairingDone() => const Center(child: CircularProgressIndicator()),
         ScanFailed() => _buildFailed(state.failure),
       },
     );
@@ -133,15 +139,15 @@ class _ScanPageState extends ConsumerState<ScanPage> {
                   onDetected: controller.onScannedText,
                   onCameraError: controller.markCameraUnavailable,
                 )
-              : const Center(child: Icon(Icons.videocam_off, size: 64)),
+              : const Center(child: NekoIcon(NekoIcons.cameraOff, size: 64)),
         ),
         if (!state.cameraActive)
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(NekoSpace.md),
             child: Column(
               children: <Widget>[
                 const Text('相机不可用或权限被拒绝，可在系统设置中开启相机权限。'),
-                const SizedBox(height: 8),
+                const SizedBox(height: NekoSpace.sm),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -164,7 +170,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
           ),
         if (state.lastError != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: NekoSpace.md),
             child: Text(
               state.lastError!.message,
               key: const Key('scan-error-text'),
@@ -179,7 +185,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
   Widget _buildConfirm(PairingTarget target) {
     final controller = _controller;
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(NekoSpace.lg),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -189,7 +195,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
             key: const Key('confirm-name'),
             style: Theme.of(context).textTheme.headlineSmall,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NekoSpace.sm),
           Text(
             '${target.endpoint.host}:${target.endpoint.port}',
             key: const Key('confirm-endpoint'),
@@ -198,13 +204,13 @@ class _ScanPageState extends ConsumerState<ScanPage> {
             '证书指纹 ${target.fingerprint.substring(0, 12)}…',
             key: const Key('confirm-fingerprint'),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: NekoSpace.lg),
           FilledButton(
             key: const Key('confirm-pair-button'),
             onPressed: controller.confirm,
             child: const Text('确认连接'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NekoSpace.sm),
           OutlinedButton(
             key: const Key('confirm-back-button'),
             onPressed: controller.backToCamera,
@@ -215,30 +221,9 @@ class _ScanPageState extends ConsumerState<ScanPage> {
     );
   }
 
-  Widget _buildDone(PairedComputer computer) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Text('已配对 ${computer.serverName}', key: const Key('done-title')),
-          const SizedBox(height: 8),
-          const Text('正在建立连接，详情见首页。', key: Key('done-subtitle')),
-          const SizedBox(height: 24),
-          FilledButton(
-            key: const Key('done-home-button'),
-            onPressed: () => context.go('/'),
-            child: const Text('完成'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildFailed(ScanFailure failure) {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(NekoSpace.lg),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -248,7 +233,7 @@ class _ScanPageState extends ConsumerState<ScanPage> {
             key: const Key('failed-message'),
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: NekoSpace.lg),
           FilledButton.tonal(
             key: const Key('failed-back-button'),
             onPressed: ref.read(scanControllerProvider).backToCamera,
@@ -269,7 +254,7 @@ class _PastePanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(NekoSpace.md),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -283,7 +268,7 @@ class _PastePanel extends ConsumerWidget {
               onSubmitted: (_) => _submit(),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: NekoSpace.sm),
           FilledButton(
             key: const Key('paste-submit-button'),
             onPressed: _submit,

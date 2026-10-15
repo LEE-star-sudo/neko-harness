@@ -5,6 +5,8 @@ import 'package:neko_mobile/core/rpc/connection_manager.dart';
 import 'package:neko_mobile/core/rpc/rpc_client.dart';
 import 'package:neko_mobile/features/app_controller.dart';
 import 'package:neko_mobile/features/chat/chat_page.dart';
+import 'package:neko_mobile/ui/neko_icons.dart';
+import 'package:neko_mobile/ui/theme.dart';
 
 /// M0 首页：展示当前连接状态；未配对时引导扫码。
 /// 前后台切换回到前台时触发连接恢复。
@@ -61,7 +63,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
   Widget _buildStatus(NekoConnectionState state) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Neko')),
+      appBar: AppBar(title: const Text('NekoAI')),
       body: Builder(
         builder: (context) {
           return switch (state) {
@@ -100,7 +102,7 @@ class _HomePageState extends ConsumerState<HomePage>
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           const Text('尚未连接电脑', key: Key('home-idle-text')),
-          const SizedBox(height: 16),
+          const SizedBox(height: NekoSpace.md),
           FilledButton(
             key: const Key('home-go-scan'),
             onPressed: () => context.go('/scan'),
@@ -117,9 +119,9 @@ class _HomePageState extends ConsumerState<HomePage>
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           const CircularProgressIndicator(),
-          const SizedBox(height: 16),
+          const SizedBox(height: NekoSpace.md),
           Text(message, key: Key('home-$keyPrefix-text')),
-          const SizedBox(height: 16),
+          const SizedBox(height: NekoSpace.md),
           OutlinedButton(
             key: const Key('home-pending-scan'),
             onPressed: () {
@@ -139,19 +141,19 @@ class _HomePageState extends ConsumerState<HomePage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
-          const Icon(Icons.cloud_off, size: 48),
-          const SizedBox(height: 16),
+          const NekoIcon(NekoIcons.cloudOff, size: 48),
+          const SizedBox(height: NekoSpace.md),
           Text('网络不可达或电脑已离线', key: const Key('home-offline-text')),
           Text('$seconds 秒后自动重试', key: const Key('home-offline-retry')),
-          const SizedBox(height: 8),
+          const SizedBox(height: NekoSpace.sm),
           const Text('电脑上的任务不受影响，恢复后自动继续。'),
-          const SizedBox(height: 16),
+          const SizedBox(height: NekoSpace.md),
           FilledButton.tonal(
             key: const Key('home-retry-now'),
             onPressed: () => ref.read(connectionManagerProvider).onForeground(),
             child: const Text('立即重试'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: NekoSpace.sm),
           OutlinedButton(
             key: const Key('home-offline-scan'),
             onPressed: () {
@@ -171,7 +173,7 @@ class _HomePageState extends ConsumerState<HomePage>
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           Text('已连接 $computerName', key: const Key('home-ready-title')),
-          const SizedBox(height: 8),
+          const SizedBox(height: NekoSpace.sm),
           Text(
             'server ${hello.serverName} · api v${hello.apiVersion}',
             key: const Key('home-ready-hello'),
@@ -180,7 +182,7 @@ class _HomePageState extends ConsumerState<HomePage>
             'gateway ${hello.gatewayVersion} · capabilities ${hello.capabilities.length}',
             key: const Key('home-ready-capabilities'),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: NekoSpace.lg),
           OutlinedButton(
             key: const Key('home-ready-scan'),
             onPressed: () {
@@ -200,16 +202,16 @@ class _HomePageState extends ConsumerState<HomePage>
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
           Text(title, key: Key('home-$keyPrefix-title')),
-          const SizedBox(height: 8),
+          const SizedBox(height: NekoSpace.sm),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
+            padding: const EdgeInsets.symmetric(horizontal: NekoSpace.xl),
             child: Text(
               guidance,
               key: Key('home-$keyPrefix-guidance'),
               textAlign: TextAlign.center,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: NekoSpace.lg),
           FilledButton(
             key: Key('home-$keyPrefix-scan'),
             onPressed: () {

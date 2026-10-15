@@ -113,8 +113,6 @@ void main() {
     await pumpUntil(tester, find.byKey(const Key('confirm-pair-button')));
     expect(find.text('E2E-Mac'), findsWidgets);
     await tester.tap(find.byKey(const Key('confirm-pair-button')));
-    await pumpUntil(tester, find.byKey(const Key('done-home-button')));
-    await tester.tap(find.byKey(const Key('done-home-button')));
     await pumpUntil(tester, find.byKey(const Key('chat-title')));
     expect(manager.state, isA<NekoConnReady>());
 

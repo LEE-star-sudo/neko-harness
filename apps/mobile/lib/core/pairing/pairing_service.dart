@@ -115,7 +115,7 @@ class LocalPairingService implements PairingService {
   LocalPairingService({
     required this.store,
     required this.clientFactory,
-    this.deviceName = 'Neko Mobile',
+    this.deviceName = 'NekoAI',
     DateTime Function()? clock,
     String Function()? idGenerator,
     List<int> Function()? credentialGenerator,

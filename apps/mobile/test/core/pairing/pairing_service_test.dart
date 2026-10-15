@@ -58,7 +58,7 @@ LocalPairingService _service(
   return LocalPairingService(
     store: store,
     clientFactory: defaultPinnedClientFactory,
-    deviceName: 'Neko Mobile',
+    deviceName: 'NekoAI',
     clock: () => DateTime.utc(2026, 10, 15),
     idGenerator: idGen.call,
     credentialGenerator: () {
@@ -110,7 +110,7 @@ void main() {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
       expect(body['v'], 1);
       expect(body['sid'], 'srv-1');
-      expect(body['deviceName'], 'Neko Mobile');
+      expect(body['deviceName'], 'NekoAI');
       expect(body['pairRequestId'], 'device-0');
       expect(body['deviceId'], 'device-1');
       expect(body['credential'], computer.credential);
@@ -336,7 +336,7 @@ void main() {
                 pinnedPort: endpoint.port,
                 pinnedSha256: fingerprint,
               ),
-          deviceName: 'Neko Mobile',
+          deviceName: 'NekoAI',
           clock: () => DateTime.utc(2026, 10, 15),
           idGenerator: () => 'device-${idCalls++}',
           credentialGenerator: () => List<int>.filled(32, 9),

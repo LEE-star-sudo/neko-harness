@@ -35,5 +35,6 @@ jobs:
       - run: flutter analyze
       # 包含读取 gateway 协议 fixtures 的 Dart 对拍测试。
       - run: flutter test
-      # 无签名资料时以 debug 签名构建 release 变体，仅作编译验证，不上传产物。
+      # 无签名资料时以 debug 签名构建 release 变体，仅作编译验证，不上传产物；
+      # 正式的 release 包由 release.yml 在发版时构建并附到 GitHub Release。
       - run: flutter build apk --release --split-per-abi

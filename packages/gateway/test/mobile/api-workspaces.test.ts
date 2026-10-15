@@ -273,15 +273,18 @@ describe("mobile api v1 workspaces and sessions", () => {
 			await waitFor(() => (marked.view.value?.items.length ?? 0) > 0, "marked session preview");
 			await desktop.detach();
 
-			const first = await rpc<{ sessions: Array<{ id: string; lastUsedAt: number }>; nextCursor?: string }>(
+			const first = await rpc<{ sessions: Array<{ id: string; lastMessageAt: number }>; nextCursor?: string }>(
 				client,
 				"sessions.list",
 				{ workspace: workspaceA },
 			);
 			expect(first.sessions).toHaveLength(50);
 			expect(first.nextCursor).toBeDefined();
+			expect(first.sessions[0]?.id).toBe(markedId);
 			for (let index = 1; index < first.sessions.length; index += 1) {
-				expect(first.sessions[index - 1]?.lastUsedAt).toBeGreaterThanOrEqual(first.sessions[index]?.lastUsedAt ?? 0);
+				expect(first.sessions[index - 1]?.lastMessageAt).toBeGreaterThanOrEqual(
+					first.sessions[index]?.lastMessageAt ?? 0,
+				);
 			}
 			const second = await rpc<{ sessions: Array<{ id: string }>; nextCursor?: string }>(client, "sessions.list", {
 				workspace: workspaceA,
@@ -304,6 +307,48 @@ describe("mobile api v1 workspaces and sessions", () => {
 				query: "no-such-string-zzzz",
 			});
 			expect(noMatch.sessions).toEqual([]);
+			client.close(1000, "done");
+			await client.waitForClose();
+			await desktop.close();
+		} finally {
+			await gateway.close();
+		}
+	}, 20_000);
+
+	it("orders sessions by last message time, not by opening them", async () => {
+		const { gateway, port } = await startEnabledGateway(dir);
+		try {
+			const desktop = await connectNekoGateway({
+				transport: "unix",
+				socketPath: gateway.socketPath ?? "",
+				serverId: gateway.serverId,
+			});
+			await desktop.workspaces.add({ path: workspaceA });
+			const device = await pairDevice(gateway, port);
+			const client = await connectMobileHello(port, device);
+			const ids: string[] = [];
+			for (let index = 0; index < 3; index += 1) {
+				ids.push((await rpc<{ id: string }>(client, "sessions.create", { workspace: workspaceA })).id);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
+			const list = async () =>
+				(
+					await rpc<{ sessions: Array<{ id: string }> }>(client, "sessions.list", { workspace: workspaceA })
+				).sessions.map((session) => session.id);
+			const newestFirst = [...ids].reverse();
+			expect(await list()).toEqual(newestFirst);
+
+			const opened = await desktop.attach(ids[0] ?? "");
+			await desktop.detach();
+			expect(opened).toBeDefined();
+			expect(await list()).toEqual(newestFirst);
+
+			const oldest = await desktop.attach(ids[0] ?? "");
+			await oldest.submit({ content: "bump" });
+			await waitFor(() => (oldest.view.value?.items.length ?? 0) > 0, "message recorded");
+			await desktop.detach();
+			expect(await list()).toEqual([ids[0] ?? "", ...newestFirst.slice(0, 2)]);
+
 			client.close(1000, "done");
 			await client.waitForClose();
 			await desktop.close();

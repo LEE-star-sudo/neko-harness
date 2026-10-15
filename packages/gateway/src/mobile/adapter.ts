@@ -1,5 +1,6 @@
 import { ChordError, type Handle } from "@earendil-works/chord";
 import { agentIdFor } from "@neko-harness/core";
+import { byMessage, messageTime } from "@neko-harness/core/session-display";
 import type { TSchema } from "typebox";
 import { Check } from "typebox/value";
 import type { RawData, WebSocket } from "ws";
@@ -380,7 +381,7 @@ export class MobileAdapter {
 					session.title.toLowerCase().includes(query) || session.firstPromptPreview.toLowerCase().includes(query),
 			);
 		}
-		sessions = [...sessions].sort((left, right) => right.lastUsedAt - left.lastUsedAt);
+		sessions = [...sessions].sort(byMessage);
 		const page = sessions.slice(offset, offset + MOBILE_LIMITS.pageItems);
 		return {
 			sessions: page.map((session) => ({
@@ -389,6 +390,7 @@ export class MobileAdapter {
 				title: session.title,
 				preview: session.firstPromptPreview,
 				lastUsedAt: Math.round(session.lastUsedAt),
+				lastMessageAt: Math.round(messageTime(session)),
 				archived: false,
 			})),
 			...(offset + page.length < sessions.length ? { nextCursor: String(offset + page.length) } : {}),
@@ -407,6 +409,7 @@ export class MobileAdapter {
 			title: created.title,
 			preview: created.firstPromptPreview,
 			lastUsedAt: Math.round(created.lastUsedAt),
+			lastMessageAt: Math.round(messageTime(created)),
 			archived: false,
 		};
 	}
