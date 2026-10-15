@@ -14,6 +14,9 @@ dart format --set-exit-if-changed . && flutter analyze && flutter test
 flutter build apk --release --split-per-abi   # 产物：build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
+`pubspec.lock` 固定使用官方源 `https://pub.dev`（CI 与之一致）；国内镜像环境请先 `unset PUB_HOSTED_URL FLUTTER_STORAGE_BASE_URL`
+再执行 `flutter pub get`，不要把镜像地址写入锁文件。
+
 `flutter test` 包含读取 `packages/gateway/test/fixtures/mobile-api-v1/` 的协议对拍测试；协议变更须同时更新 fixtures、
 `docs/mobile-api-v1.md` 与 `lib/core/api/models.dart`。
 
