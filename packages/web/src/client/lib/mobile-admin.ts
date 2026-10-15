@@ -6,7 +6,15 @@
 export type MobileListenerState =
 	| { readonly status: "disabled" }
 	| { readonly status: "starting" }
-	| { readonly status: "listening"; readonly address: string; readonly port: number }
+	| {
+			readonly status: "listening";
+			/** 手机实际连接的地址（二维码使用）。 */
+			readonly address: string;
+			readonly port: number;
+			/** 仅 WSL 中继模式出现；旧 gateway 缺省按直接监听处理。 */
+			readonly mode?: "direct" | "wsl-relay";
+			readonly bindAddress?: string;
+	  }
 	| { readonly status: "error"; readonly error: string }
 	| { readonly status: "stopping" };
 
@@ -28,6 +36,8 @@ export type MobileAdminState = {
 	readonly devices: MobileAdminDevice[];
 	/** 手机最近一次成功接入的地址；gateway 会把它排在 candidates 最前。 */
 	readonly lastConnectedAddress: string | null;
+	/** WSL 环境信息；非 WSL 或旧 gateway 缺省/为 null。 */
+	readonly wsl?: { readonly interop: boolean; readonly error: string | null } | null;
 };
 
 export type MobilePairing = { readonly pairingText: string; readonly expiresAt: number };

@@ -19,13 +19,28 @@ export function gatewayCommand(args: readonly string[]): { binary: string; args:
 	};
 }
 
-/** Wait for an owned child to exit, escalating only if graceful shutdown stalls. */
-export async function stopGatewayProcess(child: ChildProcess): Promise<void> {
+const GRACEFUL_STOP_MS = 3_000;
+const FORCED_STOP_MS = 2_000;
+
+/**
+ * Wait for an owned child to exit, escalating to SIGKILL if graceful shutdown stalls.
+ * Never waits unboundedly: a child that ignores SIGKILL is abandoned after a short grace.
+ */
+export async function stopGatewayProcess(
+	child: ChildProcess,
+	options: { readonly gracefulMs?: number; readonly forcedMs?: number } = {},
+): Promise<void> {
 	if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
 	await new Promise<void>((resolve) => {
-		const timer = setTimeout(() => child.kill("SIGKILL"), 3_000);
+		let forcedTimer: ReturnType<typeof setTimeout> | undefined;
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			forcedTimer = setTimeout(resolve, options.forcedMs ?? FORCED_STOP_MS);
+		}, options.gracefulMs ?? GRACEFUL_STOP_MS);
+		// 先注册 exit 监听再发信号：子进程可能已因同一终端信号在退出途中。
 		child.once("exit", () => {
 			clearTimeout(timer);
+			clearTimeout(forcedTimer);
 			resolve();
 		});
 		child.kill("SIGTERM");

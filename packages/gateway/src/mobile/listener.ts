@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server as HttpsServer } from "node:https";
 import type { Socket } from "node:net";
-import { hostname, type NetworkInterfaceInfo, networkInterfaces } from "node:os";
+import { hostname, type NetworkInterfaceInfo } from "node:os";
 import { createHost, type Link, memoryLinkPair } from "@earendil-works/chord";
 import { type WebSocket, WebSocketServer } from "ws";
 import { NekoChat, NekoSessionDirectory, NekoSessionManagement, NekoSubagent, NekoWorkspaces } from "../contract.ts";
@@ -10,14 +10,30 @@ import { identifiedLink } from "../link.ts";
 import { MobileAdapter, type MobileRuntimeBridge, type MobileServices } from "./adapter.ts";
 import { MobileAuth } from "./auth.ts";
 import { MobileCertificate } from "./certificate.ts";
+import { isIpv4Literal, mobileListenCandidates, prioritizeListenCandidate } from "./network.ts";
 import { MobilePairing, type MobilePairingResult, PAIRING_BODY_LIMIT_BYTES, pairingBodyTooLarge } from "./pairing.ts";
 import { MOBILE_CLOSE_REVOKED, MOBILE_LIMITS } from "./protocol.ts";
+import { RelayError, type RelayHandle, startWindowsRelay } from "./relay.ts";
 import { type MobileDeviceRecord, MobileStore } from "./store.ts";
+import { detectWsl, primaryWslAddress, WindowsAddressDiscovery, type WslEnvironment, wslOwnAddresses } from "./wsl.ts";
+
+export { mobileListenCandidates, prioritizeListenCandidate };
+
+export type MobileListenMode = "direct" | "wsl-relay";
 
 export type MobileListenerState =
 	| { readonly status: "disabled" }
 	| { readonly status: "starting" }
-	| { readonly status: "listening"; readonly address: string; readonly port: number }
+	| {
+			readonly status: "listening";
+			/** 宣告地址：手机实际连接的地址（二维码使用）。 */
+			readonly address: string;
+			readonly port: number;
+			/** 仅 WSL 中继模式出现：WSL 内部的实际监听地址。 */
+			readonly bindAddress?: string;
+			/** 仅 WSL 中继模式出现；缺省表示直接监听。 */
+			readonly mode?: MobileListenMode;
+	  }
 	| { readonly status: "error"; readonly error: string }
 	| { readonly status: "stopping" };
 
@@ -34,84 +50,27 @@ export type MobileGatewayOptions = {
 	readonly chord: MobileChordBridge;
 	/** 受理状态与审批列表的只读查询（design D6）；缺省时这些查询返回空/unknown。 */
 	readonly runtime?: MobileRuntimeBridge;
+	/** 网络环境探测与中继注入点（测试用）；缺省按真实环境。 */
+	readonly network?: MobileNetworkHooks;
 };
+
+export type MobileNetworkHooks = {
+	/** WSL 环境信息；null 表示强制按非 WSL 处理。 */
+	readonly wsl?: WslEnvironment | null;
+	readonly windowsCandidates?: () => Promise<string[]>;
+	readonly startRelay?: typeof startWindowsRelay;
+	readonly localInterfaces?: () => NodeJS.Dict<NetworkInterfaceInfo[]>;
+	/** 端口被占用时重试中继启动的总时长（毫秒）。 */
+	readonly relayPortRetryMs?: number;
+	readonly relayPortRetryIntervalMs?: number;
+};
+
+const RELAY_PORT_RETRY_MS = 10_000;
+const RELAY_PORT_RETRY_INTERVAL_MS = 1_000;
 
 function defaultServerName(): string {
 	const name = hostname().trim();
 	return (name === "" ? "neko-computer" : name).slice(0, 64);
-}
-
-/** 常见虚拟接口名前缀（macOS/Linux 短名，如 utun0、bridge100、veth1a2b3c）。 */
-const VIRTUAL_INTERFACE_PREFIXES = [
-	"anpi",
-	"awdl",
-	"bridge",
-	"docker",
-	"gif",
-	"ipsec",
-	"llw",
-	"ppp",
-	"stf",
-	"tap",
-	"tun",
-	"utun",
-	"vboxnet",
-	"veth",
-	"virbr",
-	"vmnet",
-] as const;
-
-/** Windows 接口名是描述性字符串（如 "vEthernet (WSL)"），按关键词排除。 */
-const VIRTUAL_INTERFACE_KEYWORDS = ["hyper-v", "virtual", "virtualbox", "vmware", "vpn"] as const;
-
-function isVirtualInterfaceName(name: string): boolean {
-	const lower = name.toLowerCase();
-	if (VIRTUAL_INTERFACE_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true;
-	return VIRTUAL_INTERFACE_KEYWORDS.some((keyword) => lower.includes(keyword));
-}
-
-/** RFC 2544 基准测试段（198.18.0.0/15）：代理工具 fake-ip 常用，手机无法直连。 */
-function isBenchmarkAddress(address: string): boolean {
-	return address.startsWith("198.18.") || address.startsWith("198.19.");
-}
-
-function collectListenCandidates(interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>, skipVirtual: boolean): string[] {
-	const candidates: string[] = [];
-	for (const [name, infos] of Object.entries(interfaces)) {
-		if (infos === undefined) continue;
-		if (skipVirtual && isVirtualInterfaceName(name)) continue;
-		for (const info of infos) {
-			if (info.family !== "IPv4" || info.internal) continue;
-			if (info.address.startsWith("169.254.")) continue;
-			if (skipVirtual && isBenchmarkAddress(info.address)) continue;
-			candidates.push(info.address);
-		}
-	}
-	return candidates.sort();
-}
-
-/**
- * 可供手机直连的 IPv4 候选：过滤虚拟接口与 RFC 2544 段；过滤后为空（例如只剩 VPN）
- * 时回退到未过滤列表，保证始终有地址可选。
- */
-export function mobileListenCandidates(interfaces?: NodeJS.Dict<NetworkInterfaceInfo[]>): string[] {
-	const source = interfaces ?? networkInterfaces();
-	const filtered = collectListenCandidates(source, true);
-	return filtered.length > 0 ? filtered : collectListenCandidates(source, false);
-}
-
-/** 把上次连接成功的地址排到候选最前；不在当前候选中（网络已变化）时不虚构。 */
-export function prioritizeListenCandidate(
-	candidates: readonly string[],
-	lastConnectedAddress: string | null,
-): string[] {
-	if (lastConnectedAddress === null || !candidates.includes(lastConnectedAddress)) return [...candidates];
-	return [lastConnectedAddress, ...candidates.filter((candidate) => candidate !== lastConnectedAddress)];
-}
-
-function isIpv4Literal(address: string): boolean {
-	const parts = address.split(".");
-	return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
 }
 
 function assertListenAddress(address: string): string {
@@ -122,6 +81,25 @@ function assertListenAddress(address: string): string {
 
 function toError(error: unknown): Error {
 	return error instanceof Error ? error : new Error(String(error));
+}
+
+const WSL_INTEROP_UNAVAILABLE =
+	"WSL 的 Windows 互操作不可用（找不到 powershell.exe），无法读取 Windows 局域网地址。请启用 WSL 互操作，或直接在 Windows 上运行 neko。";
+
+function describeRelayError(error: unknown, address: string, port: number, bindAddress: string): string {
+	if (!(error instanceof RelayError)) return `Windows 中继启动失败：${toMessage(error)}`;
+	switch (error.code) {
+		case "port_in_use":
+			return `Windows 上 ${address}:${port} 已被占用，请更换端口或释放该端口后重试。`;
+		case "target_unreachable":
+			return `Windows 无法连接到 WSL 内的监听地址 ${bindAddress}:${port}（${error.message}）。`;
+		case "timeout":
+			return "Windows 中继启动超时，请稍后重试。";
+		case "listen_failed":
+			return `Windows 中继无法在 ${address}:${port} 上监听：${error.message}`;
+		default:
+			return `Windows 中继启动失败：${error.message}`;
+	}
 }
 
 function isMobilePrincipal(principal: unknown): boolean {
@@ -140,8 +118,10 @@ export type MobileAdminState = {
 	readonly port: number;
 	readonly certificate: { readonly fingerprint: string; readonly expiresAt: number } | null;
 	devices: MobileAdminDevice[];
-	/** 手机最近一次成功接入的 listener 本地地址；从未接入为 null。 */
+	/** 手机最近一次成功接入的宣告地址；从未接入为 null。 */
 	readonly lastConnectedAddress: string | null;
+	/** WSL 环境信息；非 WSL 为 null。 */
+	readonly wsl: { readonly interop: boolean; readonly error: string | null } | null;
 };
 
 function toMessage(error: unknown): string {
@@ -170,6 +150,13 @@ export class MobileGateway {
 	private stateValue: MobileListenerState;
 	private queue: Promise<unknown> = Promise.resolve();
 	private closing: Promise<void> | undefined;
+	private relay: RelayHandle | undefined;
+	private readonly wslEnvironment: WslEnvironment | undefined;
+	private readonly windowsAddresses: (() => Promise<string[]>) | undefined;
+	private readonly startRelay: typeof startWindowsRelay;
+	private readonly localInterfaces: (() => NodeJS.Dict<NetworkInterfaceInfo[]>) | undefined;
+	private readonly relayPortRetryMs: number;
+	private readonly relayPortRetryIntervalMs: number;
 
 	private constructor(
 		serverId: string,
@@ -179,7 +166,19 @@ export class MobileGateway {
 		store: MobileStore | undefined,
 		storeFailure: string | undefined,
 		initial: MobileListenerState,
+		network: MobileNetworkHooks = {},
 	) {
+		this.wslEnvironment = network.wsl === null ? undefined : (network.wsl ?? detectWsl());
+		const powershell = this.wslEnvironment?.powershell;
+		if (network.windowsCandidates !== undefined) this.windowsAddresses = network.windowsCandidates;
+		else if (powershell !== undefined) {
+			const discovery = new WindowsAddressDiscovery({ powershell });
+			this.windowsAddresses = () => discovery.candidates();
+		}
+		this.startRelay = network.startRelay ?? startWindowsRelay;
+		this.localInterfaces = network.localInterfaces;
+		this.relayPortRetryMs = network.relayPortRetryMs ?? RELAY_PORT_RETRY_MS;
+		this.relayPortRetryIntervalMs = network.relayPortRetryIntervalMs ?? RELAY_PORT_RETRY_INTERVAL_MS;
 		this.serverId = serverId;
 		this.serverName = serverName;
 		this.onError = onError;
@@ -207,6 +206,7 @@ export class MobileGateway {
 			storeFailure === undefined
 				? { status: "disabled" }
 				: { status: "error", error: `mobile store unavailable: ${storeFailure}` },
+			options.network,
 		);
 		gateway.runtime = options.runtime;
 		if (store !== undefined) {
@@ -287,12 +287,29 @@ export class MobileGateway {
 		return false;
 	}
 
-	adminState(): MobileAdminState {
+	async adminState(): Promise<MobileAdminState> {
 		const store = this.requireStore();
 		const config = store.getState();
+		let candidates: string[];
+		let wsl: MobileAdminState["wsl"] = null;
+		if (this.wslEnvironment === undefined) {
+			candidates = mobileListenCandidates();
+		} else {
+			candidates = [];
+			let error: string | null = null;
+			if (this.windowsAddresses === undefined) error = WSL_INTEROP_UNAVAILABLE;
+			else {
+				try {
+					candidates = await this.windowsAddresses();
+				} catch (caught) {
+					error = `读取 Windows 局域网地址失败：${toMessage(caught)}`;
+				}
+			}
+			wsl = { interop: this.windowsAddresses !== undefined, error };
+		}
 		return {
 			state: this.stateValue,
-			candidates: prioritizeListenCandidate(mobileListenCandidates(), config.lastConnectedAddress),
+			candidates: prioritizeListenCandidate(candidates, config.lastConnectedAddress),
 			port: config.port,
 			certificate:
 				this.certificate === undefined
@@ -306,6 +323,7 @@ export class MobileGateway {
 				online: this.deviceOnline(device.deviceId),
 			})),
 			lastConnectedAddress: config.lastConnectedAddress,
+			wsl,
 		};
 	}
 
@@ -405,9 +423,10 @@ export class MobileGateway {
 			void store.touchDevice(auth.deviceId, Date.now()).catch((error: unknown) => this.onError?.(toError(error)));
 		}
 		// 学习有效地址：手机经此入口接入即证明该本地地址可达，排序到候选最前（重复值不落盘）。
-		if (store !== undefined && typeof localAddress === "string" && isIpv4Literal(localAddress)) {
-			if (store.getState().lastConnectedAddress !== localAddress) {
-				void store.rememberConnectedAddress(localAddress).catch((error: unknown) => this.onError?.(toError(error)));
+		const learned = this.advertisedAddress(localAddress);
+		if (store !== undefined && typeof learned === "string" && isIpv4Literal(learned)) {
+			if (store.getState().lastConnectedAddress !== learned) {
+				void store.rememberConnectedAddress(learned).catch((error: unknown) => this.onError?.(toError(error)));
 			}
 		}
 		const clientHost = createHost({
@@ -489,6 +508,15 @@ export class MobileGateway {
 		for (const connection of this.connections.values()) connection.sendNotification(method, params);
 	}
 
+	/** 中继模式下连接的本地地址是 WSL 内部地址，记录与排序一律使用宣告地址。 */
+	private advertisedAddress(localAddress: string | undefined): string | undefined {
+		const state = this.stateValue;
+		if (state.status === "listening" && state.mode === "wsl-relay" && localAddress === state.bindAddress) {
+			return state.address;
+		}
+		return localAddress;
+	}
+
 	private requireStore(): MobileStore {
 		if (this.storeHandle === undefined)
 			throw new Error(`mobile store is unavailable: ${this.storeFailure ?? "unknown error"}`);
@@ -501,6 +529,7 @@ export class MobileGateway {
 		await this.stopListening();
 		this.stateValue = { status: "starting" };
 		try {
+			const plan = await this.planListen(address);
 			const certificate = await this.certificateValue();
 			const server = createServer({ cert: certificate.certPem, key: certificate.keyPem }, (request, response) => {
 				this.handleRequest(request, response);
@@ -528,21 +557,87 @@ export class MobileGateway {
 				};
 				server.once("error", onFailure);
 				server.once("listening", onListening);
-				server.listen(port, address);
+				server.listen(port, plan.bindAddress);
 			});
 			this.server = server;
 			this.wss = wss;
-			this.stateValue = { status: "listening", address, port };
 			server.on("error", (error) => {
 				this.stateValue = { status: "error", error: toMessage(error) };
 				this.onError?.(error);
 				void this.stopListening().catch(() => undefined);
 			});
+			if (plan.mode === "wsl-relay") await this.startRelayFor(address, port, plan.bindAddress);
+			this.stateValue =
+				plan.mode === "wsl-relay"
+					? { status: "listening", address, port, mode: "wsl-relay", bindAddress: plan.bindAddress }
+					: { status: "listening", address, port };
 		} catch (error) {
 			await this.stopListening().catch(() => undefined);
 			this.stateValue = { status: "error", error: toMessage(error) };
 			throw error;
 		}
+	}
+
+	/** 决定监听方式：非 WSL 直接监听；WSL 下只接受 Windows 侧可用局域网地址，NAT 时经中继（design D3）。 */
+	private async planListen(address: string): Promise<{ mode: MobileListenMode; bindAddress: string }> {
+		if (this.wslEnvironment === undefined) return { mode: "direct", bindAddress: address };
+		if (this.windowsAddresses === undefined) throw new Error(WSL_INTEROP_UNAVAILABLE);
+		let candidates: string[];
+		try {
+			candidates = await this.windowsAddresses();
+		} catch (error) {
+			throw new Error(`读取 Windows 局域网地址失败：${toMessage(error)}`);
+		}
+		if (!candidates.includes(address)) {
+			throw new Error(`${address} 不是当前可用的 Windows 局域网地址，请重新选择后再开启。`);
+		}
+		const interfaces = this.localInterfaces?.();
+		if (wslOwnAddresses(interfaces).includes(address)) return { mode: "direct", bindAddress: address };
+		const bindAddress = primaryWslAddress(interfaces);
+		if (bindAddress === undefined) throw new Error("WSL 内没有可用的网络地址，无法建立手机入口。");
+		return { mode: "wsl-relay", bindAddress };
+	}
+
+	private async startRelayFor(address: string, port: number, bindAddress: string): Promise<void> {
+		const deadline = Date.now() + this.relayPortRetryMs;
+		let relay: RelayHandle;
+		for (;;) {
+			try {
+				relay = await this.startRelay({
+					powershell: this.wslEnvironment?.powershell ?? "powershell.exe",
+					listenAddress: address,
+					listenPort: port,
+					targetAddress: bindAddress,
+					targetPort: port,
+				});
+				break;
+			} catch (error) {
+				// 上一个中继可能仍在退出：端口占用时在有限时间内重试。
+				if (
+					error instanceof RelayError &&
+					error.code === "port_in_use" &&
+					Date.now() + this.relayPortRetryIntervalMs < deadline
+				) {
+					await new Promise((resolve) => setTimeout(resolve, this.relayPortRetryIntervalMs));
+					continue;
+				}
+				throw new Error(describeRelayError(error, address, port, bindAddress));
+			}
+		}
+		this.relay = relay;
+		void relay.exited.then((reason) => this.onRelayExited(relay, reason));
+	}
+
+	private onRelayExited(relay: RelayHandle, reason: string): void {
+		void this.enqueue(async () => {
+			if (this.relay !== relay) return;
+			this.relay = undefined;
+			this.pairingValue?.invalidate();
+			await this.stopListening().catch(() => undefined);
+			const message = `Windows 中继意外退出（${reason}），请重新开启手机访问。`;
+			this.stateValue = { status: "error", error: message };
+			this.onError?.(new Error(message));
+		});
 	}
 
 	private async certificateValue(): Promise<MobileCertificate> {
@@ -553,6 +648,9 @@ export class MobileGateway {
 	}
 
 	private async stopListening(): Promise<void> {
+		const relay = this.relay;
+		this.relay = undefined;
+		if (relay !== undefined) await relay.stop().catch(() => undefined);
 		for (const connection of [...this.connections.values()]) connection.close(1001, "listener_stopped");
 		const server = this.server;
 		const wss = this.wss;

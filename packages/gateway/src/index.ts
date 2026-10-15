@@ -26,6 +26,13 @@ export { identifiedLink } from "./link.ts";
 export { NekoMobileAdmin, readOrCreateMobileAdminToken } from "./mobile/admin.ts";
 export { gatewayPortFilePath, readGatewayPortFile, removeGatewayPortFile } from "./port-file.ts";
 export { gatewayCommand, stopGatewayProcess } from "./process.ts";
+export {
+	DEFAULT_SHUTDOWN_TIMEOUT_MS,
+	installShutdown,
+	type ShutdownController,
+	type ShutdownOptions,
+	type ShutdownProcess,
+} from "./shutdown.ts";
 export { createUnixLink } from "./unix-link.ts";
 export {
 	createWsLink,

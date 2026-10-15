@@ -43,6 +43,8 @@ const listenerStateSchema = Type.Union([
 		status: Type.Literal("listening"),
 		address: Type.String(),
 		port: Type.Integer({ minimum: 1, maximum: 65535 }),
+		bindAddress: Type.Optional(Type.String()),
+		mode: Type.Optional(Type.Union([Type.Literal("direct"), Type.Literal("wsl-relay")])),
 	}),
 	Type.Object({ status: Type.Literal("error"), error: Type.String() }),
 	Type.Object({ status: Type.Literal("stopping") }),
@@ -74,6 +76,12 @@ export const NekoMobileAdmin = contract("neko.mobile-admin", {
 						]),
 						devices: Type.Array(adminDeviceSchema),
 						lastConnectedAddress: Type.Union([Type.String(), Type.Null()]),
+						wsl: Type.Optional(
+							Type.Union([
+								Type.Object({ interop: Type.Boolean(), error: Type.Union([Type.String(), Type.Null()]) }),
+								Type.Null(),
+							]),
+						),
 					}),
 				] as const,
 				enable: [
@@ -85,6 +93,8 @@ export const NekoMobileAdmin = contract("neko.mobile-admin", {
 						status: Type.Literal("listening"),
 						address: Type.String(),
 						port: Type.Integer({ minimum: 1, maximum: 65535 }),
+						bindAddress: Type.Optional(Type.String()),
+						mode: Type.Optional(Type.Union([Type.Literal("direct"), Type.Literal("wsl-relay")])),
 					}),
 				] as const,
 				disable: [Type.Null(), listenerStateSchema] as const,

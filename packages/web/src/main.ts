@@ -2,8 +2,9 @@
 // 静态 HTTP（默认 8322）+ 确保 neko gateway 运行（不在则 spawn，默认 WS 8321）。
 
 import type { NekoModelRef } from "@neko-harness/core";
+import { installShutdown } from "@neko-harness/gateway";
 import { openBrowser } from "./open-browser.ts";
-import { startWebServer } from "./server.ts";
+import { type NekoWebServer, startWebServer } from "./server.ts";
 
 const USAGE = `用法: neko web [选项]
 
@@ -123,9 +124,20 @@ function parseArgs(argv: readonly string[]): CliOptions {
 	};
 }
 
+let server: NekoWebServer | undefined;
+const shutdown = installShutdown({
+	log: (message) => console.log(message),
+	exit: (code) => {
+		// 强制退出时不留下自己拉起的 gateway。
+		server?.gateway.spawned?.kill("SIGKILL");
+		process.exit(code);
+	},
+});
+
 try {
 	const options = parseArgs(process.argv.slice(2));
-	const server = await startWebServer({
+	server = await startWebServer({
+		signal: shutdown.signal,
 		...(options.port !== undefined ? { port: options.port } : {}),
 		...(options.host !== undefined ? { host: options.host } : {}),
 		gateway: {
@@ -138,27 +150,22 @@ try {
 			onLog: (line) => console.log(`[gateway] ${line}`),
 		},
 	});
-	console.log(`[web] neko web 已启动: ${server.url}`);
-	console.log(`[web]   gateway: ${server.gateway.wsUrl}（serverId: ${server.gateway.serverId}）`);
+	const running = server;
+	shutdown.setCleanup(() => running.close());
+	console.log(`[web] neko web 已启动: ${running.url}`);
+	console.log(`[web]   gateway: ${running.gateway.wsUrl}（serverId: ${running.gateway.serverId}）`);
 	console.log("[web] 按 Ctrl+C 停止。");
-	const shutdown = (): void => {
-		console.log("\n正在关闭…");
-		server
-			.close()
-			.then(() => process.exit(0))
-			.catch((error: unknown) => {
-				console.error(error instanceof Error ? error.message : String(error));
-				process.exit(1);
-			});
-	};
-	process.on("SIGINT", shutdown);
-	process.on("SIGTERM", shutdown);
 	if (options.open) {
-		void openBrowser(server.url).catch(() => {
-			console.warn(`无法自动打开浏览器，请手动访问: ${server.url}`);
+		void openBrowser(running.url).catch(() => {
+			console.warn(`无法自动打开浏览器，请手动访问: ${running.url}`);
 		});
 	}
 } catch (error) {
+	if (shutdown.signal.aborted) {
+		// 启动阶段被 Ctrl+C 打断：已拉起的 gateway 在启动流程内被终止，直接退出。
+		process.exit(0);
+	}
 	console.error(error instanceof Error ? error.message : String(error));
 	process.exitCode = 1;
+	shutdown.dispose();
 }

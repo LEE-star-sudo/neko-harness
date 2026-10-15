@@ -4,12 +4,17 @@
 // 选项优先级：CLI flag > neko.config.json（向上查找，兜底 ~/.neko/） > 内置默认。
 import { GATEWAY_USAGE, parseGatewayArgs } from "./cli-args.ts";
 import { startGateway } from "./gateway.ts";
+import { installShutdown } from "./shutdown.ts";
 
 const argv = process.argv.slice(2);
 if (argv.includes("-h") || argv.includes("--help")) {
 	console.log(GATEWAY_USAGE);
 	process.exit(0);
 }
+const shutdown = installShutdown({
+	log: (message) => console.log(message),
+	exit: (code) => process.exit(code),
+});
 const options = parseGatewayArgs(argv);
 const gateway = await startGateway({
 	...options,
@@ -20,17 +25,4 @@ if (gateway.socketPath !== undefined) console.log(`  Unix socket: ${gateway.sock
 if (gateway.wsUrl !== undefined) console.log(`  WebSocket:   ${gateway.wsUrl}`);
 console.log("按 Ctrl+C 停止。");
 
-let stopping = false;
-const stop = (): void => {
-	if (stopping) return;
-	stopping = true;
-	gateway
-		.close()
-		.then(() => process.exit(0))
-		.catch((error: unknown) => {
-			console.error("关闭失败:", error instanceof Error ? error.message : String(error));
-			process.exit(1);
-		});
-};
-process.on("SIGINT", stop);
-process.on("SIGTERM", stop);
+shutdown.setCleanup(() => gateway.close());

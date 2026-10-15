@@ -230,11 +230,13 @@ export function MobilePairing() {
 
 	const certificate = data?.certificate ?? null;
 	const certificateWarning = certificate !== null && certificate.expiresAt - Date.now() < CERT_EXPIRY_WARN_MS;
+	const wsl = data?.wsl ?? null;
+	const relayed = data?.state.status === "listening" && data.state.mode === "wsl-relay";
 	const stateLine =
 		data === null
 			? "读取中…"
 			: data.state.status === "listening"
-				? `已开启 · https://${liveAddress}`
+				? `已开启 · https://${liveAddress}${relayed ? "（经 Windows 中继）" : ""}`
 				: data.state.status === "error"
 					? "开启失败"
 					: data.state.status === "disabled"
@@ -249,6 +251,17 @@ export function MobilePairing() {
 			</div>
 			<p className="mb-3 text-xs text-ink-500">允许手机控制电脑上的 Agent。配对仅限本机管理，请只在可信网络中开启。</p>
 
+			{wsl !== null && (
+				<p className="mb-3 rounded-xl bg-tianyi-50 px-3 py-2 text-xs text-tianyi-800">
+					当前在 WSL 中运行：这里列出的是 Windows 的局域网地址，开启后由 Windows
+					侧的转发进程接入手机连接（无需管理员权限，关闭手机访问或退出 neko 时自动停止）。
+				</p>
+			)}
+			{wsl?.error != null && (
+				<p className="mb-3 rounded-xl bg-sakura-50 px-3 py-2 text-xs text-sakura-800" role="alert">
+					{wsl.error}
+				</p>
+			)}
 			{data?.state.status === "error" && (
 				<p className="mb-3 rounded-xl bg-sakura-50 px-3 py-2 text-xs text-sakura-800" role="alert">
 					开启失败：{data.state.error}。请检查所选地址与端口是否被占用。
@@ -279,7 +292,9 @@ export function MobilePairing() {
 						onChange={(event) => setAddress(event.target.value)}
 						className="focus-neko rounded-xl border border-sakura-200 bg-base px-2 py-1.5 text-sm"
 					>
-						{data?.candidates.length === 0 && <option value="">未发现局域网地址</option>}
+						{data?.candidates.length === 0 && (
+							<option value="">{wsl !== null ? "未发现 Windows 局域网地址" : "未发现局域网地址"}</option>
+						)}
 						{(data?.candidates ?? []).map((candidate) => (
 							<option key={candidate} value={candidate}>
 								{candidate === data?.lastConnectedAddress ? `${candidate}（上次连接成功）` : candidate}
@@ -303,7 +318,9 @@ export function MobilePairing() {
 			</div>
 			{listening !== true && (data?.candidates.length ?? 0) === 0 && (
 				<p className="mt-2 text-xs text-ink-500">
-					未发现可用的局域网地址，请确认电脑已连接网络（本机回环地址不可用于手机访问）。
+					{wsl !== null
+						? "未发现可用的 Windows 局域网地址，请确认 Windows 已连接网络且 WSL 互操作可用。"
+						: "未发现可用的局域网地址，请确认电脑已连接网络（本机回环地址不可用于手机访问）。"}
 				</p>
 			)}
 
@@ -342,7 +359,8 @@ export function MobilePairing() {
 							</div>
 						)}
 						<p className="max-w-64 text-xs text-ink-500">
-							用手机 App 扫码，或点击「复制配对文本」后在 App 中粘贴。请确保手机与电脑在同一网络，防火墙放行所选端口。
+							用手机 App 扫码，或点击「复制配对文本」后在 App 中粘贴。请确保手机与电脑在同一网络，防火墙放行所选端口
+							{relayed ? "（WSL 下需在 Windows 防火墙放行 powershell.exe）" : ""}。
 						</p>
 					</div>
 				</div>

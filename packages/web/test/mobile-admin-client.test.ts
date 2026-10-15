@@ -39,6 +39,31 @@ describe("mobile admin client wrapper", () => {
 		expect(JSON.parse(String(write?.init?.body))).toEqual({ address: "192.168.1.20", port: 8323 });
 	});
 
+	it("passes WSL relay fields through and surfaces gateway timeouts", async () => {
+		const state = {
+			state: {
+				status: "listening",
+				address: "192.168.31.71",
+				port: 8323,
+				mode: "wsl-relay",
+				bindAddress: "172.24.180.5",
+			},
+			candidates: ["192.168.31.71"],
+			port: 8323,
+			certificate: null,
+			devices: [],
+			lastConnectedAddress: null,
+			wsl: { interop: true, error: null },
+		};
+		stubFetch((call) => {
+			if (call.url === "/api/mobile/state") return { status: 200, body: state };
+			if (call.url === "/api/mobile/session") return { status: 200, body: { csrf: "S".repeat(43), supported: true } };
+			return { status: 504, body: { code: "gateway_timeout", message: "mobile admin call timed out" } };
+		});
+		expect(await mobileAdmin.state()).toEqual(state as never);
+		await expect(mobileAdmin.enable({ address: "192.168.31.71" })).rejects.toThrow("timed out");
+	});
+
 	it("maps 501 to gateway_unsupported and keeps server error messages", async () => {
 		stubFetch((call) => {
 			if (call.url === "/api/mobile/session") return { status: 200, body: { csrf: "S".repeat(43), supported: false } };

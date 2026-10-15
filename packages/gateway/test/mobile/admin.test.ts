@@ -431,6 +431,8 @@ describe("mobile admin full surface (4.1)", () => {
 				expect(before.state).toEqual({ status: "disabled" });
 				expect(Array.isArray(before.candidates)).toBe(true);
 				expect(before.port).toBe(8323);
+				// 非 WSL 为 null；WSL 下为互操作状态（此测试不依赖运行环境）。
+				expect(before.wsl === null || typeof before.wsl?.interop === "boolean").toBe(true);
 				expect(before.certificate).toBeNull();
 				expect(before.devices).toEqual([]);
 			} finally {

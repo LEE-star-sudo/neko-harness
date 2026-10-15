@@ -24,10 +24,37 @@ export class GatewayUnsupportedError extends Error {
 	}
 }
 
-export type MobileAdminCaller = (method: string, params: unknown) => Promise<unknown>;
+export type MobileAdminCaller = ((method: string, params: unknown) => Promise<unknown>) & {
+	/** 取消全部在途调用（关闭流程使用）。 */
+	abortAll?: () => void;
+};
+
+export class MobileAdminTimeoutError extends Error {
+	constructor(method: string, timeoutMs: number) {
+		super(`mobile admin call "${method}" timed out after ${timeoutMs}ms`);
+		this.name = "MobileAdminTimeoutError";
+	}
+}
+
+export class MobileAdminAbortedError extends Error {
+	constructor() {
+		super("mobile admin call was cancelled because the web server is shutting down");
+		this.name = "MobileAdminAbortedError";
+	}
+}
+
+/** enable 可能需要拉起 Windows 侧中继，给更长时限。 */
+export const MOBILE_ADMIN_CALL_TIMEOUT_MS = 10_000;
+export const MOBILE_ADMIN_ENABLE_TIMEOUT_MS = 30_000;
+
+export type MobileAdminCallerOptions = { readonly callTimeoutMs?: number; readonly enableTimeoutMs?: number };
 
 /** 建立服务端专用调用方：每次调用临时连接并彻底释放，旧 gateway 的 unknown_type 归一为 GatewayUnsupportedError。 */
-export function createMobileAdminCaller(gateway: GatewayHandle, nekoDir: string): MobileAdminCaller {
+export function createMobileAdminCaller(
+	gateway: GatewayHandle,
+	nekoDir: string,
+	timeouts: MobileAdminCallerOptions = {},
+): MobileAdminCaller {
 	const serverId = gateway.serverId;
 	// 令牌按需读取：移动状态损坏只让 /api/mobile/* 失败，不阻断 Web 服务启动。
 	let tokenPromise: Promise<string> | undefined;
@@ -38,11 +65,18 @@ export function createMobileAdminCaller(gateway: GatewayHandle, nekoDir: string)
 		});
 		return tokenPromise;
 	};
-	return async (method, params) => {
+	const run = async (method: string, params: unknown, signal: AbortSignal): Promise<unknown> => {
 		const token = await readToken();
+		signal.throwIfAborted();
 		const link: Link =
 			gateway.socketPath !== undefined ? await createUnixLink(gateway.socketPath) : createWsLink(gateway.wsUrl);
 		const host = createHost({ kind: "client", upstream: identifiedLink(link, serverId), onError: () => {} });
+		const release = (): void => {
+			void host.close().catch(() => undefined);
+			link.close("aborted");
+		};
+		// 超时或取消时立即断开连接，避免悬挂调用占用资源。
+		signal.addEventListener("abort", release, { once: true });
 		try {
 			const admin = host.get(NekoMobileAdmin, { token }, { at: serverId }) as unknown as Record<
 				string,
@@ -60,10 +94,39 @@ export function createMobileAdminCaller(gateway: GatewayHandle, nekoDir: string)
 				(admin as { release?: () => void }).release?.();
 			}
 		} finally {
+			signal.removeEventListener("abort", release);
 			await host.close().catch(() => undefined);
 			link.close("done");
 		}
 	};
+
+	const inflight = new Set<AbortController>();
+	const caller: MobileAdminCaller = async (method, params) => {
+		const timeoutMs =
+			method === "enable"
+				? (timeouts.enableTimeoutMs ?? MOBILE_ADMIN_ENABLE_TIMEOUT_MS)
+				: (timeouts.callTimeoutMs ?? MOBILE_ADMIN_CALL_TIMEOUT_MS);
+		const controller = new AbortController();
+		inflight.add(controller);
+		const timer = setTimeout(() => controller.abort(new MobileAdminTimeoutError(method, timeoutMs)), timeoutMs);
+		try {
+			const work = run(method, params, controller.signal);
+			work.catch(() => undefined);
+			return await new Promise<unknown>((resolve, reject) => {
+				const onAbort = (): void => reject(controller.signal.reason);
+				if (controller.signal.aborted) onAbort();
+				else controller.signal.addEventListener("abort", onAbort, { once: true });
+				work.then(resolve, reject);
+			});
+		} finally {
+			clearTimeout(timer);
+			inflight.delete(controller);
+		}
+	};
+	caller.abortAll = () => {
+		for (const controller of [...inflight]) controller.abort(new MobileAdminAbortedError());
+	};
+	return caller;
 }
 
 export type MobileAdminProxyContext = {
@@ -173,7 +236,7 @@ export async function handleMobileAdminRequest(
 			await context.caller("state", null);
 		} catch (error) {
 			if (error instanceof GatewayUnsupportedError) supported = false;
-			else throw error;
+			else return respondWithCaller(response, Promise.reject(error));
 		}
 		writeJson(response, 200, { csrf: context.csrf, supported });
 		return true;
@@ -232,6 +295,14 @@ async function respondWithCaller(response: ServerResponse, result: Promise<unkno
 		}
 		if (error instanceof ChordError) {
 			writeJson(response, 502, { code: error.code, message: error.message });
+			return true;
+		}
+		if (error instanceof MobileAdminTimeoutError) {
+			writeJson(response, 504, { code: "gateway_timeout", message: error.message });
+			return true;
+		}
+		if (error instanceof MobileAdminAbortedError) {
+			writeJson(response, 503, { code: "shutting_down", message: error.message });
 			return true;
 		}
 		throw error;

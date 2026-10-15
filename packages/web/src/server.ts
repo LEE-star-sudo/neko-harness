@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_STORAGE_PATH, normalizeWorkspace } from "@neko-harness/core";
@@ -24,7 +25,9 @@ export type NekoWebOptions = {
 	readonly staticDir?: string;
 	/** 网关选项（默认 ~/.neko/neko.sqlite 数据目录）。 */
 	readonly versionOptions?: { runningVersion?: string; manifest?: string };
-	readonly gateway?: Omit<GatewayEnsureOptions, "storagePath"> & { readonly storagePath?: string };
+	readonly gateway?: Omit<GatewayEnsureOptions, "storagePath" | "signal"> & { readonly storagePath?: string };
+	/** 启动阶段被中断（如 Ctrl+C）时终止已拉起的 gateway 并放弃启动。 */
+	readonly signal?: AbortSignal;
 };
 
 export type NekoWebServer = {
@@ -60,9 +63,11 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 	const gateway = await ensureNekoGateway({
 		...(options.gateway ?? {}),
 		storagePath,
+		...(options.signal !== undefined ? { signal: options.signal } : {}),
 	});
 
 	let mobileAdmin: MobileAdminProxyContext | undefined;
+	let closing: Promise<void> | undefined;
 	const server: Server = createServer((request, response) => {
 		const context = mobileAdmin;
 		if (context === undefined) {
@@ -82,12 +87,23 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 			response.end(error instanceof Error ? error.message : String(error));
 		});
 	});
+	const sockets = new Set<Socket>();
+	server.on("connection", (socket) => {
+		sockets.add(socket);
+		socket.once("close", () => sockets.delete(socket));
+	});
 	const port = options.port ?? DEFAULT_PORT;
 	const host = options.host ?? DEFAULT_HOST;
-	await new Promise<void>((resolveListen, rejectListen) => {
-		server.once("error", rejectListen);
-		server.listen(port, host, resolveListen);
-	});
+	try {
+		await new Promise<void>((resolveListen, rejectListen) => {
+			server.once("error", rejectListen);
+			server.listen(port, host, resolveListen);
+		});
+	} catch (error) {
+		// 端口被占用等启动失败时不得遗留自己拉起的 gateway。
+		await gateway.close().catch(() => undefined);
+		throw error;
+	}
 	const address = server.address();
 	const actualPort = typeof address === "object" && address !== null ? address.port : port;
 	mobileAdmin = createMobileAdminContext({
@@ -101,11 +117,16 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 		url: `http://${host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "[::1]" : host.includes(":") && !host.startsWith("[") ? `[${host}]` : host}:${actualPort}`,
 		port: actualPort,
 		gateway,
-		async close() {
-			await new Promise<void>((resolveClose, rejectClose) => {
-				server.close((error) => (error ? rejectClose(error) : resolveClose()));
-			});
-			await gateway.close();
+		close() {
+			closing ??= (async () => {
+				mobileAdmin?.caller.abortAll?.();
+				const closed = new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+				// 空闲 keep-alive 与进行中的请求都不应拖住退出。
+				for (const socket of sockets) socket.destroy();
+				await closed;
+				await gateway.close();
+			})();
+			return closing;
 		},
 	};
 }

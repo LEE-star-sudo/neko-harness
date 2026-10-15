@@ -37,6 +37,8 @@ export type GatewayEnsureOptions = {
 	readonly spawnTimeoutMs?: number;
 	/** 网关子进程 stdout/stderr 行回调（main.ts 用于打印）。 */
 	readonly onLog?: (line: string) => void;
+	/** 中断启动等待；已拉起的子进程会被终止。 */
+	readonly signal?: AbortSignal;
 };
 
 export type GatewayHandle = {
@@ -66,6 +68,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 		if (discovered !== undefined && (await probeWs(discovered, serverId, timeoutAt))) {
 			return makeHandle(serverId, undefined, discovered, null, nekoDir);
 		}
+		throwIfAborted(options.signal);
 		const child = spawnGatewayProcess(options, null, serverId);
 		pipeChildLogs(child, options.onLog);
 		let spawnError: Error | undefined;
@@ -75,6 +78,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 		try {
 			let lastError: unknown = new Error("gateway 未就绪");
 			while (Date.now() < timeoutAt) {
+				throwIfAborted(options.signal);
 				if (spawnError !== undefined) throw spawnError;
 				if (child.exitCode !== null || child.signalCode !== null) {
 					throw new Error(
@@ -91,7 +95,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 						lastError = error;
 					}
 				}
-				await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())));
+				await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())), options.signal);
 			}
 			throw new Error(
 				`等待 neko gateway 就绪超时（${options.spawnTimeoutMs ?? 30_000}ms）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
@@ -116,6 +120,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 		return makeHandle(serverId, socketPath, wsUrl, null, nekoDir);
 	}
 
+	throwIfAborted(options.signal);
 	const child = spawnGatewayProcess(options, socketPath, serverId);
 	pipeChildLogs(child, options.onLog);
 	let spawnError: Error | undefined;
@@ -126,6 +131,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 		// 让子进程有机会打印启动错误再报错。
 		let lastError: unknown = new Error("gateway 未就绪");
 		while (Date.now() < timeoutAt) {
+			throwIfAborted(options.signal);
 			if (spawnError !== undefined) throw spawnError;
 			if (child.exitCode !== null || child.signalCode !== null) {
 				throw new Error(
@@ -140,7 +146,7 @@ export async function ensureNekoGateway(options: GatewayEnsureOptions): Promise<
 				if (error instanceof ApplicationProtocolError) throw error;
 				lastError = error;
 			}
-			await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())));
+			await sleep(Math.max(0, Math.min(PROBE_INTERVAL_MS, timeoutAt - Date.now())), options.signal);
 		}
 		throw new Error(
 			`等待 neko gateway 就绪超时（${options.spawnTimeoutMs ?? 30_000}ms）：${lastError instanceof Error ? lastError.message : String(lastError)}`,
@@ -256,6 +262,19 @@ async function loadOrCreateServerId(nekoDir: string): Promise<string> {
 	return created;
 }
 
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+function throwIfAborted(signal: AbortSignal | undefined): void {
+	if (signal?.aborted) throw new Error("neko gateway 启动被中断");
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	return new Promise((resolve) => {
+		if (signal?.aborted) return resolve();
+		const timer = setTimeout(done, ms);
+		function done(): void {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", done);
+			resolve();
+		}
+		signal?.addEventListener("abort", done, { once: true });
+	});
 }

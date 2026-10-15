@@ -11,7 +11,9 @@ import { IS_WINDOWS } from "../../gateway/test/helpers.ts";
 import {
 	GatewayUnsupportedError,
 	handleMobileAdminRequest,
+	MobileAdminAbortedError,
 	type MobileAdminProxyContext,
+	MobileAdminTimeoutError,
 } from "../src/mobile-admin.ts";
 import { type NekoWebServer, startWebServer } from "../src/server.ts";
 
@@ -101,6 +103,34 @@ describe("mobile admin proxy checks", () => {
 		expect(h.status()).toBe(200);
 		expect(h.calls).toEqual([{ method: "enable", params: { address: "192.168.1.20" } }]);
 		expect(h.headers()["access-control-allow-origin"]).toBeUndefined();
+	});
+
+	it("answers 504 for a timed-out gateway call and 503 for one cancelled by shutdown", async () => {
+		const failing = (error: Error): MobileAdminProxyContext => ({
+			csrf: CSRF,
+			allowedHosts: ALLOWED_HOSTS,
+			caller: () => Promise.reject(error),
+		});
+		const timedOut = harness(VALID_WRITE);
+		await handleMobileAdminRequest(
+			timedOut.request,
+			timedOut.response,
+			failing(new MobileAdminTimeoutError("enable", 30_000)),
+		);
+		expect(timedOut.status()).toBe(504);
+		expect(JSON.parse(timedOut.text()).code).toBe("gateway_timeout");
+
+		const cancelled = harness(VALID_WRITE);
+		await handleMobileAdminRequest(cancelled.request, cancelled.response, failing(new MobileAdminAbortedError()));
+		expect(cancelled.status()).toBe(503);
+
+		const session = harness({ method: "GET", url: "/api/mobile/session", headers: { host: "127.0.0.1:8322" } });
+		await handleMobileAdminRequest(
+			session.request,
+			session.response,
+			failing(new MobileAdminTimeoutError("state", 10_000)),
+		);
+		expect(session.status()).toBe(504);
 	});
 
 	it("rejects non-loopback peers even when X-Forwarded-For claims loopback", async () => {
