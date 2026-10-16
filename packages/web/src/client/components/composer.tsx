@@ -15,6 +15,7 @@ import {
 } from "react";
 import { appActions } from "../lib/bootstrap";
 import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
+import { fitHeight } from "../lib/composer-height";
 import { type HistoryBrowse, stepHistory } from "../lib/input-history";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { readUpgradeDraft, removeUpgradeDraft, saveUpgradeDraft } from "../lib/upgrade-draft";
@@ -147,9 +148,25 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		const at = recalled.current === "start" ? 0 : el.value.length;
 		recalled.current = null;
 		el.setSelectionRange(at, at);
-		el.style.height = "auto";
-		el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
 	});
+	// 高度由草稿内容派生：任何清空/替换草稿的路径（发送、切会话、恢复、历史回填）都经此重算。
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 高度只取决于文字内容、会话与宽度，这些值是重算触发条件而不在回调中读取。
+	useLayoutEffect(() => {
+		const el = textarea.current;
+		if (el) fitHeight(el);
+	}, [draft.text, props.sessionId]);
+	useEffect(() => {
+		const el = textarea.current;
+		if (!el || typeof ResizeObserver === "undefined") return;
+		let width = el.clientWidth;
+		const observer = new ResizeObserver(() => {
+			if (el.clientWidth === width) return;
+			width = el.clientWidth;
+			fitHeight(el);
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
 	const recallHistory = (e: KeyboardEvent<HTMLTextAreaElement>) => {
 		const el = e.currentTarget;
 		const step = stepHistory(browse.current, history, e, el.value, { start: el.selectionStart, end: el.selectionEnd });
@@ -537,8 +554,6 @@ function SessionComposer(props: Props & { sessionId: string }) {
 							setCommandSelected(0);
 							setMenu(!(e.nativeEvent as InputEvent).isComposing && isCommandQuery(e.target.value));
 							if (!(e.nativeEvent as InputEvent).isComposing) mentions.refresh();
-							e.target.style.height = "auto";
-							e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
 						}}
 						onPaste={(e) => {
 							const files = Array.from(e.clipboardData.files);

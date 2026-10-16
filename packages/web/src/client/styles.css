@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 
 /*
  * neko web 浅色二次元主题（design D7）。
@@ -515,6 +516,17 @@ button {
 .md {
 	line-height: 1.75;
 	overflow-wrap: anywhere;
+}
+
+/* 公式：块级公式过宽时在自身内横向滚动，不撑破消息气泡 */
+.md .katex-display {
+	overflow-x: auto;
+	overflow-y: hidden;
+	padding: 0.25rem 0;
+}
+
+.md .katex {
+	overflow-wrap: normal;
 }
 
 .md > :first-child {
