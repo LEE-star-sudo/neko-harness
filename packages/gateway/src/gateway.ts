@@ -118,6 +118,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		...(options.credentialsPath !== undefined ? { credentialsPath: options.credentialsPath } : {}),
 		...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 		...(searchProvider !== undefined ? { searchProvider } : {}),
+		...(fileConfig.context !== undefined ? { contextSettings: fileConfig.context } : {}),
 		model,
 		thinkingLevel: options.thinkingLevel ?? fileConfig.thinkingLevel ?? "high",
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),

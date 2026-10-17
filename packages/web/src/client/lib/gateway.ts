@@ -9,6 +9,9 @@ import { boundedWebSocketLink } from "@neko-harness/gateway/link";
 import type {
 	NekoBrowseOptions,
 	NekoChat,
+	NekoContextSettings,
+	NekoContextSettingsPatch,
+	NekoContextSettingsState,
 	NekoCredentialState,
 	NekoCredentials,
 	NekoDirectoryPage,
@@ -33,6 +36,7 @@ export type GatewayEvents = {
 	onUpdates?(state: UpdateState | null): void;
 	onCredentials?(state: NekoCredentialState | null): void;
 	onSearchSettings?(state: NekoSearchSettingsState | null): void;
+	onContextSettings?(state: NekoContextSettingsState | null): void;
 	onError(text: string): void;
 	onDirectory(state: NekoDirectoryState): void;
 	onWorkspaces(state: NekoWorkspaceState): void;
@@ -70,6 +74,7 @@ export class GatewayConnection {
 	#models: NekoModels | undefined;
 	#credentials: NekoCredentials | undefined;
 	#searchSettings: NekoSearchSettings | undefined;
+	#contextSettings: NekoContextSettings | undefined;
 	#skillMarket: NekoSkillMarket | undefined;
 	#chat: NekoChat | undefined;
 	#sessions: readonly NekoSessionSummary[] = [];
@@ -114,6 +119,14 @@ export class GatewayConnection {
 	async setSearchProvider(provider: SearchProviderId): Promise<void> {
 		if (!this.#connected || !this.#searchSettings) throw new Error("网关未连接");
 		await this.#searchSettings.set({ provider });
+	}
+	async setContextSettings(patch: NekoContextSettingsPatch): Promise<void> {
+		if (!this.#connected || !this.#contextSettings) throw new Error("网关未连接");
+		await this.#contextSettings.set(patch);
+	}
+	async resetContextSettings(): Promise<void> {
+		if (!this.#connected || !this.#contextSettings) throw new Error("网关未连接");
+		await this.#contextSettings.reset({});
 	}
 	async start(): Promise<void> {
 		this.#options.events.onPhase("connecting");
@@ -389,6 +402,7 @@ export class GatewayConnection {
 		this.#models = client.models;
 		this.#credentials = client.credentials;
 		this.#searchSettings = client.searchSettings;
+		this.#contextSettings = client.contextSettings;
 		this.#skillMarket = client.skillMarket;
 
 		this.#unsub.push(
@@ -403,6 +417,13 @@ export class GatewayConnection {
 			}),
 		);
 		this.#options.events.onSearchSettings?.(this.#searchSettings.state.value);
+		const contextSettings = this.#contextSettings;
+		this.#unsub.push(
+			contextSettings.state.subscribe((value) => {
+				if (epoch === this.#epoch) this.#options.events.onContextSettings?.(value);
+			}),
+		);
+		this.#options.events.onContextSettings?.(contextSettings.state.value);
 		const directory = client.directory;
 		const publish = (value: NekoDirectoryState) => {
 			if (epoch !== this.#epoch) return;
@@ -480,6 +501,8 @@ export class GatewayConnection {
 		this.#options.events.onCredentials?.(null);
 		this.#searchSettings = undefined;
 		this.#options.events.onSearchSettings?.(null);
+		this.#contextSettings = undefined;
+		this.#options.events.onContextSettings?.(null);
 		this.#models = undefined;
 
 		const client = this.#client;

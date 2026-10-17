@@ -470,6 +470,75 @@ export const NekoSearchSettings = contract("neko.search-settings", {
 		},
 	},
 });
+const contextSource = Type.Enum(["default", "config", "saved"]);
+export const ContextSettingsStateSchema = Type.Object({
+	revision: integer,
+	effective: Type.Object({
+		compaction: Type.Object({
+			enabled: bool,
+			triggerPercent: Type.Union([integer, nil]),
+			keepRecentTokens: integer,
+		}),
+		pruning: Type.Object({
+			enabled: bool,
+			triggerPercent: integer,
+			keepRecent: integer,
+			minChars: integer,
+			minSavePercent: integer,
+		}),
+	}),
+	sources: Type.Object({
+		compaction: Type.Object({ enabled: contextSource, triggerPercent: contextSource, keepRecentTokens: contextSource }),
+		pruning: Type.Object({
+			enabled: contextSource,
+			triggerPercent: contextSource,
+			keepRecent: contextSource,
+			minChars: contextSource,
+			minSavePercent: contextSource,
+		}),
+	}),
+});
+const nullable = <T extends ReturnType<typeof Type.Integer> | typeof bool>(schema: T) => Type.Union([schema, nil]);
+const ContextSettingsPatchSchema = Type.Object(
+	{
+		compaction: Type.Optional(
+			Type.Object(
+				{
+					enabled: Type.Optional(nullable(bool)),
+					triggerPercent: Type.Optional(nullable(integer)),
+					keepRecentTokens: Type.Optional(nullable(integer)),
+				},
+				{ additionalProperties: false },
+			),
+		),
+		pruning: Type.Optional(
+			Type.Object(
+				{
+					enabled: Type.Optional(nullable(bool)),
+					triggerPercent: Type.Optional(nullable(integer)),
+					keepRecent: Type.Optional(nullable(integer)),
+					minChars: Type.Optional(nullable(integer)),
+					minSavePercent: Type.Optional(nullable(integer)),
+				},
+				{ additionalProperties: false },
+			),
+		),
+	},
+	{ additionalProperties: false },
+);
+export const NekoContextSettings = contract("neko.context-settings", {
+	version: 1,
+	input: Type.Object({}, { additionalProperties: false }),
+	variants: {
+		ready: {
+			state: { state: ContextSettingsStateSchema },
+			methods: {
+				set: rpc(ContextSettingsPatchSchema, nil),
+				reset: rpc(Type.Object({}, { additionalProperties: false }), nil),
+			},
+		},
+	},
+});
 export const FileCandidatesSchema = Type.Object({
 	entries: Type.Array(Type.Object({ name: str, path: str, kind: Type.Enum(["file", "directory"]) }), { maxItems: 100 }),
 	limited: bool,
@@ -548,6 +617,7 @@ export type NekoWorkspaces = Ref<typeof NekoWorkspaces>;
 export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Ref<typeof NekoCredentials>;
 export type NekoSearchSettings = Ref<typeof NekoSearchSettings>;
+export type NekoContextSettings = Ref<typeof NekoContextSettings>;
 export type NekoSkillMarket = Ref<typeof NekoSkillMarket>;
 export type NekoSessionSummary = Static<typeof SessionSummarySchema>;
 export type NekoDirectoryState = Static<typeof DirectoryStateSchema>;
@@ -555,6 +625,8 @@ export type NekoWorkspaceSummary = Static<typeof WorkspaceSummarySchema>;
 export type NekoWorkspaceState = Static<typeof WorkspaceStateSchema>;
 export type NekoCredentialState = Static<typeof CredentialStateSchema>;
 export type NekoSearchSettingsState = Static<typeof SearchSettingsStateSchema>;
+export type NekoContextSettingsState = Static<typeof ContextSettingsStateSchema>;
+export type NekoContextSettingsPatch = Static<typeof ContextSettingsPatchSchema>;
 export type NekoAttachment = Static<typeof AttachmentSchema>;
 export type NekoBrowseOptions = Static<typeof browse>;
 export type NekoDirectoryPage = Static<typeof page>;

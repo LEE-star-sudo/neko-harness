@@ -3,7 +3,7 @@ import { ApplicationProtocolError } from "@neko-harness/core/application-version
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { SearchProviderId } from "@neko-harness/core/search-providers";
-import type { NekoBrowseOptions } from "./contract.ts";
+import type { NekoBrowseOptions, NekoContextSettingsPatch } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
 import { storeActions } from "./store.ts";
 import { readUpgradeDraft } from "./upgrade-draft";
@@ -83,6 +83,7 @@ export function startNekoApp(): void {
 				onUpdates: storeActions.setUpdates,
 				onCredentials: storeActions.setCredentials,
 				onSearchSettings: storeActions.setSearchSettings,
+				onContextSettings: storeActions.setContextSettings,
 				onWorkspaces: (state) => storeActions.setWorkspaces(state.workspaces),
 				onWorkspace: storeActions.setWorkspace,
 				onOperation: storeActions.setOperation,
@@ -134,6 +135,12 @@ export const appActions = {
 	},
 	removeCredential(provider: CredentialProviderId) {
 		return requireConnection().removeCredential(provider);
+	},
+	setContextSettings(patch: NekoContextSettingsPatch) {
+		return requireConnection().setContextSettings(patch);
+	},
+	resetContextSettings() {
+		return requireConnection().resetContextSettings();
 	},
 	setSearchProvider(provider: SearchProviderId) {
 		return requireConnection().setSearchProvider(provider);

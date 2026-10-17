@@ -14,6 +14,17 @@ export {
 	parseNekoConfig,
 } from "./config.ts";
 export {
+	type CompactionSettings,
+	type ContextSettingSource,
+	type ContextSettingSources,
+	type ContextSettings,
+	type ContextSettingsPatch,
+	type ContextSettingsState,
+	type EffectiveContextSettings,
+	PRUNING_DEFAULTS,
+	type PruningSettings,
+} from "./context-settings.ts";
+export {
 	CREDENTIAL_PROVIDERS,
 	type CredentialProviderId,
 	type CredentialProviderSpec,

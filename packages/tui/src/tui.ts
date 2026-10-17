@@ -38,6 +38,7 @@ import { ThemedText, ThemedTruncatedText, ThemedWrappedText } from "./components
 import { type ToolCardState, ToolExecutionComponent, ToolSpinnerTicker } from "./components/tool-execution.ts";
 import { UserMessageComponent } from "./components/user-message.ts";
 import { WelcomeScreen } from "./components/welcome.ts";
+import { openContextPanel } from "./context-ui.ts";
 import { detectColorFgBgMode, followTerminalTheme } from "./detect-theme.ts";
 import { type ExportArgs, exportToFile, parseExportArgs } from "./export-command.ts";
 import { fileCompletion } from "./file-completion.ts";
@@ -128,6 +129,7 @@ class NekoTuiApp {
 	#agentsPanel = false;
 	#jobsPanel = false;
 	#searchStop: (() => void) | undefined;
+	#contextStop: (() => void) | undefined;
 	#agentDetails = new Map<string, SubagentDetail>();
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
@@ -181,6 +183,8 @@ class NekoTuiApp {
 				this.#jobsPanel = false;
 				this.#searchStop?.();
 				this.#searchStop = undefined;
+				this.#contextStop?.();
+				this.#contextStop = undefined;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
 				this.#ui.setFocus(this.#editor);
@@ -449,6 +453,10 @@ class NekoTuiApp {
 		}
 		if (trimmed === "/search") {
 			this.#showSearch();
+			return;
+		}
+		if (trimmed === "/context") {
+			this.#showContext();
 			return;
 		}
 		const instructions = compactInstructions(trimmed);
@@ -963,6 +971,11 @@ class NekoTuiApp {
 	#showSearch(): void {
 		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
 		this.#searchStop = openSearchPanel(this.#panel, this.#gateway.client, (message) => this.addNotice(message));
+		this.#ui.setFocus(this.#panel);
+	}
+	#showContext(): void {
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
+		this.#contextStop = openContextPanel(this.#panel, this.#gateway.client, (message) => this.addNotice(message));
 		this.#ui.setFocus(this.#panel);
 	}
 	#agentDetail(target: string | number) {

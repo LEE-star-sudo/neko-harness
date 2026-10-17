@@ -37,6 +37,19 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { createCodingTools } from "@earendil-works/pi-durable/tools";
 import { AgentFileSearch } from "./agent-file-search.ts";
 import { type CompactionRecord, readCompaction } from "./compaction.ts";
+import { ContextPruner } from "./context-pruning.ts";
+import {
+	applyContextPatch,
+	type ContextSettings,
+	type ContextSettingsPatch,
+	type ContextSettingsState,
+	compactionPolicy,
+	emptySavedContextSettings,
+	parseContextSettingsPatch,
+	resolveContextSettings,
+	type SavedContextSettings,
+	sanitizeSavedContextSettings,
+} from "./context-settings.ts";
 import {
 	type CredentialProviderId,
 	type CredentialStatus,
@@ -110,6 +123,8 @@ export type NekoRuntimeOptions = {
 	readonly credentialsPath?: string;
 	/** Search provider used until the user saves a choice (config `webSearch.provider`); default "tavily". */
 	readonly searchProvider?: SearchProviderId;
+	/** Config-file context settings (compaction trigger, tool result pruning); saved UI values take precedence. */
+	readonly contextSettings?: ContextSettings;
 	/** Model the root conversation runs with; default the built-in DeepSeek chat model. */
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
@@ -256,6 +271,16 @@ const SearchSettingsDoc = defineDoc<{ provider: SearchProviderId | null }>({
 	initial: () => ({ provider: null }),
 });
 
+/** User-level context settings saved from a UI; `null` fields were never saved. */
+const ContextSettingsDoc = defineDoc<SavedContextSettings>({
+	kind: "app.neko.context-settings",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: emptySavedContextSettings,
+});
+
 const ActivityDoc = defineDoc<{ lastUsedAt: number }>({
 	kind: "app.neko.activity",
 	version: 1,
@@ -315,6 +340,12 @@ export type NekoRuntime = {
 	/** Every chat model in the Models registry, for frontend model selectors. */
 	listModels(): NekoModelInfo[];
 	credentialStatus(provider: CredentialProviderId): Promise<CredentialStatus>;
+	/** Effective context settings (saved > config > default) with the source of every value. */
+	contextSettings(): Promise<ContextSettingsState>;
+	/** Validate and persist a patch of saved overrides (`null` clears one); applies from the next check. */
+	setContextSettings(patch: ContextSettingsPatch): Promise<ContextSettingsState>;
+	/** Clear every saved override. */
+	resetContextSettings(): Promise<ContextSettingsState>;
 	/** The search provider the next tool call uses. */
 	searchSettings(): Promise<SearchSettings>;
 	/** Persist the user's search provider choice; the next tool call uses it. */
@@ -422,11 +453,22 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const approvalExtension = createApprovalExtension(() => approvals);
 	registry.install(approvalExtension);
 
+	let savedContext: SavedContextSettings = emptySavedContextSettings();
+	let contextState = resolveContextSettings(options.contextSettings, savedContext);
 	const harness = await Harness.open(
 		storage,
 		{
 			models,
 			registry,
+			settings: {
+				// Read at every use, so a saved change applies from the next threshold check without a restart.
+				get compaction() {
+					return compactionPolicy(
+						contextState,
+						models.getModels().map((model) => model.contextWindow),
+					);
+				},
+			},
 			onReport: options.onReport,
 			conversationCreated: async (tx, record) => {
 				(await tx.doc(SessionMetadataDoc, record.id)).createdAt = Date.now();
@@ -485,6 +527,18 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	});
 	const savedSearch = (await harness.snapshot(SearchSettingsDoc, conversation.id, context))?.provider;
 	if (isSearchProvider(savedSearch)) searchProvider = savedSearch;
+	savedContext = sanitizeSavedContextSettings(await harness.snapshot(ContextSettingsDoc, conversation.id, context));
+	contextState = resolveContextSettings(options.contextSettings, savedContext);
+	const persistContext = async (next: SavedContextSettings): Promise<ContextSettingsState> => {
+		await harness.commit(async (tx) => {
+			const doc = await tx.doc(ContextSettingsDoc, conversation.id);
+			doc.compaction = next.compaction;
+			doc.pruning = next.pruning;
+		}, context);
+		savedContext = next;
+		contextState = resolveContextSettings(options.contextSettings, savedContext);
+		return contextState;
+	};
 	const registerWorkspace = async (path: string): Promise<NekoWorkspace> => {
 		await harness.commit(async (tx) => {
 			const doc = await tx.doc(WorkspacesDoc, conversation.id);
@@ -518,10 +572,22 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	for (const record of existing)
 		if (!record.owner && !(await harness.snapshot(ArchivedDoc, record.id, context))?.archived)
 			await metadata.restore(record.id);
+	const pruner = new ContextPruner({
+		harness,
+		context,
+		settings: () => contextState.effective.pruning,
+		windowOf: async (id) => {
+			const target = await harness.conversation(id, context);
+			const model = (await target?.agent(context))?.model;
+			return (model && models.getModel(model.provider, model.modelId)?.contextWindow) || 0;
+		},
+		report: (error) => options.onReport?.(error),
+	});
 	let closing: Promise<void> | undefined;
 	const cleanup = () => {
 		if (!closing)
 			closing = (async () => {
+				pruner.close();
 				jobs.shutdown();
 				await workspaceFiles.close();
 				await metadata.close();
@@ -940,6 +1006,15 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 								? "keyless"
 								: "none",
 			};
+		},
+		async contextSettings() {
+			return contextState;
+		},
+		async setContextSettings(patch) {
+			return persistContext(applyContextPatch(savedContext, parseContextSettingsPatch(patch)));
+		},
+		async resetContextSettings() {
+			return persistContext(emptySavedContextSettings());
 		},
 		async searchSettings() {
 			return { selected: searchProvider };

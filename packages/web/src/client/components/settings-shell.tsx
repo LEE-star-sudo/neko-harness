@@ -2,13 +2,15 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Icon } from "./primitives";
 
-export type SettingsSection = "credentials" | "mobile" | "about";
+export type SettingsSection = "credentials" | "context" | "mobile" | "about";
 
-const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "phone" | "info"; to: string }[] = [
-	{ key: "credentials", label: "密钥", icon: "key", to: "/settings" },
-	{ key: "mobile", label: "手机配对", icon: "phone", to: "/settings/mobile" },
-	{ key: "about", label: "关于与更新", icon: "info", to: "/about" },
-];
+const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "layers" | "phone" | "info"; to: string }[] =
+	[
+		{ key: "credentials", label: "密钥", icon: "key", to: "/settings" },
+		{ key: "context", label: "上下文", icon: "layers", to: "/settings/context" },
+		{ key: "mobile", label: "手机配对", icon: "phone", to: "/settings/mobile" },
+		{ key: "about", label: "关于与更新", icon: "info", to: "/about" },
+	];
 
 /**
  * 设置区统一外壳：左侧栏菜单（密钥 / 关于与更新，未来可扩展通用偏好）+ 右侧内容。

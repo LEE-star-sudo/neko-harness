@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { type ContextSettings, mergeContextSettings, parseContextSettings } from "./context-settings.ts";
 import type { NekoModelRef } from "./runtime.ts";
 import { isSearchProvider, SEARCH_PROVIDERS, type SearchProviderId } from "./search-providers.ts";
 
@@ -36,6 +37,8 @@ export type NekoConfig = {
 	readonly theme?: NekoTheme;
 	readonly skills?: NekoSkillsConfig;
 	readonly webSearch?: NekoWebSearchConfig;
+	/** Context management: compaction trigger and tool result pruning. Unset keeps the native behaviour. */
+	readonly context?: ContextSettings;
 };
 
 export const DEFAULT_SKILL_MARKET_URL = "https://skill.kirineko.tech";
@@ -128,6 +131,9 @@ export function mergeNekoConfig(base: NekoConfig, overrides: NekoConfig): NekoCo
 			: {}),
 		...(base.webSearch !== undefined || overrides.webSearch !== undefined
 			? { webSearch: { ...base.webSearch, ...overrides.webSearch } }
+			: {}),
+		...(base.context !== undefined || overrides.context !== undefined
+			? { context: mergeContextSettings(base.context, overrides.context) }
 			: {}),
 	};
 }
@@ -229,6 +235,13 @@ function validate(config: Record<string, unknown>, source: string): void {
 			throw new Error(
 				`neko config: ${source}: "webSearch.provider" must be one of ${SEARCH_PROVIDERS.map((item) => `"${item}"`).join(", ")}.`,
 			);
+		}
+	}
+	if (config.context !== undefined) {
+		try {
+			parseContextSettings(config.context);
+		} catch (error) {
+			throw new Error(`neko config: ${source}: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
 }

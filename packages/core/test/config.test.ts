@@ -167,3 +167,36 @@ it("parses, validates, and merges webSearch.provider", () => {
 	).toBe("deepseek");
 	expect(mergeNekoConfig({}, {}).webSearch).toBeUndefined();
 });
+
+it("parses, validates, and merges context settings", () => {
+	const parsed = parseNekoConfig(
+		'{"context": {"compaction": {"triggerPercent": 50, "keepRecentTokens": 40000, "enabled": false}, "pruning": {"enabled": true, "keepRecent": 0}}}',
+		"test.json",
+		{},
+	);
+	expect(parsed.context?.compaction).toEqual({ triggerPercent: 50, keepRecentTokens: 40000, enabled: false });
+	expect(parsed.context?.pruning).toEqual({ enabled: true, keepRecent: 0 });
+	for (const bad of [
+		'{"context": 5}',
+		'{"context": {"other": {}}}',
+		'{"context": {"compaction": {"triggerPercent": 100}}}',
+		'{"context": {"compaction": {"triggerPercent": 0}}}',
+		'{"context": {"compaction": {"triggerPercent": 12.5}}}',
+		'{"context": {"compaction": {"keepRecentTokens": 0}}}',
+		'{"context": {"compaction": {"enabled": "yes"}}}',
+		'{"context": {"compaction": {"nope": 1}}}',
+		'{"context": {"pruning": {"minChars": -1}}}',
+		'{"context": {"pruning": {"minSavePercent": 0}}}',
+		'{"context": {"pruning": {"enabled": null}}}',
+	])
+		expect(() => parseNekoConfig(bad, "test.json", {})).toThrow(/test\.json.*context/);
+	const merged = mergeNekoConfig(
+		{ context: { compaction: { triggerPercent: 50 }, pruning: { enabled: true } } },
+		{ context: { compaction: { enabled: false }, pruning: { enabled: false } } },
+	);
+	expect(merged.context).toEqual({
+		compaction: { triggerPercent: 50, enabled: false },
+		pruning: { enabled: false },
+	});
+	expect(mergeNekoConfig({}, {}).context).toBeUndefined();
+});
