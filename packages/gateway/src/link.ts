@@ -1,10 +1,27 @@
 /** Bounds around the SDK's native JSON WebSocket link; no second wire protocol. */
-import { type Frame, type Link, type WebSocketLike, webSocketLink } from "@earendil-works/chord";
+import {
+	createHost,
+	type Host,
+	type Link,
+	type WebSocketLike,
+	type WebSocketLinkOptions,
+	webSocketLink,
+} from "@earendil-works/chord";
 export const MAX_LINK_BYTES = 16 * 1024 * 1024;
-const size = (text: string) => new TextEncoder().encode(text).byteLength;
+/** The socket surface the bound needs; browser, `ws` and Node sockets all satisfy it. */
+export type BoundedSocket = Pick<WebSocketLike, "readyState" | "close" | "addEventListener"> & {
+	readonly bufferedAmount: number;
+	send(data: string | Uint8Array<ArrayBuffer>): void;
+	/** Node `ws` sockets only. */
+	readonly on?: (event: "message", listener: (data: Uint8Array | ArrayBuffer, isBinary: boolean) => void) => unknown;
+};
+const asBytes = (data: Uint8Array | ArrayBuffer) => (data instanceof Uint8Array ? data : new Uint8Array(data));
+const size = (data: string | Uint8Array) =>
+	typeof data === "string" ? new TextEncoder().encode(data).byteLength : data.byteLength;
 export function boundedWebSocketLink(
-	socket: WebSocketLike & { readonly bufferedAmount: number },
+	socket: BoundedSocket,
 	max = MAX_LINK_BYTES,
+	options?: WebSocketLinkOptions,
 ): Link {
 	let queued = 0,
 		incoming = 0,
@@ -19,21 +36,32 @@ export function boundedWebSocketLink(
 				socket.close(1009, "byte limit");
 				throw new Error("Link pending byte limit exceeded");
 			}
-			socket.send(data);
+			socket.send(data as string | Uint8Array<ArrayBuffer>);
 		},
 		close: (code, reason) => socket.close(code, reason),
 		addEventListener(type, handler) {
-			if (type === "message")
-				socket.addEventListener("message", (event) => {
-					const bytes = size(String(event.data));
+			if (type === "message") {
+				const deliver = (data: string | Uint8Array) => {
+					const bytes = size(data);
 					if (!receiving) incoming += bytes;
 					if (bytes > max || incoming > max) {
 						native.close("frame limit exceeded");
 						return;
 					}
-					(handler as (event: { data: unknown }) => void)(event);
-				});
-			else
+					(handler as (event: { data: unknown }) => void)({ data });
+				};
+				// `ws` reports text frames as Buffers through addEventListener under Bun; its `on` event carries the real frame type.
+				if (socket.on)
+					socket.on("message", (data, isBinary) =>
+						deliver(isBinary ? asBytes(data) : new TextDecoder().decode(asBytes(data))),
+					);
+				else
+					socket.addEventListener("message", (event) =>
+						deliver(
+							typeof event.data === "string" || event.data instanceof Uint8Array ? event.data : String(event.data),
+						),
+					);
+			} else
 				socket.addEventListener(type, () => {
 					if (type === "open") queued = 0;
 					try {
@@ -44,17 +72,17 @@ export function boundedWebSocketLink(
 				});
 		},
 	};
-	native = webSocketLink(bridge);
+	native = webSocketLink(bridge, options);
 	socket.addEventListener("error", () => native.close("socket error"));
 	return {
 		get closed() {
 			return native.closed;
 		},
 		send(frame) {
-			if (native.closed) return;
+			if (native.closed) return undefined;
 			if (socket.readyState > 1) {
 				native.close("socket closed");
-				return;
+				return undefined;
 			}
 			const bytes = size(JSON.stringify(frame));
 			if (bytes > max || bytes + socket.bufferedAmount + queued > max) {
@@ -62,7 +90,7 @@ export function boundedWebSocketLink(
 				throw new Error("Link byte limit exceeded");
 			}
 			if (socket.readyState === 0) queued += bytes;
-			native.send(frame);
+			return native.send(frame);
 		},
 		receive(handler) {
 			receiving = true;
@@ -73,45 +101,16 @@ export function boundedWebSocketLink(
 		close: (reason) => native.close(reason),
 	};
 }
-/** Gate delivery on the parent's native hello identity before any service state reaches a client. */
-export function identifiedLink(link: Link, expectedName: string): Link {
-	let receiver: ((frame: Frame) => void) | undefined;
-	let seen = false,
-		pendingBytes = 0;
-	const pending: Frame[] = [];
-	link.receive((frame) => {
-		if (!seen) {
-			if (frame.t !== "hello" || frame.name !== expectedName) {
-				link.close("serverId mismatch");
-				return;
-			}
-			seen = true;
-		}
-		if (receiver) receiver(frame);
-		else {
-			pendingBytes += size(JSON.stringify(frame));
-			if (pendingBytes > MAX_LINK_BYTES) {
-				link.close("receive queue limit exceeded");
-				pending.length = 0;
-				return;
-			}
-			pending.push(frame);
-		}
+/** A client host whose only peer is the gateway behind `link`; requests the gateway makes itself act as the server. */
+export function createClientHost(link: Link, options: { readonly onProtocolMismatch?: () => void } = {}): Host {
+	return createHost({
+		kind: "client",
+		self: { kind: "client" },
+		upstream: {
+			link,
+			principal: { kind: "server" },
+			...(options.onProtocolMismatch ? { onProtocolMismatch: options.onProtocolMismatch } : {}),
+		},
+		onError: () => {},
 	});
-	return {
-		get closed() {
-			return link.closed;
-		},
-		send: (frame) => link.send(frame),
-		receive(handler) {
-			receiver = handler;
-			pendingBytes = 0;
-			for (const frame of pending.splice(0)) {
-				if (link.closed) break;
-				handler(frame);
-			}
-		},
-		onClose: (handler) => link.onClose(handler),
-		close: (reason) => link.close(reason),
-	};
 }

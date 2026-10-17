@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createNekoRuntime } from "../src/runtime.ts";
 
-it("uses published DeepSeek 1.2 capabilities directly", async () => {
+it("uses published DeepSeek 1.3 capabilities directly", async () => {
 	const runtime = await createNekoRuntime({ storage: "memory" });
 	try {
 		const models = runtime.listModels();
@@ -26,7 +26,7 @@ it("uses published DeepSeek 1.2 capabilities directly", async () => {
 	}
 });
 
-it("delegates custom provider URLs and refresh context to Pi 1.2", async () => {
+it("delegates custom provider URLs and refresh context to Pi 1.3", async () => {
 	const faux = fauxProvider();
 	const baseUrl = "https://custom-provider.invalid/v1";
 	const contexts: RefreshModelsContext[] = [];

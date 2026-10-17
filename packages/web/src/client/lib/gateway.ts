@@ -147,7 +147,7 @@ export class GatewayConnection {
 	}
 	async selectWorkspace(path: string): Promise<void> {
 		await this.#operate(async (epoch) => {
-			if (!this.#workspaces?.state.value?.workspaces.some((w) => w.path === path)) throw new Error("工作区不存在");
+			if (!this.#workspaces?.state.value.workspaces.some((w) => w.path === path)) throw new Error("工作区不存在");
 			await this.#select(path, undefined, epoch);
 		});
 	}
@@ -370,10 +370,10 @@ export class GatewayConnection {
 		this.#assert(epoch);
 		this.#unsub.push(
 			client.application.info.subscribe((value) => {
-				if (epoch === this.#epoch) this.#options.events.onUpdates?.(value ?? null);
+				if (epoch === this.#epoch) this.#options.events.onUpdates?.(value);
 			}),
 		);
-		this.#options.events.onUpdates?.(client.application.info.value ?? null);
+		this.#options.events.onUpdates?.(client.application.info.value);
 		this.#management = client.management;
 		this.#workspaces = client.workspaces;
 		this.#workspaceFiles = client.workspaceFiles;
@@ -383,13 +383,12 @@ export class GatewayConnection {
 
 		this.#unsub.push(
 			this.#credentials.state.subscribe((value) => {
-				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value ?? null);
+				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value);
 			}),
 		);
-		if (this.#credentials.state.value) this.#options.events.onCredentials?.(this.#credentials.state.value);
+		this.#options.events.onCredentials?.(this.#credentials.state.value);
 		const directory = client.directory;
-		const publish = (value: NekoDirectoryState | undefined) => {
-			if (!value) return;
+		const publish = (value: NekoDirectoryState) => {
 			if (epoch !== this.#epoch) return;
 			this.#sessions = value.sessions;
 			this.#options.events.onDirectory(value);
@@ -398,7 +397,7 @@ export class GatewayConnection {
 		this.#unsub.push(directory.state.subscribe(publish));
 		this.#unsub.push(
 			this.#workspaces.state.subscribe((value) => {
-				if (value && epoch === this.#epoch) this.#options.events.onWorkspaces(value);
+				if (epoch === this.#epoch) this.#options.events.onWorkspaces(value);
 			}),
 		);
 		if (!this.#initialized) {
@@ -406,11 +405,8 @@ export class GatewayConnection {
 			this.#assert(epoch);
 			this.#initialized = true;
 		}
-		const initialDirectory = directory.state.value;
-		const initialWorkspaces = this.#workspaces.state.value;
-		if (!initialDirectory || !initialWorkspaces) throw new Error("工作区目录不可用，请重连");
-		publish(initialDirectory);
-		this.#options.events.onWorkspaces(initialWorkspaces);
+		publish(directory.state.value);
+		this.#options.events.onWorkspaces(this.#workspaces.state.value);
 		await this.#select(this.#workspace, this.#currentSessionId, epoch);
 		this.#assert(epoch);
 		this.#connected = true;

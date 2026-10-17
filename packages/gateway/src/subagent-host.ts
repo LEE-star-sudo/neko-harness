@@ -1,14 +1,4 @@
-import {
-	ChordError,
-	type Context,
-	cell,
-	type Host,
-	hostPrincipal,
-	listener,
-	local,
-	opaque,
-	resource,
-} from "@earendil-works/chord";
+import { ChordError, type Context, type Host, local, opaque } from "@earendil-works/chord";
 import { type ConversationId, type EntryId, type TaskId, UsageDoc } from "@earendil-works/pi-durable";
 import {
 	agentIdFor,
@@ -23,6 +13,7 @@ import {
 import { Type } from "typebox";
 import { NekoSubagent } from "./contract.ts";
 import { IMAGE_CHUNK_BYTES } from "./image-uploads.ts";
+import type { GatewayPrincipal } from "./principal.ts";
 import { Owner } from "./session-host.ts";
 
 async function openReader(
@@ -182,48 +173,45 @@ const ChildProjection = local("neko.subagent-projection", {
 		reader: opaque<Awaited<ReturnType<typeof openReader>>>("neko.subagent-reader@1"),
 	},
 });
-export function installSubagentHost(host: Host, runtime: NekoRuntime, context: Context) {
+export function installSubagentHost(host: Host<GatewayPrincipal>, runtime: NekoRuntime, context: Context) {
 	host.serve(ChildProjection, (input, _principal, self) => {
-		const { revision } = self.state({ revision: cell(Type.Integer(), 0) });
-		const { reader } = self.resources({
-			reader: resource({
-				rev: 1,
-				async open() {
-					const entry = (await listDelegations(runtime.harness, input.parentId as ConversationId, context)).find((d) =>
-						input.agentId.startsWith("round-")
-							? d.taskId === Number(input.agentId.slice(6))
-							: (d.agentId ?? agentIdFor(d.childId)) === input.agentId,
-					);
-					if (!entry) throw new ChordError("gone", "Subagent unavailable");
-					const r = await openReader(
-						runtime,
-						entry.childId,
-						input.parentId,
-						context,
-						entry.historyThrough,
-						entry.historyUsage,
-					);
-					try {
-						const initial = await r.refresh();
-						await host.root((ctx) => revision.replace(ctx, initial));
-						return r;
-					} catch (error) {
-						r.close();
-						throw error;
-					}
-				},
-				close: (r) => r.close(),
-			}),
+		const revision = self.state("revision", Type.Integer(), 0);
+		const reader = self.resource("reader", {
+			version: 1,
+			async open() {
+				const entry = (await listDelegations(runtime.harness, input.parentId as ConversationId, context)).find((d) =>
+					input.agentId.startsWith("round-")
+						? d.taskId === Number(input.agentId.slice(6))
+						: (d.agentId ?? agentIdFor(d.childId)) === input.agentId,
+				);
+				if (!entry) throw new ChordError("gone", "Subagent unavailable");
+				const r = await openReader(
+					runtime,
+					entry.childId,
+					input.parentId,
+					context,
+					entry.historyThrough,
+					entry.historyUsage,
+				);
+				try {
+					const initial = await r.refresh();
+					await host.root((ctx) => revision.replace(ctx, initial));
+					return r;
+				} catch (error) {
+					r.close();
+					throw error;
+				}
+			},
+			close: (r) => r.close(),
 		});
-		self.listen({
-			view: listener(
-				reader,
-				(r) => r,
-				async (_event, ctx) => {
-					revision.replace(ctx, await reader.value.refresh());
-				},
-			),
-		});
+		self.on(
+			"view",
+			reader,
+			(r) => r,
+			async (_event, ctx) => {
+				revision.replace(ctx, await reader.value.refresh());
+			},
+		);
 		return { revision, reader: self.expose(reader) };
 	});
 	host.serve(NekoSubagent, (input, principal, self) => {
@@ -242,26 +230,23 @@ export function installSubagentHost(host: Host, runtime: NekoRuntime, context: C
 			if (!entry) throw new ChordError("forbidden", "Subagent does not belong to this session");
 			return entry;
 		};
-		const { target } = self.resources({ target: resource({ rev: 1, deps: [owner], open: check }) });
-		const shared = self.get(
-			ChildProjection,
-			{ parentId: Number(input.sessionId), agentId: input.agentId ?? `round-${input.taskId}` },
-			{ principal: hostPrincipal },
-		);
-		const { authorizedRevision } = self.state({ authorizedRevision: cell(Type.Integer(), 0) });
-		self.listen({
-			authorizedView: listener(shared.revision, async (value, ctx) => {
-				try {
-					void target.value;
-					await check();
-					if (value) authorizedRevision.replace(ctx, value);
-				} catch {
-					authorizedRevision.replace(ctx, 0);
-				}
-			}),
+		const target = self.resource("target", { version: 1, deps: [owner], open: check });
+		const shared = self.get(ChildProjection, {
+			parentId: Number(input.sessionId),
+			agentId: input.agentId ?? `round-${input.taskId}`,
+		});
+		const authorizedRevision = self.state("authorizedRevision", Type.Integer(), 0);
+		self.on("authorizedView", shared.revision, async (value, ctx) => {
+			try {
+				void target.value;
+				await check();
+				if (value) authorizedRevision.replace(ctx, value);
+			} catch {
+				authorizedRevision.replace(ctx, 0);
+			}
 		});
 		return {
-			kind: "ready",
+			variant: "ready",
 			revision: authorizedRevision,
 			chunk: async (request) => {
 				await check();

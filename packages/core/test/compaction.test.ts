@@ -1,5 +1,5 @@
 import { expect, it } from "bun:test";
-import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import { type FauxResponseFactory, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
 
 import { createNekoRuntime } from "../src/runtime.ts";
@@ -34,6 +34,37 @@ it("uses native compaction, distinguishes no-op and applied, preserves recency",
 		await runtime.close();
 	}
 }, 15000);
+
+it("keeps the system baseline ahead of the conversation after compaction without touching recency", async () => {
+	const requests: string[][] = [];
+	const record: FauxResponseFactory = (context) => {
+		requests.push(context.messages.map((message) => message.role));
+		return fauxAssistantMessage([fauxText("ok")]);
+	};
+	const faux = fauxProvider({ models: [{ id: "compact", contextWindow: 1000000 }] });
+	faux.setResponses(Array.from({ length: 12 }, () => record));
+	const runtime = await createNekoRuntime({
+		storage: "memory",
+		model: { provider: "faux", modelId: "compact" },
+		providers: [faux.provider],
+	});
+	try {
+		await runtime.waitAnswer(await runtime.submit(`first ${"a".repeat(90000)}`));
+		await runtime.waitAnswer(await runtime.submit(`second ${"b".repeat(90000)}`));
+		const before = (await runtime.listConversations())[0]!;
+		await runtime.root.compact("Keep the task");
+		for (let i = 0; i < 200 && (await runtime.root.compactionRecord())?.phase !== "applied"; i++) await Bun.sleep(10);
+		expect((await runtime.root.compactionRecord())?.phase).toBe("applied");
+		expect((await runtime.listConversations())[0]!.lastMessageAt).toBe(before.lastMessageAt);
+		await runtime.waitAnswer(await runtime.submit("third"));
+		const after = requests.at(-1)!;
+		expect(after.filter((role) => role === "system")).toHaveLength(1);
+		expect(after[0]).toBe("system");
+		expect(after.slice(1).includes("system")).toBe(false);
+	} finally {
+		await runtime.close();
+	}
+}, 20000);
 
 for (const [label, extra, expectedBlocking] of [
 	["background", 40000, false],

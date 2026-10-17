@@ -1,22 +1,26 @@
 import { expect, it } from "bun:test";
-import { cell, createHost } from "@earendil-works/chord";
+import { createHost } from "@earendil-works/chord";
 import { Value } from "typebox/value";
-import { ChatViewSchema, DirectoryStateSchema, NekoModels, NekoSessionDirectory } from "../src/contract.ts";
+import {
+	ChatViewSchema,
+	DirectoryStateSchema,
+	GATEWAY_HOST,
+	NekoModels,
+	NekoSessionDirectory,
+} from "../src/contract.ts";
 
 it("validates shared contract results and state before publishing them", async () => {
-	const host = createHost({ name: "contract-test", dev: true, onError() {} });
-	host.serve(NekoModels, () => ({ kind: "ready", list: async () => [{ provider: "invalid" }] as never }));
+	const host = createHost({ name: GATEWAY_HOST, self: { kind: "host" }, dev: true, onError() {} });
+	host.serve(NekoModels, () => ({ variant: "ready", list: async () => [{ provider: "invalid" }] as never }));
 	let invalidState = () => Promise.resolve();
 	host.serve(NekoSessionDirectory, (_input, _principal, self) => {
-		const { state } = self.state({ state: cell(DirectoryStateSchema, { revision: 1, sessions: [] }) });
+		const state = self.state("state", DirectoryStateSchema, { revision: 1, sessions: [] });
 		invalidState = () => host.root((ctx) => state.replace(ctx, { revision: 1, sessions: [{ id: 42 }] } as never));
-		return { kind: "ready", state };
+		return { variant: "ready", state };
 	});
 	try {
-		const models = host.get(NekoModels, {});
-		const directory = host.get(NekoSessionDirectory, {});
+		const [models, directory] = await Promise.all([host.get(NekoModels, {}), host.get(NekoSessionDirectory, {})]);
 		const stop = directory.state.subscribe(() => {});
-		await Promise.all([models.ready, directory.ready]);
 		await expect(models.list(null)).rejects.toMatchObject({ code: "invalid", reason: "result" });
 		await expect(invalidState()).rejects.toMatchObject({ code: "invalid", reason: "state" });
 		expect(directory.state.value).toEqual({ revision: 1, sessions: [] });

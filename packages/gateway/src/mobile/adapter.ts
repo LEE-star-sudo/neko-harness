@@ -1,10 +1,9 @@
-import { ChordError, type Handle } from "@earendil-works/chord";
+import { ChordError, type Ref } from "@earendil-works/chord";
 import { agentIdFor } from "@neko-harness/core";
 import { byMessage, messageTime } from "@neko-harness/core/session-display";
 import type { TSchema } from "typebox";
 import { Check } from "typebox/value";
 import type { RawData, WebSocket } from "ws";
-import { waitForValue } from "../client-session.ts";
 import type {
 	NekoAttachment,
 	NekoChat,
@@ -66,13 +65,13 @@ export type MobileAdapterOptions = {
 
 /** per-phone 复用的桌面服务句柄（白名单：目录/管理/工作区/聊天/子 agent，见 design D6）。 */
 export type MobileServices = {
-	readonly directory: Handle<typeof NekoSessionDirectory>;
-	readonly management: Handle<typeof NekoSessionManagement>;
-	readonly workspaces: Handle<typeof NekoWorkspaces>;
-	readonly openChat?: (attachment: NekoAttachment) => Handle<typeof NekoChat>;
+	readonly directory: Ref<typeof NekoSessionDirectory>;
+	readonly management: Ref<typeof NekoSessionManagement>;
+	readonly workspaces: Ref<typeof NekoWorkspaces>;
+	readonly openChat?: (attachment: NekoAttachment) => Ref<typeof NekoChat>;
 	readonly openSubagent?: (
 		input: NekoAttachment & { readonly taskId?: number; readonly agentId?: string },
-	) => Handle<typeof NekoSubagent>;
+	) => Ref<typeof NekoSubagent>;
 };
 
 const CLOSE_INVALID_JSON = 1003;
@@ -134,7 +133,7 @@ type ChatState = {
 	readonly subscriptionId: string;
 	readonly sessionId: string;
 	readonly attachment: NekoAttachment;
-	readonly chat: Handle<typeof NekoChat>;
+	readonly chat: Ref<typeof NekoChat>;
 	readonly projection: MobileChatProjection;
 	/** 释放视图与审批订阅；快照同步建立后赋值。 */
 	cleanup: () => void;
@@ -355,15 +354,18 @@ export class MobileAdapter {
 	// ——— workspaces / sessions ———
 
 	private async workspacesList(): Promise<unknown> {
-		const state = await waitForValue(this.services().workspaces.state);
+		const { workspaces } = this.services();
+		await workspaces.ready;
+		const state = workspaces.state.value;
 		return {
 			workspaces: state.workspaces.map((workspace) => ({ root: workspace.path, name: baseName(workspace.path) })),
 		};
 	}
 
 	private async registeredWorkspaceRoots(): Promise<string[]> {
-		const state = await waitForValue(this.services().workspaces.state);
-		return state.workspaces.map((workspace) => workspace.path);
+		const { workspaces } = this.services();
+		await workspaces.ready;
+		return workspaces.state.value.workspaces.map((workspace) => workspace.path);
 	}
 
 	private async sessionsList(params: { workspace: string; query?: string; cursor?: string }): Promise<unknown> {
@@ -372,7 +374,9 @@ export class MobileAdapter {
 			throw new MobileMethodError("invalid_params", `unknown workspace: ${params.workspace}`);
 		const offset = params.cursor === undefined ? 0 : Number.parseInt(params.cursor, 10);
 		if (!Number.isInteger(offset) || offset < 0) throw new MobileMethodError("invalid_params", "invalid cursor");
-		const directory = await waitForValue(this.services().directory.state);
+		const { directory: directoryRef } = this.services();
+		await directoryRef.ready;
+		const directory = directoryRef.state.value;
 		let sessions = directory.sessions.filter((session) => session.workspaceRoot === params.workspace);
 		if (params.query !== undefined) {
 			const query = params.query.toLowerCase();
@@ -449,10 +453,7 @@ export class MobileAdapter {
 		const chat = services.openChat(attachment);
 		const stopView = chat.view.subscribe(() => {});
 		try {
-			await remote(async () => {
-				await chat.ready;
-				await waitForValue(chat.view);
-			});
+			await remote(() => chat.ready);
 		} catch (error) {
 			stopView();
 			chat.release();

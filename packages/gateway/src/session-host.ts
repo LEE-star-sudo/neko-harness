@@ -1,17 +1,14 @@
 import { open } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import {
-	type BehaviorOf,
 	ChordError,
 	type Context,
-	cell,
+	type Ctx,
 	type Host,
-	hostPrincipal,
+	type ImplementationOf,
 	type LocalContract,
-	listener,
 	local,
 	opaque,
-	resource,
 } from "@earendil-works/chord";
 import { withAbortSignal } from "@earendil-works/chord/context";
 import { type ConversationId, type EntryRecord, UsageDoc } from "@earendil-works/pi-durable";
@@ -32,6 +29,7 @@ import { workspaceTarget } from "@neko-harness/core/workspace-files";
 import { Type } from "typebox";
 import { ChatViewSchema, type NekoAttachment, NekoChat } from "./contract.ts";
 import { IMAGE_CHUNK_BYTES, ImageUploads } from "./image-uploads.ts";
+import type { GatewayPrincipal } from "./principal.ts";
 import { installSubagentHost } from "./subagent-host.ts";
 export type AttachmentOwner = { active: NekoAttachment | null };
 const OwnerInput = Type.Object({});
@@ -182,73 +180,70 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 		},
 	};
 }
-export function serveSessions(host: Host, runtime: NekoRuntime, context: Context) {
+export function serveSessions(host: Host<GatewayPrincipal>, runtime: NekoRuntime, context: Context) {
 	installSubagentHost(host, runtime, context);
 	host.serve(Owner, (_input, _principal, self) => {
-		const { owner } = self.resources({
-			owner: resource({
-				rev: 1,
-				open: () => ({ active: null }) as AttachmentOwner,
-				close: (value) => {
-					value.active = null;
-				},
-			}),
+		const owner = self.resource("owner", {
+			version: 1,
+			open: () => ({ active: null }) as AttachmentOwner,
+			close: (value) => {
+				value.active = null;
+			},
 		});
 		return { owner: self.expose(owner) };
 	});
 	host.serve(Projection, (input, _principal, self) => {
-		const { view } = self.state({ view: cell(ChatViewSchema, emptyView) });
-		const { projection } = self.resources({
-			projection: resource({
-				rev: 1,
-				async open({ signal }) {
-					const session = await runtime.getConversation(Number(input.id) as NekoSession["id"]);
-					if (!session) throw new ChordError("gone", "Session unavailable");
-					const opened = await openProjection(runtime, session, context);
-					try {
-						const initial = await opened.project();
-						await host.root((ctx) => view.replace(ctx, initial), { signal });
-						return opened;
-					} catch (error) {
-						opened.close();
-						throw error;
-					}
-				},
-				close: (value) => value.close(),
-			}),
+		const view = self.state("view", ChatViewSchema, emptyView);
+		const projection = self.resource("projection", {
+			version: 1,
+			async open({ signal }) {
+				const session = await runtime.getConversation(Number(input.id) as NekoSession["id"]);
+				if (!session) throw new ChordError("gone", "Session unavailable");
+				const opened = await openProjection(runtime, session, context);
+				try {
+					const initial = await opened.project();
+					await host.root((ctx) => view.replace(ctx, initial), { signal });
+					return opened;
+				} catch (error) {
+					opened.close();
+					throw error;
+				}
+			},
+			close: (value) => value.close(),
 		});
-		self.listen({
-			view: listener(
-				projection,
-				(value) => value,
-				async (_event, ctx) => {
-					view.replace(ctx, await projection.value.project());
-				},
-			),
-		});
+		self.on(
+			"view",
+			projection,
+			(value) => value,
+			async (_event, ctx) => {
+				view.replace(ctx, await projection.value.project());
+			},
+		);
 		return { view, reader: self.expose(projection) };
 	});
 	host.serve(NekoChat, (input, principal, self) => {
 		const owner = self.get(Owner, {}, { principal });
-		const shared = self.get(Projection, { id: input.sessionId }, { principal: hostPrincipal });
-		const { uploads, projection } = self.resources({
-			uploads: resource({ rev: 1, open: () => new ImageUploads(), close: (value) => value.close() }),
-			projection: resource({
-				rev: 1,
-				deps: [owner],
-				async open() {
-					if (
-						owner.owner?.active?.attachmentId !== input.attachmentId ||
-						owner.owner.active.sessionId !== input.sessionId
-					)
-						throw new ChordError("forbidden", "Attachment does not belong to this connection");
-					const session = await runtime.getConversation(Number(input.sessionId) as NekoSession["id"]);
-					if (!session) throw new ChordError("gone", "Session unavailable");
-					return {
-						session,
-					};
-				},
-			}),
+		const shared = self.get(Projection, { id: input.sessionId });
+		const uploads = self.resource("uploads", {
+			version: 1,
+			open: () => new ImageUploads(),
+			close: (value) => value.close(),
+		});
+		const projection = self.resource("projection", {
+			version: 1,
+			deps: [owner],
+			async open() {
+				if (
+					owner.owner?.active?.attachmentId !== input.attachmentId ||
+					owner.owner.active.sessionId !== input.sessionId
+				)
+					throw new ChordError("forbidden", "Attachment does not belong to this connection");
+				const session = await runtime.getConversation(Number(input.sessionId) as NekoSession["id"]);
+				if (!session) throw new ChordError("gone", "Session unavailable");
+				return {
+					session,
+				};
+			},
 		});
 		const safeUpload = <T>(action: () => T): T => {
 			try {
@@ -257,8 +252,8 @@ export function serveSessions(host: Host, runtime: NekoRuntime, context: Context
 				throw new ChordError("invalid", error instanceof Error ? error.message : "Image upload failed");
 			}
 		};
-		const behavior: BehaviorOf<typeof NekoChat> = {
-			kind: "ready",
+		const behavior: ImplementationOf<typeof NekoChat> = {
+			variant: "ready",
 			view: shared.view,
 			draftImage: async ({ id, offset }) => safeUpload(() => uploads.value.read(id, offset)),
 			importImage: async (path, ctx) => {
@@ -422,11 +417,8 @@ export function serveSessions(host: Host, runtime: NekoRuntime, context: Context
 		for (const name of Object.keys(
 			NekoChat.def.variants.ready.methods,
 		) as (keyof typeof NekoChat.def.variants.ready.methods)[]) {
-			const method = behavior[name] as (arg: never, ctx: import("@earendil-works/chord").Ctx) => unknown;
-			(behavior as unknown as Record<string, unknown>)[name] = async (
-				arg: never,
-				ctx: import("@earendil-works/chord").Ctx,
-			) => {
+			const method = behavior[name] as (arg: never, ctx: Ctx<GatewayPrincipal>) => unknown;
+			(behavior as unknown as Record<string, unknown>)[name] = async (arg: never, ctx: Ctx<GatewayPrincipal>) => {
 				await guard();
 				ctx.signal.throwIfAborted();
 				return method(arg, ctx);

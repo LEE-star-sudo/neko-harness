@@ -1,10 +1,11 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ChordError, createHost, type Link } from "@earendil-works/chord";
+import { ChordError, type Link } from "@earendil-works/chord";
 import {
+	assertGatewayIdentity,
+	createClientHost,
 	createUnixLink,
 	createWsLink,
-	identifiedLink,
 	NekoMobileAdmin,
 	readOrCreateMobileAdminToken,
 } from "@neko-harness/gateway";
@@ -70,7 +71,7 @@ export function createMobileAdminCaller(
 		signal.throwIfAborted();
 		const link: Link =
 			gateway.socketPath !== undefined ? await createUnixLink(gateway.socketPath) : createWsLink(gateway.wsUrl);
-		const host = createHost({ kind: "client", upstream: identifiedLink(link, serverId), onError: () => {} });
+		const host = createClientHost(link);
 		const release = (): void => {
 			void host.close().catch(() => undefined);
 			link.close("aborted");
@@ -78,7 +79,8 @@ export function createMobileAdminCaller(
 		// 超时或取消时立即断开连接，避免悬挂调用占用资源。
 		signal.addEventListener("abort", release, { once: true });
 		try {
-			const admin = host.get(NekoMobileAdmin, { token }, { at: serverId }) as unknown as Record<
+			await assertGatewayIdentity(host, serverId, signal);
+			const admin = (await host.get(NekoMobileAdmin, { token }, { signal })) as unknown as Record<
 				string,
 				(params: unknown) => Promise<unknown>
 			>;

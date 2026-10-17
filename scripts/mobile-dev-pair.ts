@@ -5,10 +5,10 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createHost } from "@earendil-works/chord";
 import { DEFAULT_STORAGE_PATH } from "@neko-harness/core";
 import qrcode from "qrcode-generator";
-import { identifiedLink } from "../packages/gateway/src/link.ts";
+import { assertGatewayIdentity } from "../packages/gateway/src/client-session.ts";
+import { createClientHost } from "../packages/gateway/src/link.ts";
 import { NekoMobileAdmin } from "../packages/gateway/src/mobile/admin.ts";
 import { MobileStore } from "../packages/gateway/src/mobile/store.ts";
 import { readGatewayPortFile } from "../packages/gateway/src/port-file.ts";
@@ -161,9 +161,10 @@ export async function main(argv: readonly string[]): Promise<void> {
 	// 与 gateway 共用同一 admin-token 文件：缺失时在本机安全生成（0600，32 字节随机），绝不打印。
 	const token = await (await MobileStore.open(options.dataDir)).ensureAdminToken();
 	const link = await connectGatewayLink({ ...options, serverId });
-	const host = createHost({ kind: "client", upstream: identifiedLink(link, serverId), onError: () => {} });
+	const host = createClientHost(link);
 	try {
-		const admin = host.get(NekoMobileAdmin, { token }, { at: serverId });
+		await assertGatewayIdentity(host, serverId);
+		const admin = await host.get(NekoMobileAdmin, { token });
 		try {
 			const state = await admin.enable({ address: options.address, port: options.port });
 			const { pairingText, expiresAt } = await admin.createPairing(null);

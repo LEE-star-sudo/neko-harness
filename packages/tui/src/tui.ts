@@ -385,7 +385,7 @@ class NekoTuiApp {
 		const refreshVersion = async () => {
 			const installed = await installedVersion();
 			if (this.#exitStarted) return;
-			const notice = versionNotice(this.#gateway.client.application.info.value ?? null, installed);
+			const notice = versionNotice(this.#gateway.client.application.info.value, installed);
 			this.#versionNotice.clear();
 			if (notice) this.#versionNotice.addChild(new ThemedTruncatedText(() => formatNotice(notice, "info"), 1, 0));
 			this.#ui.requestRender();
@@ -497,7 +497,7 @@ class NekoTuiApp {
 				void openVersion(
 					this.#panel,
 					async () => ({
-						state: this.#gateway.client.application.info.value ?? null,
+						state: this.#gateway.client.application.info.value,
 						installed: await installedVersion(),
 					}),
 					() => this.#gateway.client.application.check(null),
@@ -534,7 +534,7 @@ class NekoTuiApp {
 		if (chat === undefined) return;
 		if (
 			this.#lastView?.agent.model?.provider === "deepseek" &&
-			this.#gateway.client.credentials.state.value?.statuses.deepseek.source === "none"
+			this.#gateway.client.credentials.state.value.statuses.deepseek.source === "none"
 		) {
 			this.#editor.setText(text);
 			this.addNotice("Configure DeepSeek with /login before sending.", "warning");
@@ -665,7 +665,7 @@ class NekoTuiApp {
 			this.addNotice(messageOf(error), "warning", { wrap: true });
 			return;
 		}
-		const summary = this.#gateway.client.directory.state.value?.sessions.find((s) => s.id === sessionId);
+		const summary = this.#gateway.client.directory.state.value.sessions.find((s) => s.id === sessionId);
 		const title = summary ? sessionName(summary, "") : "";
 		this.addNotice("Exporting...");
 		try {
@@ -721,7 +721,7 @@ class NekoTuiApp {
 		this.#historyItems = undefined;
 		this.#resetTranscript();
 		const view = handle.view;
-		if (view.value !== undefined) this.applyView(view.value);
+		this.applyView(view.value);
 		this.#viewUnsubscribe = view.subscribe(() => {
 			this.scheduleApply();
 		});
@@ -768,7 +768,7 @@ class NekoTuiApp {
 	async archiveSession(): Promise<void> {
 		const current = this.#sessionId;
 		await this.#gateway.client.management.archive(current);
-		const next = recentlyVisited(this.#gateway.client.directory.state.value?.sessions ?? [], this.#options.cwd!).find(
+		const next = recentlyVisited(this.#gateway.client.directory.state.value.sessions, this.#options.cwd!).find(
 			(s) => s.id !== current,
 		);
 		if (next) await this.switchSession(next.id);
@@ -780,11 +780,7 @@ class NekoTuiApp {
 	private sessionItems() {
 		return [
 			{ value: NEW_SESSION_VALUE, label: "+ New session", description: this.#options.cwd },
-			...sessionPickerItems(
-				this.#gateway.client.directory.state.value?.sessions ?? [],
-				this.#options.cwd!,
-				this.#sessionId,
-			),
+			...sessionPickerItems(this.#gateway.client.directory.state.value.sessions, this.#options.cwd!, this.#sessionId),
 		];
 	}
 	openSessionsOverlay(): void {
@@ -1431,13 +1427,7 @@ export async function runTui(options: NekoTuiOptions = {}): Promise<void> {
 
 /** 初始会话：目录里最早创建的（root 最小 id）；目录为空则新建。 */
 export async function initialSessionId(gateway: NekoTuiGateway, cwd: string): Promise<string> {
-	const state = gateway.client.directory.state;
-	const start = Date.now();
-	while (state.value === undefined) {
-		if (Date.now() - start > 5_000) throw new Error("Timed out loading sessions");
-		await new Promise((resolve) => setTimeout(resolve, 25));
-	}
-	const sessions = state.value?.sessions ?? [];
+	const sessions = gateway.client.directory.state.value.sessions;
 	const first = recentlyVisited(sessions, cwd)[0];
 	if (first !== undefined) return first.id;
 	return (await gateway.client.management.create({ ...(cwd !== undefined ? { cwd } : {}) })).id;

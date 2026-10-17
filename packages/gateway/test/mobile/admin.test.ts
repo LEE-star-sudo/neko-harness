@@ -6,11 +6,11 @@ import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect as tlsConnect } from "node:tls";
-import { ChordError, createHost, type Link } from "@earendil-works/chord";
+import { ChordError, type Link } from "@earendil-works/chord";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
 import { renderPairingQr } from "../../../../scripts/mobile-dev-pair.ts";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../../src/index.ts";
-import { identifiedLink } from "../../src/link.ts";
+import { createClientHost } from "../../src/link.ts";
 import { createMobileAdminFactory, NekoMobileAdmin } from "../../src/mobile/admin.ts";
 import type { MobileGateway } from "../../src/mobile/listener.ts";
 import { MobileStore } from "../../src/mobile/store.ts";
@@ -140,8 +140,8 @@ function tlsFingerprint(port: number): Promise<string> {
 
 async function connectAdmin(gateway: NekoGateway, token: string) {
 	const link: Link = IS_WINDOWS ? createWsLink(gateway.wsUrl ?? "") : await createUnixLink(gateway.socketPath ?? "");
-	const host = createHost({ kind: "client", upstream: identifiedLink(link, gateway.serverId), onError: () => {} });
-	const admin = host.get(NekoMobileAdmin, { token }, { at: gateway.serverId });
+	const host = createClientHost(link);
+	const admin = await host.get(NekoMobileAdmin, { token });
 	return { host, link, admin };
 }
 

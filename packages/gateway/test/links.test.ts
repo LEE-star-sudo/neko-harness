@@ -1,8 +1,8 @@
 import { expect, it } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { type Frame, memoryLinkPair, type WebSocketLike } from "@earendil-works/chord";
-import { boundedWebSocketLink, identifiedLink, MAX_LINK_BYTES } from "../src/link.ts";
+import type { Frame, WebSocketLike } from "@earendil-works/chord";
+import { boundedWebSocketLink, MAX_LINK_BYTES } from "../src/link.ts";
 import { UnixLink } from "../src/unix-link.ts";
 
 class FakeSocket extends EventEmitter {
@@ -31,7 +31,7 @@ it("decodes split and joined Unix frames in FIFO order, including Unicode", () =
 	const seen: Frame[] = [];
 	link.receive((frame) => seen.push(frame));
 	const frames: Frame[] = [
-		{ t: "hello", name: "中文 host", kind: "client", epoch: 0 },
+		{ t: "hello", name: "中文 host", kind: "client", codeVersion: 0 },
 		{ t: "ping", n: 2 },
 		{ t: "pong", n: 3 },
 	];
@@ -102,7 +102,7 @@ class FakeWs implements WebSocketLike {
 it("preserves a long Unicode frame and ignores late sends after normal WS closure", () => {
 	const socket = new FakeWs();
 	const link = boundedWebSocketLink(socket);
-	const frame: Frame = { t: "hello", name: "长文本🌸".repeat(100000), kind: "host", epoch: 0 };
+	const frame: Frame = { t: "hello", name: "长文本🌸".repeat(100000), kind: "host", codeVersion: 0 };
 	const received: Frame[] = [];
 	link.receive((value) => received.push(value));
 	socket.open();
@@ -130,7 +130,7 @@ it("uses native WS buffering before open with bounded outbound and inbound queue
 	const slow = new FakeWs();
 	const other = boundedWebSocketLink(slow, 100);
 	for (let n = 0; n < 3; n++) other.send({ t: "ping", n });
-	expect(() => other.send({ t: "hello", name: "x".repeat(70), kind: "client", epoch: 0 })).toThrow();
+	expect(() => other.send({ t: "hello", name: "x".repeat(70), kind: "client", codeVersion: 0 })).toThrow();
 	expect(other.closed).toBe(true);
 	const blocked = new FakeWs();
 	blocked.open();
@@ -138,15 +138,4 @@ it("uses native WS buffering before open with bounded outbound and inbound queue
 	const third = boundedWebSocketLink(blocked, 100);
 	expect(() => third.send({ t: "ping", n: 1 })).toThrow();
 	expect(third.closed).toBe(true);
-});
-it("checks native hello name before forwarding state", async () => {
-	const [a, b] = memoryLinkPair();
-	const client = identifiedLink(a, "expected");
-	let seen = 0;
-	client.receive(() => seen++);
-	b.send({ t: "hello", name: "wrong", kind: "host", epoch: 1 });
-	b.send({ t: "ping", n: 1 });
-	await Bun.sleep(0);
-	expect(client.closed).toBe(true);
-	expect(seen).toBe(0);
 });

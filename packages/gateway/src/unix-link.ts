@@ -66,7 +66,7 @@ export class UnixLink implements Link {
 		}
 		if (this.#buffer.length > MAX_LINK_BYTES + 4) this.close("receive buffer limit exceeded");
 	}
-	#transmit(data: string) {
+	#transmit(data: string | Uint8Array) {
 		const bytes = Buffer.from(data);
 		if (bytes.length > MAX_LINK_BYTES || this.#socket.writableLength + bytes.length + 4 > MAX_LINK_BYTES) {
 			this.#socket.destroy();
@@ -78,7 +78,7 @@ export class UnixLink implements Link {
 	}
 	send(frame: Frame) {
 		try {
-			this.#native.send(frame);
+			return this.#native.send(frame);
 		} catch (error) {
 			this.#native.close("pending byte limit exceeded");
 			throw error;

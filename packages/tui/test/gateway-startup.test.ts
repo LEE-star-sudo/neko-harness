@@ -192,6 +192,29 @@ for (const at of ["reuse", "spawn"] as const) {
 	});
 }
 
+it("treats a running gateway on another Chord protocol version as fatal and does not spawn a competitor", async () => {
+	const fresh = await target();
+	const legacy = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+	await new Promise<void>((resolve) => legacy.once("listening", resolve));
+	legacy.on("connection", (socket) => {
+		socket.send(JSON.stringify({ t: "hello", name: "legacy", kind: "host", epoch: 1 }));
+		socket.on("error", () => {});
+	});
+	const address = legacy.address();
+	if (!address || typeof address === "string") throw new Error("Missing address");
+	await writeFile(fresh.portFile, `ws://127.0.0.1:${address.port}`);
+	const child = mockSpawn(() => writeFileSync(fresh.portFile, fresh.gateway.wsUrl!));
+	try {
+		await expect(connectToGateway(fresh.options)).rejects.toBeInstanceOf(ApplicationProtocolError);
+		expect(child.spawn).not.toHaveBeenCalled();
+	} finally {
+		child.restore();
+		for (const client of legacy.clients) client.terminate();
+		await new Promise<void>((resolve) => legacy.close(() => resolve()));
+		await fresh.close();
+	}
+});
+
 for (const file of ["identity", "port"] as const) {
 	it(`reports a signal-terminated child promptly while waiting for its ${file} file`, async () => {
 		const fresh = await target();

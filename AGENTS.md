@@ -2,7 +2,7 @@
 
 ## 项目
 
-neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord / pi-env / pi-tui 1.2.0，全部精确锁版本）的 agent harness monorepo。Bun 1.4.2。设计决策见 `openspec/changes/archive/2026-10-11-bootstrap-neko-harness/design.md`。
+neko-harness：基于 Pi 生态（pi-durable / pi-ai / chord / pi-env / pi-tui 1.3.0，全部精确锁版本）的 agent harness monorepo。Bun 1.4.2。设计决策见 `openspec/changes/archive/2026-10-11-bootstrap-neko-harness/design.md`。
 
 ## 常用命令
 
@@ -43,9 +43,11 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - core 的 `job` 工具（`packages/core/src/jobs.ts`、`job-engine.ts`）基于 `env.exec` 运行后台命令（不用 pty）；任务状态存 `app.neko.jobs` 文档，运行中输出只在内存。任务结束/崩溃经 `jobReport` 输入回报并触发新一轮，投影为带 `jobId` 的 `system` 项，不进入输入历史。
 - 前端入口：Web 顶栏「任务」面板、TUI `/jobs`；经网关 `jobOutput`/`jobStop`（`jobsClient`）和 `ChatView.jobs` 读取，`ChatView.jobs` 缺省表示旧网关。数值上限集中在 `JOB_LIMITS`，改动需同步 spec。
 
-## Pi 1.2 使用要点（以已安装发布包的类型与行为为准）
+## Pi 1.3 使用要点（以已安装发布包的类型与行为为准）
 
-- durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord handle 方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root。
+- durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord 引用（`Ref`）方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root；ctx 只能给创建它的 host 的引用用（否则 `invalid/foreign_ctx`）。
+- Chord 1.3：契约 `remote(..., { host: hostNamed(...) })` 声明放置，调用方不再传 `{ at }`；工厂返回 `variant`（非 `kind`）；`self.state(name, schema, initial)`、`self.resource(name, { version, ... })`、`self.on(name, source, handler)` 按名声明；`lifetime: "host"` 取代 `eager`。`host.get` 异步并等首个状态快照，`host.hold` 同步可能仍 loading（状态在水合前读取会抛 `not_ready`，已结束的引用读取会抛其结束错误）；状态类型是 `T` 不含 `undefined`。对状态的监听器会在重订阅时再收到当前值，必须幂等对账。Chord 未导出 `MethodSpec`，`gateway/contract.ts` 用 `contract()`/`rpc()` 元组封装以保持声明可移植。
+- 网关：host 名固定为 `GATEWAY_HOST`（`neko`），`serverId` 由应用信息校验（`GatewayIdentityError` / `assertGatewayIdentity`），客户端 host 一律用 `createClientHost(link)`；主体类型是 `GatewayPrincipal`。链路协议版本 4：协议版本不同或握手无法解析（如 Pi 1.2 网关）会被客户端报告为 `ApplicationProtocolError`（不可重试）。服务端 WebSocket 不接受压缩帧；`ws` 在 Bun 下经 `addEventListener` 把文本帧交成 Buffer，因此有界链路用 `on("message", (data, isBinary))`。
 - 存储：`openNodeSqliteStorage(path)`（自动建父目录）或 `MemoryStorage`；一个存储同时只被一个 Harness 打开。
 - 会话：`harness.root(context, { agent })` → `conversation.submit({ type: "input", content }, context)` → `submission.wait(context)`；同 `requestId` 重复提交幂等（含重开后）。
 - 前端渲染数据源：`conversation.viewState(context)` / `conversation.watch(context)` / `watchEvents(harness, id, context)`。
@@ -56,4 +58,4 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 工具结果使用 `output`（模型）、`structuredOutput`（程序）与 `details`（UI，随工具消息持久化）；消息自身仍用 `content`。输入的 `entry: { kind, data }` 与内容原子持久化，排队期间位于 InboxDoc。
 - 存储致命错误终止 Harness，`closed`/watch `session_failed` 通知结束；独立无效读取 StorageRequestError 只失败该请求，在 commit 中仍终止运行时。不重试 StorageRejected。
 - 原生 read 统一文字/图片，上游 Photon 处理器负责工具读图；附件仍严格校验。listFiles 来自 pi-env LocalExecutionEnv，共享按需 Connection，关闭时释放；@ 补全不依赖 fd，缓存与刷新边界见升级 design D11。
-- 以已安装的 1.2.0 类型为准，reference main 可含未发布修复。ConversationId 是数字 brand（ROOT = 1），未知 id 的 harness.conversation() 返回 undefined。
+- 以已安装的 1.3.0 类型为准，reference main 可含未发布修复（升级设计见 `openspec/changes/upgrade-pi-sdk-1-3/design.md`）。ConversationId 是数字 brand（ROOT = 1），未知 id 的 harness.conversation() 返回 undefined。

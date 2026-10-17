@@ -31,10 +31,7 @@ it("rejects forged attachments and malformed calls before side effects, preservi
 	try {
 		const chat = await a.attach("1");
 		await b.attach("1");
-		const stolen = b.host.get(NekoChat, a.attachment!, { at: target.serverId });
-		await expect(stolen.ready).rejects.toThrow("Attachment");
-		expect(stolen.view.value).toBeUndefined();
-		stolen.release();
+		await expect(b.host.get(NekoChat, a.attachment!)).rejects.toThrow("Attachment");
 		const before = await target.gateway.runtime.listConversations();
 		await expect(a.management.create({ cwd: 42 } as never)).rejects.toMatchObject({ code: "invalid" });
 		expect(await target.gateway.runtime.listConversations()).toHaveLength(before.length);

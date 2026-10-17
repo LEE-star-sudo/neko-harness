@@ -1,4 +1,5 @@
 export { connectNekoGateway, type NekoGatewayAddress, type NekoGatewayClient } from "./client.ts";
+export { assertGatewayIdentity } from "./client-session.ts";
 export {
 	NekoApplicationInfo,
 	NekoChat,
@@ -22,7 +23,7 @@ export {
 	startGateway,
 } from "./gateway.ts";
 export { isServerId } from "./identity.ts";
-export { identifiedLink } from "./link.ts";
+export { createClientHost } from "./link.ts";
 export { NekoMobileAdmin, readOrCreateMobileAdminToken } from "./mobile/admin.ts";
 export { gatewayPortFilePath, readGatewayPortFile, removeGatewayPortFile } from "./port-file.ts";
 export { gatewayCommand, stopGatewayProcess } from "./process.ts";

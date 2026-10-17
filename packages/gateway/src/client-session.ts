@@ -1,5 +1,5 @@
 /** Shared browser-safe connection and first-snapshot orchestration. Native handles pass through unchanged. */
-import { type Ctx, createHost, type Host, type Link, type Readable } from "@earendil-works/chord";
+import type { Ctx, Host, Link } from "@earendil-works/chord";
 import { APPLICATION_PROTOCOL, ApplicationProtocolError } from "@neko-harness/core/application-version";
 import {
 	NekoApplicationInfo,
@@ -16,30 +16,23 @@ import {
 	type WireJobOutput,
 	type WireJobSummary,
 } from "./contract.ts";
-import { identifiedLink } from "./link.ts";
+import { createClientHost } from "./link.ts";
 import { type SubagentClient, subagentClient } from "./subagent-client.ts";
-export function waitForValue<T>(state: Readable<T | undefined>, signal?: AbortSignal): Promise<T> {
-	return new Promise((resolve, reject) => {
-		let stop = () => {};
-		let settled = false;
-		const finish = (error?: unknown, value?: T) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			stop();
-			signal?.removeEventListener("abort", abort);
-			if (error) reject(error);
-			else resolve(value!);
-		};
-		const abort = () => finish(signal?.reason ?? new Error("Cancelled"));
-		const timer = setTimeout(() => finish(new Error("Timed out waiting for first snapshot")), 5000);
-		stop = state.subscribe((value) => {
-			if (value !== undefined) finish(undefined, value);
-		});
-		if (settled) stop();
-		signal?.addEventListener("abort", abort, { once: true });
-		if (signal?.aborted) abort();
-	});
+/** The gateway behind the link is not the one the caller discovered (its server id differs). */
+export class GatewayIdentityError extends Error {
+	constructor() {
+		super("Gateway identity mismatch");
+		this.name = "GatewayIdentityError";
+	}
+}
+/** Verifies from the gateway's own application info that it is the expected server before anything else is sent to it. */
+export async function assertGatewayIdentity(host: Host, serverId: string, signal?: AbortSignal): Promise<void> {
+	const application = await host.get(NekoApplicationInfo, {}, signal ? { signal } : {});
+	try {
+		if (application.info.value.serverId !== serverId) throw new GatewayIdentityError();
+	} finally {
+		application.release();
+	}
 }
 export const JOBS_UNSUPPORTED = "This gateway does not support background jobs. Restart the gateway to enable them.";
 export type JobsClient = {
@@ -90,8 +83,19 @@ export type NekoGatewayConnection = {
 	close(): Promise<void>;
 };
 export function createGatewayConnection(link: Link, serverId: string): NekoGatewayConnection {
-	const host = createHost({ kind: "client", upstream: identifiedLink(link, serverId), onError: () => {} });
-	const get = <C extends Parameters<Host["get"]>[0]>(type: C) => host.get(type, {} as never, { at: serverId });
+	let protocolMismatch = false;
+	const linkClosed = new AbortController();
+	let closeReason = "";
+	link.onClose((reason) => {
+		closeReason = reason;
+		linkClosed.abort(new Error(`Gateway connection closed: ${reason}`));
+	});
+	const host = createClientHost(link, {
+		onProtocolMismatch: () => {
+			protocolMismatch = true;
+		},
+	});
+	const get = <C extends Parameters<Host["hold"]>[0]>(type: C) => host.hold(type, {} as never);
 	const application = get(NekoApplicationInfo);
 	const keep: (() => void)[] = [application.info.subscribe(() => {})];
 	let business: ReturnType<typeof bindBusiness> | undefined;
@@ -116,6 +120,27 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 		if (!business) business = bindBusiness();
 		return business;
 	};
+	const checkReady = async (signal?: AbortSignal) => {
+		await deadline(application.ready, signal);
+		const info = application.info.value;
+		// Identity is verified from the gateway's own state before any business service is bound.
+		if (info.serverId !== serverId) throw new GatewayIdentityError();
+		if (info.protocolVersion !== APPLICATION_PROTOCOL) throw new ApplicationProtocolError();
+		protocolChecked = true;
+		const { directory, management, models, workspaces, credentials, workspaceFiles, skillMarket } = services();
+		await deadline(
+			Promise.all([
+				directory.ready,
+				management.ready,
+				models.ready,
+				workspaces.ready,
+				credentials.ready,
+				workspaceFiles.ready,
+				skillMarket.ready,
+			]),
+			signal,
+		);
+	};
 	let chat: NekoChat | undefined;
 	let attachment: NekoAttachment | undefined;
 	let stopView: (() => void) | undefined;
@@ -126,7 +151,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 		subagent(target) {
 			if (!attachment) throw new Error("No active session");
 			const input = { ...attachment, ...(typeof target === "string" ? { agentId: target } : { taskId: target }) };
-			return subagentClient(() => host.get(NekoSubagent, input, { at: serverId }));
+			return subagentClient(() => host.hold(NekoSubagent, input));
 		},
 		host,
 		link,
@@ -155,28 +180,13 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			return attachment;
 		},
 		async ready(signal) {
-			await deadline(application.ready, signal);
-			const info = await waitForValue(application.info, signal);
-			if (info.protocolVersion !== APPLICATION_PROTOCOL) throw new ApplicationProtocolError();
-			protocolChecked = true;
-			const { directory, management, models, workspaces, credentials, workspaceFiles, skillMarket } = services();
-			await deadline(
-				Promise.all([
-					directory.ready,
-					management.ready,
-					models.ready,
-					workspaces.ready,
-					credentials.ready,
-					workspaceFiles.ready,
-					skillMarket.ready,
-				]),
-				signal,
-			);
-			await Promise.all([
-				waitForValue(directory.state, signal),
-				waitForValue(workspaces.state, signal),
-				waitForValue(credentials.state, signal),
-			]);
+			try {
+				await checkReady(signal ? AbortSignal.any([signal, linkClosed.signal]) : linkClosed.signal);
+			} catch (error) {
+				// Another Chord protocol version, or a peer (e.g. a Pi 1.2 gateway) whose handshake we cannot parse.
+				if (protocolMismatch || closeReason.startsWith("protocol")) throw new ApplicationProtocolError();
+				throw error;
+			}
 		},
 		async attach(sessionId: string, ctx?: Ctx): Promise<NekoChat> {
 			const next = await connection.management.attach(sessionId, ctx);
@@ -185,12 +195,11 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			stopView?.();
 			chat?.release();
 			attachment = next;
-			const current = host.get(NekoChat, next, { at: serverId });
+			const current = host.hold(NekoChat, next);
 			chat = current;
 			stopView = current.view.subscribe(() => {});
 			try {
 				await deadline(current.ready, ctx?.signal);
-				await waitForValue(current.view, ctx?.signal);
 				if (current !== chat) throw new Error("Attachment changed");
 				return current;
 			} catch (error) {

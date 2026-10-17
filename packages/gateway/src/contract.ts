@@ -1,16 +1,19 @@
-/** Browser-safe Chord 1.2 contracts. All wire values are validated schemas. */
-import { type Handle, method, type RemoteContract, remote } from "@earendil-works/chord";
+/** Browser-safe Chord 1.3 contracts. All wire values are validated schemas. */
+import { type HostNamed, hostNamed, method, type Ref, type RemoteContract, remote } from "@earendil-works/chord";
 import { type Static, type TSchema, Type } from "typebox";
 
-// Chord 1.2 does not export MethodSpec; retain public schema tuples in emitted declarations.
-type Definition = {
+/** Every gateway service lives on the one host that serves it; the server id is verified through application info. */
+export const GATEWAY_HOST = "neko";
+// Chord does not export MethodSpec; keep public schema tuples so emitted declarations stay portable.
+export type Definition = {
 	version: number;
 	input: TSchema;
 	variants: Record<string, { state?: Record<string, TSchema>; methods?: Record<string, readonly [TSchema, TSchema]> }>;
 };
-type WireDef<D extends Definition> = {
+export type WireDef<D extends Definition> = {
 	version: D["version"];
 	input: D["input"];
+	host: HostNamed;
 	variants: {
 		[K in keyof D["variants"]]: {
 			state: D["variants"][K] extends { state: infer S extends Record<string, TSchema> } ? S : Record<never, never>;
@@ -20,8 +23,8 @@ type WireDef<D extends Definition> = {
 		};
 	};
 };
-const rpc = <A extends TSchema, R extends TSchema>(args: A, result: R): readonly [A, R] => [args, result];
-function contract<const D extends Definition>(name: string, def: D): RemoteContract<WireDef<D>> {
+export const rpc = <A extends TSchema, R extends TSchema>(args: A, result: R): readonly [A, R] => [args, result];
+export function contract<const D extends Definition>(name: string, def: D): RemoteContract<WireDef<D>> {
 	const variants = Object.fromEntries(
 		Object.entries(def.variants).map(([key, value]) => [
 			key,
@@ -33,7 +36,9 @@ function contract<const D extends Definition>(name: string, def: D): RemoteContr
 			},
 		]),
 	);
-	return remote(name, { ...def, variants } as Parameters<typeof remote>[1]) as RemoteContract<WireDef<D>>;
+	return remote(name, { ...def, host: hostNamed(GATEWAY_HOST), variants } as unknown as Parameters<
+		typeof remote
+	>[1]) as unknown as RemoteContract<WireDef<D>>;
 }
 const str = Type.String();
 const num = Type.Number();
@@ -350,7 +355,7 @@ export const NekoSubagent = contract("neko.subagent", {
 		},
 	},
 });
-export type NekoSubagent = Handle<typeof NekoSubagent>;
+export type NekoSubagent = Ref<typeof NekoSubagent>;
 export const NekoChat = contract("neko.chat", {
 	version: 1,
 	input: chatInput,
@@ -517,16 +522,16 @@ export const NekoSkillMarket = contract("neko.skill-market", {
 		},
 	},
 });
-export type NekoSessionDirectory = Handle<typeof NekoSessionDirectory>;
-export type NekoSessionManagement = Handle<typeof NekoSessionManagement>;
-export type NekoModels = Handle<typeof NekoModels>;
-export type NekoChat = Handle<typeof NekoChat>;
+export type NekoSessionDirectory = Ref<typeof NekoSessionDirectory>;
+export type NekoSessionManagement = Ref<typeof NekoSessionManagement>;
+export type NekoModels = Ref<typeof NekoModels>;
+export type NekoChat = Ref<typeof NekoChat>;
 export type WireJobSummary = Static<typeof JobSummarySchema>;
 export type WireJobOutput = Static<typeof JobOutputSchema>;
-export type NekoWorkspaces = Handle<typeof NekoWorkspaces>;
-export type NekoWorkspaceFiles = Handle<typeof NekoWorkspaceFiles>;
-export type NekoCredentials = Handle<typeof NekoCredentials>;
-export type NekoSkillMarket = Handle<typeof NekoSkillMarket>;
+export type NekoWorkspaces = Ref<typeof NekoWorkspaces>;
+export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
+export type NekoCredentials = Ref<typeof NekoCredentials>;
+export type NekoSkillMarket = Ref<typeof NekoSkillMarket>;
 export type NekoSessionSummary = Static<typeof SessionSummarySchema>;
 export type NekoDirectoryState = Static<typeof DirectoryStateSchema>;
 export type NekoWorkspaceSummary = Static<typeof WorkspaceSummarySchema>;
@@ -549,10 +554,13 @@ export const ApplicationInfoSchema = Type.Object({
 	latestVersion: nullableString,
 	checkedAt: Type.Union([integer, nil]),
 	checkState: Type.Enum(["unknown", "checking", "ok", "failed", "development"]),
+	serverId: str,
 });
 export const NekoApplicationInfo = contract("neko.application-info", {
 	version: 1,
 	input: Type.Object({}),
-	variants: { ready: { state: { info: ApplicationInfoSchema }, methods: { check: rpc(nil, ApplicationInfoSchema) } } },
+	variants: {
+		ready: { state: { info: ApplicationInfoSchema }, methods: { check: rpc(nil, ApplicationInfoSchema) } },
+	},
 });
-export type NekoApplicationInfo = Handle<typeof NekoApplicationInfo>;
+export type NekoApplicationInfo = Ref<typeof NekoApplicationInfo>;

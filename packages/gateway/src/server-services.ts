@@ -1,14 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-	ChordError,
-	type Context,
-	cell,
-	type Host,
-	hostPrincipal,
-	listener,
-	local,
-	method,
-} from "@earendil-works/chord";
+import { ChordError, type Context, type Ctx, type Host, local, method, type Self } from "@earendil-works/chord";
 import type { ConversationId } from "@earendil-works/pi-durable";
 import { CREDENTIAL_PROVIDERS, type NekoRuntime } from "@neko-harness/core";
 import { UpdateChecker, type UpdateCheckerOptions } from "@neko-harness/core/application-updates";
@@ -31,6 +22,7 @@ import {
 	NekoWorkspaces,
 	WorkspaceStateSchema,
 } from "./contract.ts";
+import type { GatewayPrincipal } from "./principal.ts";
 import { Owner, serveSessions } from "./session-host.ts";
 import { activeLevelOf, createSkillMarketClient, SkillMarketError } from "./skill-market.ts";
 import { browseWorkspaces } from "./workspaces.ts";
@@ -46,10 +38,11 @@ const ServerState = local("neko.server-state", {
 	},
 });
 export async function createNekoServerServices(options: {
-	host: Host;
+	host: Host<GatewayPrincipal>;
 	runtime: NekoRuntime;
 	context: Context;
 	marketUrl: string;
+	serverId: string;
 	promptHome?: string;
 	updates?: UpdateCheckerOptions;
 	updateIntervalMs?: number;
@@ -58,6 +51,7 @@ export async function createNekoServerServices(options: {
 	const updates = new UpdateChecker(options.updates);
 	await updates.local();
 	const updateListeners = new Set<(value: UpdateState) => void>();
+	const info = (value: UpdateState) => ({ ...value, serverId: options.serverId });
 	let published = JSON.stringify(updates.state),
 		closed = false;
 	const publishUpdates = () => {
@@ -68,25 +62,24 @@ export async function createNekoServerServices(options: {
 		for (const listener of updateListeners) listener(updates.state);
 	};
 	host.serve(NekoApplicationInfo, (_input, _principal, self) => {
-		const state = self.state({ info: cell(ApplicationInfoSchema, updates.state) });
-		self.listen({
-			updates: listener(
-				{
-					subscribe: (fn: (value: UpdateState) => void) => {
-						updateListeners.add(fn);
-						return () => updateListeners.delete(fn);
-					},
+		const current = self.state("info", ApplicationInfoSchema, info(updates.state));
+		self.on(
+			"updates",
+			{
+				subscribe: (fn: (value: UpdateState) => void) => {
+					updateListeners.add(fn);
+					return () => updateListeners.delete(fn);
 				},
-				(value, ctx) => state.info.replace(ctx, value),
-			),
-		});
+			},
+			(value, ctx) => current.replace(ctx, info(value)),
+		);
 		return {
-			kind: "ready",
-			info: state.info,
+			variant: "ready",
+			info: current,
 			check: async () => {
 				await updates.check(true);
 				publishUpdates();
-				return updates.state;
+				return info(updates.state);
 			},
 		};
 	});
@@ -166,56 +159,54 @@ export async function createNekoServerServices(options: {
 	host.serve(
 		ServerState,
 		(_input, _principal, self) => {
-			const state = self.state({
-				directory: cell(DirectoryStateSchema, { revision: 1, sessions }),
-				workspaces: cell(WorkspaceStateSchema, { revision: 1, workspaces }),
-				credentials: cell(CredentialStateSchema, { revision: 1, statuses }),
-			});
-			self.listen({
-				directory: listener(
-					{ subscribe: runtime.harness.subscribeCommits.bind(runtime.harness) },
-					async (event, ctx) => {
-						if (
-							!event.changes.some(
-								(change) =>
-									change.type === "conversation" ||
-									(change.type === "document" &&
-										[
-											"app.neko.session-metadata",
-											"app.neko.activity",
-											"app.neko.conversation",
-											"app.neko.workspaces",
-											"pi.agent",
-										].includes(change.record.kind)),
-							)
+			const directory = self.state("directory", DirectoryStateSchema, { revision: 1, sessions });
+			const workspaceState = self.state("workspaces", WorkspaceStateSchema, { revision: 1, workspaces });
+			const credentials = self.state("credentials", CredentialStateSchema, { revision: 1, statuses });
+			self.on(
+				"directory",
+				{ subscribe: runtime.harness.subscribeCommits.bind(runtime.harness) },
+				async (event, ctx) => {
+					if (
+						!event.changes.some(
+							(change) =>
+								change.type === "conversation" ||
+								(change.type === "document" &&
+									[
+										"app.neko.session-metadata",
+										"app.neko.activity",
+										"app.neko.conversation",
+										"app.neko.workspaces",
+										"pi.agent",
+									].includes(change.record.kind)),
 						)
-							return;
-						await serialize(async () => {
-							const [items, roots] = await Promise.all([list(), runtime.listWorkspaces()]);
-							state.directory.replace(ctx, { revision: state.directory.value.revision + 1, sessions: items });
-							state.workspaces.replace(ctx, { revision: state.workspaces.value.revision + 1, workspaces: roots });
-						});
-					},
-				),
-			});
+					)
+						return;
+					await serialize(async () => {
+						const [items, roots] = await Promise.all([list(), runtime.listWorkspaces()]);
+						directory.replace(ctx, { revision: directory.value.revision + 1, sessions: items });
+						workspaceState.replace(ctx, { revision: workspaceState.value.revision + 1, workspaces: roots });
+					});
+				},
+			);
 			return {
-				...state,
-				async refreshCredentials(_input: null, ctx: import("@earendil-works/chord").Ctx) {
-					state.credentials.replace(ctx, {
-						revision: state.credentials.value.revision + 1,
+				directory,
+				workspaces: workspaceState,
+				credentials,
+				async refreshCredentials(_input: null, ctx: Ctx<GatewayPrincipal>) {
+					credentials.replace(ctx, {
+						revision: credentials.value.revision + 1,
 						statuses: await readStatuses(),
 					});
 					return null;
 				},
 			};
 		},
-		{ eager: { input: {} } },
+		{ lifetime: "host" },
 	);
-	const shared = (self: import("@earendil-works/chord").Self) =>
-		self.get(ServerState, {}, { principal: hostPrincipal });
-	host.serve(NekoSessionDirectory, (_input, _principal, self) => ({ kind: "ready", state: shared(self).directory }));
+	const shared = (self: Self<GatewayPrincipal>) => self.get(ServerState, {});
+	host.serve(NekoSessionDirectory, (_input, _principal, self) => ({ variant: "ready", state: shared(self).directory }));
 	host.serve(NekoWorkspaces, (_input, _principal, self) => ({
-		kind: "ready",
+		variant: "ready",
 		state: shared(self).workspaces,
 		browse: (input) => browseWorkspaces(input),
 		add: (input) => serialize(() => runtime.addWorkspace(input.path)),
@@ -223,7 +214,7 @@ export async function createNekoServerServices(options: {
 	host.serve(NekoCredentials, (_input, _principal, self) => {
 		const hub = shared(self);
 		return {
-			kind: "ready",
+			variant: "ready",
 			state: hub.credentials,
 			save: async (input, ctx) => {
 				await runtime.saveCredential(input.provider, input.key);
@@ -236,7 +227,7 @@ export async function createNekoServerServices(options: {
 		};
 	});
 	host.serve(NekoModels, () => ({
-		kind: "ready",
+		variant: "ready",
 		list: async () =>
 			[...runtime.listModels()].map((value) => ({
 				...value,
@@ -245,7 +236,7 @@ export async function createNekoServerServices(options: {
 			})),
 	}));
 	host.serve(NekoWorkspaceFiles, () => ({
-		kind: "ready",
+		variant: "ready",
 		search: async (input, ctx) => {
 			const roots = await runtime.listWorkspaces();
 			if (!roots.some((root) => root.path === input.workspaceRoot))
@@ -262,7 +253,7 @@ export async function createNekoServerServices(options: {
 			return found;
 		};
 		return {
-			kind: "ready",
+			variant: "ready",
 			create: (input) => serialize(async () => summary((await runtime.createConversation(input)).id)),
 			fork: (id) => serialize(async () => summary((await runtime.forkConversation(toConversationId(id))).id)),
 			archive: async (id) => {
@@ -286,7 +277,7 @@ export async function createNekoServerServices(options: {
 		};
 	});
 	host.serve(NekoSkillMarket, () => ({
-		kind: "ready",
+		variant: "ready",
 		list: (input) =>
 			market
 				.list(input.query)

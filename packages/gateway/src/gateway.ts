@@ -16,10 +16,12 @@ import {
 	type NekoRuntime,
 } from "@neko-harness/core";
 import type { UpdateCheckerOptions } from "@neko-harness/core/application-updates";
+import { GATEWAY_HOST } from "./contract.ts";
 import { isServerId } from "./identity.ts";
 import { createMobileAdminFactory, NekoMobileAdmin } from "./mobile/admin.ts";
 import { MobileGateway } from "./mobile/listener.ts";
 import { removeGatewayPortFile, writeGatewayPortFile } from "./port-file.ts";
+import { type GatewayPrincipal, gatewayPrincipalKey, HOST_PRINCIPAL } from "./principal.ts";
 import { createNekoServerServices } from "./server-services.ts";
 import { createUnixListener } from "./unix-link.ts";
 import { createWsListener, type WsListener } from "./ws-listener.ts";
@@ -158,8 +160,9 @@ type BindOptions = {
 
 async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<NekoGateway> {
 	const { context, host, port, socketPath, serverId, nekoDir } = options;
-	const chord = createHost({
-		name: serverId,
+	const chord = createHost<GatewayPrincipal>({
+		name: GATEWAY_HOST,
+		self: HOST_PRINCIPAL,
 		dev: true,
 		onError: (error) => options.onError?.(error instanceof Error ? error : new Error(String(error))),
 		principalKey: gatewayPrincipalKey,
@@ -168,6 +171,7 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		host: chord,
 		runtime,
 		context,
+		serverId,
 		marketUrl: options.marketUrl,
 		...(options.updates ? { updates: options.updates } : {}),
 		...(options.updateIntervalMs ? { updateIntervalMs: options.updateIntervalMs } : {}),
@@ -182,7 +186,15 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 	}
 	try {
 		for (const listener of listeners)
-			await listener.start((link) => chord.accept(link, { principal: { connectionId: randomUUID() } }));
+			await listener.start((link) =>
+				chord.accept(link, {
+					principal: { kind: "local", connectionId: randomUUID() },
+					onProtocolMismatch: ({ peer }) =>
+						options.onError?.(
+							new Error(`Rejected a client on Chord protocol ${peer ?? "unknown"}; restart or update it.`),
+						),
+				}),
+			);
 	} catch (error) {
 		await Promise.allSettled(listeners.map((listener) => listener.close()));
 		await chord.close();
@@ -252,18 +264,6 @@ async function bindGateway(runtime: NekoRuntime, options: BindOptions): Promise<
 		})
 		.catch((error) => options.onError?.(error instanceof Error ? error : new Error(String(error))));
 	return gateway;
-}
-
-/** 移动 principal 的记录键携带 deviceId/grantRevision/connectionId；其余 principal 沿用 canonical JSON（桌面行为不变）。 */
-function gatewayPrincipalKey(principal: unknown): string {
-	if (typeof principal === "object" && principal !== null) {
-		const record = principal as Record<string, unknown>;
-		if (record.kind === "mobile" && typeof record.deviceId === "string" && typeof record.grantRevision === "number") {
-			const connectionId = typeof record.connectionId === "string" ? record.connectionId : "";
-			return `mobile:${record.deviceId}:${record.grantRevision}:${connectionId}`;
-		}
-	}
-	return JSON.stringify(principal) ?? "unknown";
 }
 
 /** 活跃实例占用/stale 识别由 Chord Unix listener 负责；此处把错误翻译为可操作的提示。 */

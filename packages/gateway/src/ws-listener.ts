@@ -48,7 +48,8 @@ export function createWsListener(options: WsListenerOptions): WsListener {
 			server.on("error", (error) => options.onError?.(error));
 			server.on("connection", (socket) => {
 				socket.on("error", (error) => options.onError?.(error));
-				accept(boundedWebSocketLink(socket, options.maxPendingBytes));
+				// 拒绝打包（压缩）帧：字节上限在解压之前生效，客户端不可信。
+				accept(boundedWebSocketLink(socket, options.maxPendingBytes, { acceptPacked: false }));
 			});
 		},
 		async close() {

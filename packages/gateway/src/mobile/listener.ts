@@ -3,10 +3,11 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer, type Server as HttpsServer } from "node:https";
 import type { Socket } from "node:net";
 import { hostname, type NetworkInterfaceInfo } from "node:os";
-import { createHost, type Link, memoryLinkPair } from "@earendil-works/chord";
+import { type Link, memoryLinkPair } from "@earendil-works/chord";
 import { type WebSocket, WebSocketServer } from "ws";
 import { NekoChat, NekoSessionDirectory, NekoSessionManagement, NekoSubagent, NekoWorkspaces } from "../contract.ts";
-import { identifiedLink } from "../link.ts";
+import { createClientHost } from "../link.ts";
+import { type GatewayPrincipal, isMobilePrincipal } from "../principal.ts";
 import { MobileAdapter, type MobileRuntimeBridge, type MobileServices } from "./adapter.ts";
 import { MobileAuth } from "./auth.ts";
 import { MobileCertificate } from "./certificate.ts";
@@ -38,8 +39,8 @@ export type MobileListenerState =
 	| { readonly status: "stopping" };
 
 export type MobileChordBridge = {
-	accept(link: Link, options: { readonly principal: unknown; readonly kind: "client" }): void;
-	invalidatePrincipal(match: ((principal: unknown) => boolean) | Readonly<Record<string, unknown>>): Promise<void>;
+	accept(link: Link, options: { readonly principal: GatewayPrincipal; readonly kind: "client" }): void;
+	invalidatePrincipal(match: (principal: GatewayPrincipal) => boolean): Promise<void>;
 };
 
 export type MobileGatewayOptions = {
@@ -100,12 +101,6 @@ function describeRelayError(error: unknown, address: string, port: number, bindA
 		default:
 			return `Windows 中继启动失败：${error.message}`;
 	}
-}
-
-function isMobilePrincipal(principal: unknown): boolean {
-	return (
-		typeof principal === "object" && principal !== null && (principal as Record<string, unknown>).kind === "mobile"
-	);
 }
 
 export type MobileAdminDevice = Pick<MobileDeviceRecord, "deviceId" | "name" | "pairedAt" | "lastSeenAt"> & {
@@ -429,11 +424,7 @@ export class MobileGateway {
 				void store.rememberConnectedAddress(learned).catch((error: unknown) => this.onError?.(toError(error)));
 			}
 		}
-		const clientHost = createHost({
-			kind: "client",
-			upstream: identifiedLink(clientEnd, this.serverId),
-			onError: () => {},
-		});
+		const clientHost = createClientHost(clientEnd);
 		let servicesValue: MobileServices | undefined;
 		const adapter = new MobileAdapter({
 			socket,
@@ -445,11 +436,11 @@ export class MobileGateway {
 			services: () => {
 				if (servicesValue === undefined) {
 					servicesValue = {
-						directory: clientHost.get(NekoSessionDirectory, {} as never, { at: this.serverId }),
-						management: clientHost.get(NekoSessionManagement, {} as never, { at: this.serverId }),
-						workspaces: clientHost.get(NekoWorkspaces, {} as never, { at: this.serverId }),
-						openChat: (attachment) => clientHost.get(NekoChat, attachment, { at: this.serverId }),
-						openSubagent: (input) => clientHost.get(NekoSubagent, input, { at: this.serverId }),
+						directory: clientHost.hold(NekoSessionDirectory, {}),
+						management: clientHost.hold(NekoSessionManagement, {}),
+						workspaces: clientHost.hold(NekoWorkspaces, {}),
+						openChat: (attachment) => clientHost.hold(NekoChat, attachment),
+						openSubagent: (input) => clientHost.hold(NekoSubagent, input),
 					};
 				}
 				return servicesValue;
@@ -477,10 +468,13 @@ export class MobileGateway {
 	private ensureNotifications(): void {
 		if (this.notificationCleanup !== undefined) return;
 		const [serverEnd, clientEnd] = memoryLinkPair();
-		this.chord.accept(serverEnd, { principal: { connectionId: "mobile-notification-hub" }, kind: "client" });
-		const host = createHost({ kind: "client", upstream: identifiedLink(clientEnd, this.serverId), onError: () => {} });
-		const directory = host.get(NekoSessionDirectory, {} as never, { at: this.serverId });
-		const workspaces = host.get(NekoWorkspaces, {} as never, { at: this.serverId });
+		this.chord.accept(serverEnd, {
+			principal: { kind: "local", connectionId: "mobile-notification-hub" },
+			kind: "client",
+		});
+		const host = createClientHost(clientEnd);
+		const directory = host.hold(NekoSessionDirectory, {});
+		const workspaces = host.hold(NekoWorkspaces, {});
 		const last = { directory: -1, workspaces: -1 };
 		const unsubscribe = [
 			directory.state.subscribe(() => {
