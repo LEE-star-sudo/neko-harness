@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxProvider } from "../../../test/faux.ts";
+import { APPLICATION_PROTOCOL } from "../../core/src/application-version.ts";
 import { startGateway } from "../../gateway/src/gateway.ts";
 import { waitFor } from "../../gateway/test/helpers.ts";
 import { GatewayConnection } from "../src/client/lib/gateway.ts";
@@ -49,7 +50,7 @@ it("reports immutable web version and changing installed version with no-store",
 			socketPath,
 			providers: [faux.provider],
 			model: { provider: "faux", modelId: "faux-1" },
-			updates: { protocolVersion: 5 },
+			updates: { protocolVersion: APPLICATION_PROTOCOL + 1 },
 		});
 		const incompatible = await (await fetch(`${web.url}/api/info`)).json();
 		expect(incompatible.protocolCompatible).toBe(false);
@@ -119,7 +120,7 @@ it("rediscovers a changed gateway address and drops incompatible retries", async
 			port: 0,
 			providers: [faux.provider],
 			model: { provider: "faux", modelId: "faux-1" },
-			updates: { protocolVersion: 5 },
+			updates: { protocolVersion: APPLICATION_PROTOCOL + 1 },
 		});
 		await waitFor(() => phase === "error", "incompatible phase");
 		const count = discoveries;

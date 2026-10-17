@@ -56,6 +56,12 @@ import { createNekoPrompt } from "./prompt/prompt.ts";
 import { createResourceLoader, scanSkillsByLevel } from "./prompt/resources.ts";
 import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
+import {
+	DEFAULT_SEARCH_PROVIDER,
+	isSearchProvider,
+	type SearchProviderId,
+	type SearchSettings,
+} from "./search-providers.ts";
 import { mergeUsage, SessionMetadataDoc, SessionMetadataManager } from "./session-metadata.ts";
 import { subagentUsageTotals, subtractSubagentUsage } from "./subagent-usage.ts";
 import {
@@ -65,7 +71,9 @@ import {
 	refreshDelegations,
 } from "./subagents.ts";
 import { createApprovalExtension, prepareApprovalConversations, ToolApprovals } from "./tool-approvals.ts";
-import { createWebSearchTools } from "./web-search.ts";
+import { createDeepseekProvider } from "./web-search/deepseek.ts";
+import { createWebSearchTools } from "./web-search/index.ts";
+import { createTavilyProvider } from "./web-search/tavily.ts";
 import {
 	accessibleWorkspace,
 	executionWorkspace,
@@ -100,6 +108,8 @@ export type NekoRuntimeOptions = {
 	readonly tavilyApiKey?: string;
 	readonly credentials?: CredentialStore;
 	readonly credentialsPath?: string;
+	/** Search provider used until the user saves a choice (config `webSearch.provider`); default "tavily". */
+	readonly searchProvider?: SearchProviderId;
 	/** Model the root conversation runs with; default the built-in DeepSeek chat model. */
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
@@ -236,6 +246,16 @@ const WorkspacesDoc = defineDoc<{ items: NekoWorkspace[] }>({
 	initial: () => ({ items: [] }),
 });
 
+/** User-level search provider choice; `null` means "never saved", so the config value or the default applies. */
+const SearchSettingsDoc = defineDoc<{ provider: SearchProviderId | null }>({
+	kind: "app.neko.search-settings",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ provider: null }),
+});
+
 const ActivityDoc = defineDoc<{ lastUsedAt: number }>({
 	kind: "app.neko.activity",
 	version: 1,
@@ -295,6 +315,10 @@ export type NekoRuntime = {
 	/** Every chat model in the Models registry, for frontend model selectors. */
 	listModels(): NekoModelInfo[];
 	credentialStatus(provider: CredentialProviderId): Promise<CredentialStatus>;
+	/** The search provider the next tool call uses. */
+	searchSettings(): Promise<SearchSettings>;
+	/** Persist the user's search provider choice; the next tool call uses it. */
+	setSearchProvider(provider: SearchProviderId): Promise<void>;
 	saveCredential(provider: CredentialProviderId, key: string): Promise<void>;
 	removeCredential(provider: CredentialProviderId): Promise<void>;
 	/** The conversation's resolved agent: effective model, thinking level, selected extension names. */
@@ -366,13 +390,21 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	registry.install(createCodingTools({ images: await createNodePhotonImages() }));
 	registry.install(ImageDetails);
 	registry.install(AgentFileSearch);
-	registry.install(
-		createWebSearchTools(async () => {
-			const saved = await effectiveCredentials.read("tavily");
-			if (saved?.type === "api_key" && saved.key) return saved.key;
-			return process.env.TAVILY_API_KEY || undefined;
-		}),
-	);
+	const tavily = createTavilyProvider(async () => {
+		const saved = await effectiveCredentials.read("tavily");
+		if (saved?.type === "api_key" && saved.key) return saved.key;
+		return process.env.TAVILY_API_KEY || undefined;
+	});
+	// Same precedence as the model: runtime override, saved value, then DEEPSEEK_API_KEY.
+	const deepseekApiKey = async () => {
+		const saved = await effectiveCredentials.read("deepseek");
+		if (saved?.type === "api_key" && saved.key) return saved.key;
+		return process.env.DEEPSEEK_API_KEY || undefined;
+	};
+	const deepseek = createDeepseekProvider(deepseekApiKey);
+	let searchProvider: SearchProviderId = options.searchProvider ?? DEFAULT_SEARCH_PROVIDER;
+	// Chosen per call so a saved choice applies to the next tool call without a restart.
+	registry.install(createWebSearchTools(async () => (searchProvider === "deepseek" ? deepseek : tavily)));
 	const loadResources = createResourceLoader(options.promptHome);
 	const resourceSnapshots = createResourceSnapshots(loadResources, (id, requestId) =>
 		storage.submissionByRequest(id, requestId, context),
@@ -451,6 +483,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			cwd: defaultCwd,
 		},
 	});
+	const savedSearch = (await harness.snapshot(SearchSettingsDoc, conversation.id, context))?.provider;
+	if (isSearchProvider(savedSearch)) searchProvider = savedSearch;
 	const registerWorkspace = async (path: string): Promise<NekoWorkspace> => {
 		await harness.commit(async (tx) => {
 			const doc = await tx.doc(WorkspacesDoc, conversation.id);
@@ -906,6 +940,16 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 								? "keyless"
 								: "none",
 			};
+		},
+		async searchSettings() {
+			return { selected: searchProvider };
+		},
+		async setSearchProvider(provider) {
+			if (!isSearchProvider(provider)) throw new Error("Unknown search provider.");
+			await harness.commit(async (tx) => {
+				(await tx.doc(SearchSettingsDoc, conversation.id)).provider = provider;
+			}, context);
+			searchProvider = provider;
 		},
 		async saveCredential(provider, key) {
 			const spec = credentialProvider(provider);

@@ -15,7 +15,8 @@ const USAGE = `用法: neko <命令> [选项]
   -h, --help     显示此帮助
 
 各命令的选项详见 neko <命令> --help。
-可通过 TUI /login、Web 设置页或 DEEPSEEK_API_KEY / TAVILY_API_KEY 配置凭据。`;
+可通过 TUI /login、Web 设置页或 DEEPSEEK_API_KEY / TAVILY_API_KEY 配置凭据。
+联网搜索服务（默认 Tavily，可改选 DeepSeek）可用 TUI /search、Web 设置页或配置文件 webSearch.provider 选择。`;
 
 const [command, ...rest] = process.argv.slice(2);
 

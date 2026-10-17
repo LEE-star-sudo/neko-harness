@@ -1,7 +1,10 @@
 import { expect, it } from "bun:test";
 import { BACKGROUND_CONTEXT as context, withAbortSignal } from "@earendil-works/chord/context";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { createWebSearchTools, type TavilyFetch } from "../src/web-search.ts";
+import { createWebSearchTools, type WebFetch } from "../src/web-search/index.ts";
+import { createTavilyProvider } from "../src/web-search/tavily.ts";
+
+type TavilyFetch = WebFetch;
 
 type Call = { url: string; headers: Record<string, string>; body: Record<string, unknown> };
 
@@ -20,7 +23,7 @@ function harness(handler: (call: Call) => unknown) {
 }
 
 function tools(resolveKey: () => Promise<string | undefined>, fetchImpl: TavilyFetch) {
-	const extension = createWebSearchTools(resolveKey, fetchImpl);
+	const extension = createWebSearchTools(async () => createTavilyProvider(resolveKey, fetchImpl));
 	const find = (name: string): ToolRegistration => extension.tools!.find((tool) => tool.name === name)!;
 	return { search: find("web_search"), extract: find("web_extract") };
 }
@@ -158,16 +161,16 @@ it("cancels a response body still streaming after headers", async () => {
 	});
 	let cancelled = false;
 	const body = new ReadableStream<Uint8Array>({
-		pull() {
-			began();
-		},
 		cancel() {
 			cancelled = true;
 		},
 	});
 	const { search } = tools(
 		async () => undefined,
-		async () => new Response(body),
+		async () => {
+			began();
+			return new Response(body);
+		},
 	);
 	const pending = search.execute({ query: "q" }, api, withAbortSignal(controller.signal, context));
 	await started;

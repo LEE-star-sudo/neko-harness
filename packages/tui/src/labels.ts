@@ -16,6 +16,7 @@ export const commands: SlashCommand[] = [
 	{ name: "model", description: "Choose a model" },
 	{ name: "agents", description: "View agent tasks and activity" },
 	{ name: "jobs", description: "View background jobs" },
+	{ name: "search", description: "Choose the web search provider (Tavily/DeepSeek)" },
 	{ name: "theme", description: "Choose color theme (auto/light/dark)" },
 	{ name: "think", description: "Set thinking level (/think high)" },
 	{ name: "fork", description: "Fork this session" },

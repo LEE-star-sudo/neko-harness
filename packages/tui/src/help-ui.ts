@@ -56,6 +56,10 @@ export function helpLines(platform: string = process.platform): string[] {
 		["End", "Jump to the newest output"],
 		["←", "Back"],
 	]);
+	section("Web search", [
+		["/search", "Choose the web search provider"],
+		["Enter", "Apply the highlighted provider"],
+	]);
 	section("Skills", [
 		["U", "Install for user"],
 		["P", "Install for project"],

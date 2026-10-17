@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { NekoModelRef } from "./runtime.ts";
+import { isSearchProvider, SEARCH_PROVIDERS, type SearchProviderId } from "./search-providers.ts";
 
 export type NekoTheme = "light" | "dark" | "auto";
 
@@ -10,6 +11,12 @@ export type NekoTheme = "light" | "dark" | "auto";
 export type NekoSkillsConfig = {
 	/** Base URL of the skill market API; defaults to the official market. */
 	readonly marketUrl?: string;
+};
+
+/** Web search settings. */
+export type NekoWebSearchConfig = {
+	/** Initial search provider, used until the user saves a choice; defaults to "tavily". */
+	readonly provider?: SearchProviderId;
 };
 
 /** Gateway listen addresses, consumed by the gateway change (v1 core only carries them). */
@@ -28,6 +35,7 @@ export type NekoConfig = {
 	readonly gateway?: NekoGatewayConfig;
 	readonly theme?: NekoTheme;
 	readonly skills?: NekoSkillsConfig;
+	readonly webSearch?: NekoWebSearchConfig;
 };
 
 export const DEFAULT_SKILL_MARKET_URL = "https://skill.kirineko.tech";
@@ -118,6 +126,9 @@ export function mergeNekoConfig(base: NekoConfig, overrides: NekoConfig): NekoCo
 		...(base.skills !== undefined || overrides.skills !== undefined
 			? { skills: { ...base.skills, ...overrides.skills } }
 			: {}),
+		...(base.webSearch !== undefined || overrides.webSearch !== undefined
+			? { webSearch: { ...base.webSearch, ...overrides.webSearch } }
+			: {}),
 	};
 }
 
@@ -206,6 +217,18 @@ function validate(config: Record<string, unknown>, source: string): void {
 		const { marketUrl } = skills as Record<string, unknown>;
 		if (marketUrl !== undefined && typeof marketUrl !== "string") {
 			throw new Error(`neko config: ${source}: "skills.marketUrl" must be a string.`);
+		}
+	}
+	const webSearch = config.webSearch;
+	if (webSearch !== undefined) {
+		if (typeof webSearch !== "object" || webSearch === null || Array.isArray(webSearch)) {
+			throw new Error(`neko config: ${source}: "webSearch" must be an object.`);
+		}
+		const { provider } = webSearch as Record<string, unknown>;
+		if (provider !== undefined && !isSearchProvider(provider)) {
+			throw new Error(
+				`neko config: ${source}: "webSearch.provider" must be one of ${SEARCH_PROVIDERS.map((item) => `"${item}"`).join(", ")}.`,
+			);
 		}
 	}
 }

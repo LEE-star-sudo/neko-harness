@@ -149,3 +149,21 @@ it("parses, validates, and merges skills.marketUrl", () => {
 	expect(merged.skills?.marketUrl).toBe("https://a.example.com");
 	expect(mergeNekoConfig({}, {}).skills).toBeUndefined();
 });
+
+it("parses, validates, and merges webSearch.provider", () => {
+	for (const provider of ["deepseek", "tavily"] as const) {
+		expect(parseNekoConfig(`{"webSearch": {"provider": "${provider}"}}`, "test.json", {}).webSearch?.provider).toBe(
+			provider,
+		);
+	}
+	for (const invalid of ["auto", "bing"])
+		expect(() => parseNekoConfig(`{"webSearch": {"provider": "${invalid}"}}`, "test.json", {})).toThrow(
+			/webSearch\.provider/,
+		);
+	expect(() => parseNekoConfig('{"webSearch": "tavily"}', "test.json", {})).toThrow(/webSearch/);
+	expect(mergeNekoConfig({ webSearch: { provider: "tavily" } }, { webSearch: {} }).webSearch?.provider).toBe("tavily");
+	expect(
+		mergeNekoConfig({ webSearch: { provider: "tavily" } }, { webSearch: { provider: "deepseek" } }).webSearch?.provider,
+	).toBe("deepseek");
+	expect(mergeNekoConfig({}, {}).webSearch).toBeUndefined();
+});

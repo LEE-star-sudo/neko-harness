@@ -8,7 +8,7 @@ export type CredentialProviderId = "deepseek" | "tavily";
 
 export type CredentialProviderSpec = {
 	readonly id: CredentialProviderId;
-	/** Environment variable probed for status display and (Tavily) request auth. */
+	/** Environment variable probed for status display and request auth; the DeepSeek key serves both the model and web search. */
 	readonly envVar: string;
 	/** Where users obtain a key; surfaced by frontends. */
 	readonly signupUrl: string;

@@ -14,12 +14,14 @@ import {
 	NekoCredentials,
 	type NekoMarketSkill,
 	NekoModels,
+	NekoSearchSettings,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,
 	NekoSkillMarket,
 	NekoWorkspaceFiles,
 	NekoWorkspaces,
+	SearchSettingsStateSchema,
 	WorkspaceStateSchema,
 } from "./contract.ts";
 import type { GatewayPrincipal } from "./principal.ts";
@@ -34,7 +36,9 @@ const ServerState = local("neko.server-state", {
 		directory: DirectoryStateSchema,
 		workspaces: WorkspaceStateSchema,
 		credentials: CredentialStateSchema,
+		searchSettings: SearchSettingsStateSchema,
 		refreshCredentials: method(Type.Null(), Type.Null()),
+		refreshSearchSettings: method(Type.Null(), Type.Null()),
 	},
 });
 export async function createNekoServerServices(options: {
@@ -146,7 +150,12 @@ export async function createNekoServerServices(options: {
 		Object.fromEntries(
 			await Promise.all(CREDENTIAL_PROVIDERS.map(async (spec) => [spec.id, await runtime.credentialStatus(spec.id)])),
 		) as NekoCredentialState["statuses"];
-	const [sessions, workspaces, statuses] = await Promise.all([list(), runtime.listWorkspaces(), readStatuses()]);
+	const [sessions, workspaces, statuses, search] = await Promise.all([
+		list(),
+		runtime.listWorkspaces(),
+		readStatuses(),
+		runtime.searchSettings(),
+	]);
 	let mutationTail = Promise.resolve();
 	const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
 		const result = mutationTail.catch(() => {}).then(fn);
@@ -162,6 +171,14 @@ export async function createNekoServerServices(options: {
 			const directory = self.state("directory", DirectoryStateSchema, { revision: 1, sessions });
 			const workspaceState = self.state("workspaces", WorkspaceStateSchema, { revision: 1, workspaces });
 			const credentials = self.state("credentials", CredentialStateSchema, { revision: 1, statuses });
+			const searchSettings = self.state("searchSettings", SearchSettingsStateSchema, { revision: 1, ...search });
+			const refreshSearchSettings = async (_input: null, ctx: Ctx<GatewayPrincipal>) => {
+				const next = await runtime.searchSettings();
+				const current = searchSettings.value;
+				if (next.selected !== current.selected)
+					searchSettings.replace(ctx, { revision: current.revision + 1, ...next });
+				return null;
+			};
 			self.on(
 				"directory",
 				{ subscribe: runtime.harness.subscribeCommits.bind(runtime.harness) },
@@ -192,6 +209,7 @@ export async function createNekoServerServices(options: {
 				directory,
 				workspaces: workspaceState,
 				credentials,
+				searchSettings,
 				async refreshCredentials(_input: null, ctx: Ctx<GatewayPrincipal>) {
 					credentials.replace(ctx, {
 						revision: credentials.value.revision + 1,
@@ -199,6 +217,7 @@ export async function createNekoServerServices(options: {
 					});
 					return null;
 				},
+				refreshSearchSettings,
 			};
 		},
 		{ lifetime: "host" },
@@ -224,6 +243,18 @@ export async function createNekoServerServices(options: {
 				await runtime.removeCredential(input.provider);
 				return hub.refreshCredentials(null, ctx);
 			},
+		};
+	});
+	host.serve(NekoSearchSettings, (_input, _principal, self) => {
+		const hub = shared(self);
+		return {
+			variant: "ready",
+			state: hub.searchSettings,
+			set: (input, ctx) =>
+				serialize(async () => {
+					await runtime.setSearchProvider(input.provider);
+					return hub.refreshSearchSettings(null, ctx);
+				}),
 		};
 	});
 	host.serve(NekoModels, () => ({

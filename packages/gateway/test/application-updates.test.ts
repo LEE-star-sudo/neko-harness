@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxProvider } from "../../../test/faux.ts";
-import { ApplicationProtocolError } from "../../core/src/application-version.ts";
+import { APPLICATION_PROTOCOL, ApplicationProtocolError } from "../../core/src/application-version.ts";
 import { connectToGateway } from "../../tui/src/gateway.ts";
 import { ensureNekoGateway } from "../../web/src/gateway-spawn.ts";
 import { connectNekoGateway } from "../src/client.ts";
@@ -71,7 +71,7 @@ it("rejects incompatible live gateway without spawning a competing instance", as
 		port: 0,
 		providers: [faux.provider],
 		model: { provider: "faux", modelId: "faux-1" },
-		updates: { protocolVersion: 5 },
+		updates: { protocolVersion: APPLICATION_PROTOCOL + 1 },
 	});
 	try {
 		await expect(

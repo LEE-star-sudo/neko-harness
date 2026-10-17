@@ -29,6 +29,11 @@
 			"types": "./dist/credential-providers.d.ts",
 			"import": "./dist/credential-providers.js"
 		},
+		"./search-providers": {
+			"neko-source": "./src/search-providers.ts",
+			"types": "./dist/search-providers.d.ts",
+			"import": "./dist/search-providers.js"
+		},
 		"./file-mentions": {
 			"neko-source": "./src/file-mentions.ts",
 			"types": "./dist/file-mentions.d.ts",

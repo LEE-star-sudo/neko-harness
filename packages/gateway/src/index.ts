@@ -11,6 +11,8 @@ export {
 	type NekoMarketPreview,
 	type NekoMarketSkill,
 	NekoModels,
+	NekoSearchSettings,
+	type NekoSearchSettingsState,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	type NekoSessionSummary,

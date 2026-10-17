@@ -1,7 +1,7 @@
 import type { ChatView, NekoModelInfo } from "@neko-harness/core";
 import type { UpdateState } from "@neko-harness/core/application-version";
 import { useSyncExternalStore } from "react";
-import type { NekoCredentialState, NekoWorkspaceSummary } from "./contract.ts";
+import type { NekoCredentialState, NekoSearchSettingsState, NekoWorkspaceSummary } from "./contract.ts";
 import type { NekoSessionSummary } from "./gateway.ts";
 
 export type ConnPhase = "connecting" | "ready" | "reconnecting" | "error";
@@ -14,6 +14,7 @@ export type NekoState = {
 	updates: UpdateState | null;
 	webInfo: { webVersion: string; installedVersion: string | null; serverId: string; gatewaySpawned: boolean } | null;
 	credentials: NekoCredentialState | null;
+	searchSettings: NekoSearchSettingsState | null;
 	workspaceRoot: string;
 	workspaces: readonly NekoWorkspaceSummary[];
 	operating: boolean;
@@ -32,6 +33,7 @@ let state: NekoState = {
 	updates: null,
 	webInfo: null,
 	credentials: null,
+	searchSettings: null,
 	workspaceRoot: "",
 	workspaces: [],
 	operating: false,
@@ -75,6 +77,10 @@ export const storeActions = {
 	setCredentials(credentials: NekoCredentialState | null): void {
 		if (credentials && state.credentials && credentials.revision < state.credentials.revision) return;
 		emit({ ...state, credentials });
+	},
+	setSearchSettings(searchSettings: NekoSearchSettingsState | null): void {
+		if (searchSettings && state.searchSettings && searchSettings.revision < state.searchSettings.revision) return;
+		emit({ ...state, searchSettings });
 	},
 	setWorkspace(workspaceRoot: string): void {
 		emit({ ...state, workspaceRoot });

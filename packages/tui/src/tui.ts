@@ -48,6 +48,7 @@ import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./ima
 import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
+import { openSearchPanel } from "./search-ui.ts";
 import { openSkillMarket } from "./skill-market-ui.ts";
 import { SubagentDetail, subagentItems } from "./subagents-ui.ts";
 import {
@@ -126,6 +127,7 @@ class NekoTuiApp {
 	#chat: NekoChat | undefined;
 	#agentsPanel = false;
 	#jobsPanel = false;
+	#searchStop: (() => void) | undefined;
 	#agentDetails = new Map<string, SubagentDetail>();
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
@@ -177,6 +179,8 @@ class NekoTuiApp {
 				this.#thinkingModel = undefined;
 				this.#agentsPanel = false;
 				this.#jobsPanel = false;
+				this.#searchStop?.();
+				this.#searchStop = undefined;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
 				this.#ui.setFocus(this.#editor);
@@ -441,6 +445,10 @@ class NekoTuiApp {
 		}
 		if (trimmed === "/jobs") {
 			this.#showJobs();
+			return;
+		}
+		if (trimmed === "/search") {
+			this.#showSearch();
 			return;
 		}
 		const instructions = compactInstructions(trimmed);
@@ -950,6 +958,11 @@ class NekoTuiApp {
 			async () => jobItems(jobs.list()),
 			async (value) => new JobDetail(jobs, value, this.#panel, changed).open(),
 		);
+		this.#ui.setFocus(this.#panel);
+	}
+	#showSearch(): void {
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
+		this.#searchStop = openSearchPanel(this.#panel, this.#gateway.client, (message) => this.addNotice(message));
 		this.#ui.setFocus(this.#panel);
 	}
 	#agentDetail(target: string | number) {

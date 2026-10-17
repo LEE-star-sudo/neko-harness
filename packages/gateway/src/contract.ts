@@ -454,6 +454,22 @@ export const NekoCredentials = contract("neko.credentials", {
 		},
 	},
 });
+export const SearchSettingsStateSchema = Type.Object({
+	revision: integer,
+	selected: Type.Enum(["tavily", "deepseek"]),
+});
+export const NekoSearchSettings = contract("neko.search-settings", {
+	version: 1,
+	input: Type.Object({}, { additionalProperties: false }),
+	variants: {
+		ready: {
+			state: { state: SearchSettingsStateSchema },
+			methods: {
+				set: rpc(Type.Object({ provider: Type.Enum(["tavily", "deepseek"]) }, { additionalProperties: false }), nil),
+			},
+		},
+	},
+});
 export const FileCandidatesSchema = Type.Object({
 	entries: Type.Array(Type.Object({ name: str, path: str, kind: Type.Enum(["file", "directory"]) }), { maxItems: 100 }),
 	limited: bool,
@@ -531,12 +547,14 @@ export type WireJobOutput = Static<typeof JobOutputSchema>;
 export type NekoWorkspaces = Ref<typeof NekoWorkspaces>;
 export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Ref<typeof NekoCredentials>;
+export type NekoSearchSettings = Ref<typeof NekoSearchSettings>;
 export type NekoSkillMarket = Ref<typeof NekoSkillMarket>;
 export type NekoSessionSummary = Static<typeof SessionSummarySchema>;
 export type NekoDirectoryState = Static<typeof DirectoryStateSchema>;
 export type NekoWorkspaceSummary = Static<typeof WorkspaceSummarySchema>;
 export type NekoWorkspaceState = Static<typeof WorkspaceStateSchema>;
 export type NekoCredentialState = Static<typeof CredentialStateSchema>;
+export type NekoSearchSettingsState = Static<typeof SearchSettingsStateSchema>;
 export type NekoAttachment = Static<typeof AttachmentSchema>;
 export type NekoBrowseOptions = Static<typeof browse>;
 export type NekoDirectoryPage = Static<typeof page>;

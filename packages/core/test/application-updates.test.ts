@@ -3,12 +3,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { installedVersion, UpdateChecker } from "../src/application-updates.ts";
-import { newer, RUNNING_VERSION, stableVersion, type UpdateState, updateAction } from "../src/application-version.ts";
+import {
+	APPLICATION_PROTOCOL,
+	newer,
+	RUNNING_VERSION,
+	stableVersion,
+	type UpdateState,
+	updateAction,
+} from "../src/application-version.ts";
 
 const state: UpdateState = {
 	runningVersion: "1.0.0",
 	installedVersion: "1.0.0",
-	protocolVersion: 4,
+	protocolVersion: APPLICATION_PROTOCOL,
 	latestVersion: "1.1.0",
 	checkedAt: 1,
 	checkState: "ok",
@@ -48,7 +55,9 @@ it("distinguishes install, running services, page and unknown versions", () => {
 			gateway: { ...state, runningVersion: "1.1.0", installedVersion: "1.1.0" },
 		}),
 	).toBe("none");
-	expect(updateAction({ ...base, gateway: { ...state, protocolVersion: 5 } })).toBe("incompatible");
+	expect(updateAction({ ...base, gateway: { ...state, protocolVersion: APPLICATION_PROTOCOL + 1 } })).toBe(
+		"incompatible",
+	);
 	expect(updateAction({ gateway: null, frontend: "development", installed: null })).toBe("none");
 });
 it("checks cached registry independently of changed installed files, coalesces and handles failure", async () => {

@@ -7,6 +7,7 @@ import {
 	NekoChat,
 	NekoCredentials,
 	NekoModels,
+	NekoSearchSettings,
 	NekoSessionDirectory,
 	NekoSessionManagement,
 	NekoSkillMarket,
@@ -74,6 +75,7 @@ export type NekoGatewayConnection = {
 	readonly workspaces: NekoWorkspaces;
 	readonly workspaceFiles: NekoWorkspaceFiles;
 	readonly credentials: NekoCredentials;
+	readonly searchSettings: NekoSearchSettings;
 	readonly skillMarket: NekoSkillMarket;
 	readonly attachment: NekoAttachment | undefined;
 	ready(signal?: AbortSignal): Promise<void>;
@@ -107,13 +109,15 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			workspaces = get(NekoWorkspaces),
 			workspaceFiles = get(NekoWorkspaceFiles),
 			credentials = get(NekoCredentials),
+			searchSettings = get(NekoSearchSettings),
 			skillMarket = get(NekoSkillMarket);
 		keep.push(
 			directory.state.subscribe(() => {}),
 			workspaces.state.subscribe(() => {}),
 			credentials.state.subscribe(() => {}),
+			searchSettings.state.subscribe(() => {}),
 		);
-		return { directory, management, models, workspaces, workspaceFiles, credentials, skillMarket };
+		return { directory, management, models, workspaces, workspaceFiles, credentials, searchSettings, skillMarket };
 	}
 	const services = () => {
 		if (!protocolChecked) throw new Error("Gateway protocol not checked");
@@ -127,7 +131,8 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 		if (info.serverId !== serverId) throw new GatewayIdentityError();
 		if (info.protocolVersion !== APPLICATION_PROTOCOL) throw new ApplicationProtocolError();
 		protocolChecked = true;
-		const { directory, management, models, workspaces, credentials, workspaceFiles, skillMarket } = services();
+		const { directory, management, models, workspaces, credentials, searchSettings, workspaceFiles, skillMarket } =
+			services();
 		await deadline(
 			Promise.all([
 				directory.ready,
@@ -135,6 +140,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 				models.ready,
 				workspaces.ready,
 				credentials.ready,
+				searchSettings.ready,
 				workspaceFiles.ready,
 				skillMarket.ready,
 			]),
@@ -172,6 +178,9 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 		},
 		get credentials() {
 			return services().credentials;
+		},
+		get searchSettings() {
+			return services().searchSettings;
 		},
 		get skillMarket() {
 			return services().skillMarket;

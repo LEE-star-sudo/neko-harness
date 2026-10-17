@@ -14,6 +14,7 @@ import {
 	loadNekoConfig,
 	type NekoModelRef,
 	type NekoRuntime,
+	type SearchProviderId,
 } from "@neko-harness/core";
 import type { UpdateCheckerOptions } from "@neko-harness/core/application-updates";
 import { GATEWAY_HOST } from "./contract.ts";
@@ -36,6 +37,8 @@ export type NekoGatewayOptions = {
 	readonly storagePath?: string;
 	readonly apiKey?: string;
 	readonly credentialsPath?: string;
+	/** 用户未保存选择时的搜索 provider；缺省读取配置 webSearch.provider，再回落 tavily。 */
+	readonly searchProvider?: SearchProviderId;
 	readonly model?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
 	readonly cwd?: string;
@@ -93,6 +96,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		options.port !== undefined
 			? options.port
 			: (fileConfig.gateway?.port ?? (process.platform === "win32" ? 0 : DEFAULT_PORT));
+	const searchProvider = options.searchProvider ?? fileConfig.webSearch?.provider;
 	const marketUrl = options.marketUrl ?? fileConfig.skills?.marketUrl ?? DEFAULT_SKILL_MARKET_URL;
 	const nekoDir = dirname(storagePath);
 	const serverId = options.serverId ?? (await loadOrCreateServerId(nekoDir));
@@ -113,6 +117,7 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		...(options.storage !== "memory" ? { storagePath } : {}),
 		...(options.credentialsPath !== undefined ? { credentialsPath: options.credentialsPath } : {}),
 		...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
+		...(searchProvider !== undefined ? { searchProvider } : {}),
 		model,
 		thinkingLevel: options.thinkingLevel ?? fileConfig.thinkingLevel ?? "high",
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),

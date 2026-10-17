@@ -10,6 +10,7 @@ export {
 	type NekoGatewayConfig,
 	type NekoSkillsConfig,
 	type NekoTheme,
+	type NekoWebSearchConfig,
 	parseNekoConfig,
 } from "./config.ts";
 export {
@@ -65,6 +66,13 @@ export {
 	type NekoSkillInfo,
 	type NekoSubmitOptions,
 } from "./runtime.ts";
+export {
+	DEFAULT_SEARCH_PROVIDER,
+	isSearchProvider,
+	SEARCH_PROVIDERS,
+	type SearchProviderId,
+	type SearchSettings,
+} from "./search-providers.ts";
 export { mergeUsage } from "./session-metadata.ts";
 export type { SkillInvocation } from "./skill-invocation.ts";
 export { subagentUsageTotals, subtractSubagentUsage } from "./subagent-usage.ts";

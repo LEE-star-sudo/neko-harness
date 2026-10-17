@@ -1,6 +1,7 @@
 import type { CredentialStatus } from "@neko-harness/core";
 import { CREDENTIAL_PROVIDERS, type CredentialProviderSpec } from "@neko-harness/core/credential-providers";
 import { useRef, useState } from "react";
+import { SearchServiceCard } from "../components/search-service-card";
 import { SettingsShell } from "../components/settings-shell";
 import { appActions } from "../lib/bootstrap";
 import { useNekoState } from "../lib/store";
@@ -45,7 +46,7 @@ function ProviderCredentialCard(props: {
 	}
 	const disabled = busy || !ready || !status;
 	return (
-		<section className="rounded-2xl border border-sakura-200 bg-surface p-5 shadow-soft">
+		<section id={`credential-${spec.id}`} className="rounded-2xl border border-sakura-200 bg-surface p-5 shadow-soft">
 			<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 				<h2 className="text-base font-bold text-ink-900">{name}</h2>
 				<span className="rounded-full bg-tianyi-50 px-3 py-1 text-xs text-tianyi-800">
@@ -111,7 +112,7 @@ function ProviderCredentialCard(props: {
 }
 
 export function SettingsPage() {
-	const { credentials, phase } = useNekoState();
+	const { credentials, searchSettings, phase } = useNekoState();
 	const ready = phase === "ready" && credentials !== null;
 	return (
 		<SettingsShell active="credentials">
@@ -124,6 +125,12 @@ export function SettingsPage() {
 			</div>
 			<main className="mx-auto w-full max-w-4xl px-5 pb-8">
 				<div className="flex flex-col gap-4">
+					<SearchServiceCard
+						settings={searchSettings}
+						credentials={credentials}
+						ready={ready}
+						onSelect={(provider) => appActions.setSearchProvider(provider)}
+					/>
 					{CREDENTIAL_PROVIDERS.map((spec) => (
 						<ProviderCredentialCard key={spec.id} spec={spec} status={credentials?.statuses[spec.id]} ready={ready} />
 					))}

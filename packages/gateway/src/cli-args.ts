@@ -15,7 +15,8 @@ export const GATEWAY_USAGE = `用法: neko serve [选项]
   --config <dir>       neko.config.json 查找起始目录（默认当前目录）
   -h, --help           显示此帮助
 
-可通过前端设置或 DEEPSEEK_API_KEY 配置凭据。`;
+可通过前端设置或 DEEPSEEK_API_KEY / TAVILY_API_KEY 配置凭据；
+联网搜索服务可在前端设置，或用配置文件 webSearch.provider（tavily / deepseek，默认 tavily）。`;
 
 export type GatewayCliOptions = {
 	host?: string;
