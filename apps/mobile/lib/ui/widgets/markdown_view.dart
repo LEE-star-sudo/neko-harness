@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:neko_mobile/ui/theme.dart';
+import 'package:neko_mobile/ui/widgets/math_markdown.dart';
 
-/// 助手正文 Markdown：不渲染 HTML（原样显示为文本），代码块与表格独立横向滚动。
+/// 助手正文 Markdown：不渲染 HTML（原样显示为文本），代码块、表格与块级公式独立横向滚动，支持 LaTeX 公式。
 class NekoMarkdown extends StatelessWidget {
   const NekoMarkdown(this.text, {super.key});
 
@@ -17,6 +19,15 @@ class NekoMarkdown extends StatelessWidget {
       data: escapeHtml(text),
       selectable: true,
       softLineBreak: true,
+      inlineSyntaxes: <md.InlineSyntax>[
+        MathInlineSyntax(),
+        MathLiteralSyntax(),
+      ],
+      blockSyntaxes: const <md.BlockSyntax>[MathBlockSyntax()],
+      builders: <String, MarkdownElementBuilder>{
+        mathInlineTag: MathBuilder(),
+        mathBlockTag: MathBuilder(),
+      },
       styleSheet: base.copyWith(
         p: theme.textTheme.bodyMedium,
         h1: theme.textTheme.headlineSmall,

@@ -68,30 +68,55 @@ function place(tex: string, display: boolean, raw: string): string {
 	return `<span data-math="${sink.nonce}:${sink.items.length - 1}"></span>`;
 }
 
-// 块级 $$ 必须独占行首；行内 $..$ 要求起始后非空白、结尾前非空白且后随非数字，避免把 "$5 和 $10" 当公式。
-const blockRule = /^\$\$[ \t]*\n?([\s\S]+?)\n?[ \t]*\$\$[ \t]*(?:\n|$)/;
-const inlineRule = /^(\$\$?)(?![\s$])((?:\\[\s\S]|[^$\\])+?)(?<!\s)\1(?!\d)/;
+// 块级 $$ / \[ 必须独占行首且结束定界符在行尾；行内 $..$ 要求起始后非空白、结尾前非空白且后随非数字，避免把 "$5 和 $10" 当公式，
+// 内容不含反引号，避免货币符号与后面行内代码里的 $ 配成公式；\(..\) 为行内公式。
+const blockRules = [
+	/^\$\$[ \t]*\n?([\s\S]+?)\n?[ \t]*\$\$[ \t]*(?:\n|$)/,
+	/^\\\[[ \t]*\n?([\s\S]+?)\n?[ \t]*\\\][ \t]*(?:\n|$)/,
+];
+const inlineRule = /^(?:\\\(([\s\S]+?)\\\)|(\$\$?)(?![\s$])((?:\\[\s\S]|[^$\\`])+?)(?<!\s)\2(?!\d))/;
+// 未成对的 \( \) \[ \] 保持原文（marked 默认转义规则会吞掉反斜杠）。
+const literalRule = /^\\[()[\]]/;
 
+function indexOf(src: string, pattern: RegExp): number | undefined {
+	const index = src.search(pattern);
+	return index < 0 ? undefined : index;
+}
+
+// marked 对后注册的扩展优先尝试，因此兜底的 mathLiteral 必须排在最前。
 export const mathExtensions: TokenizerAndRendererExtension[] = [
+	{
+		name: "mathLiteral",
+		level: "inline",
+		start: (src) => indexOf(src, /\\[()[\]]/),
+		tokenizer(src) {
+			const match = literalRule.exec(src);
+			return match ? { type: "mathLiteral", raw: match[0] } : undefined;
+		},
+		renderer: (token) => escapeText(token.raw),
+	},
 	{
 		name: "mathBlock",
 		level: "block",
-		start: (src) => src.match(/^\$\$/m)?.index,
+		start: (src) => src.match(/^(?:\$\$|\\\[)/m)?.index,
 		tokenizer(src) {
-			const match = blockRule.exec(src);
-			if (!match?.[1]?.trim()) return undefined;
-			return { type: "mathBlock", raw: match[0], text: match[1].trim() };
+			for (const rule of blockRules) {
+				const match = rule.exec(src);
+				if (match?.[1]?.trim()) return { type: "mathBlock", raw: match[0], text: match[1].trim() };
+			}
+			return undefined;
 		},
 		renderer: (token) => `<p>${place(token.text as string, true, token.raw.trimEnd())}</p>\n`,
 	},
 	{
 		name: "mathInline",
 		level: "inline",
-		start: (src) => src.indexOf("$"),
+		start: (src) => indexOf(src, /\$|\\\(/),
 		tokenizer(src) {
 			const match = inlineRule.exec(src);
-			if (!match?.[2]) return undefined;
-			return { type: "mathInline", raw: match[0], text: match[2], display: match[1] === "$$" };
+			const tex = match?.[1] ?? match?.[3];
+			if (!match || !tex?.trim()) return undefined;
+			return { type: "mathInline", raw: match[0], text: tex.trim(), display: match[2] === "$$" };
 		},
 		renderer: (token) => place(token.text as string, token.display as boolean, token.raw),
 	},

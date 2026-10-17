@@ -22,7 +22,10 @@ flutter build apk --release --split-per-abi   # 产物：build/app/outputs/flutt
 
 依赖取舍：不使用 `permission_handler`（14.x 要求 compileSdk 37），相机设置跳转由 `MainActivity` 的 MethodChannel 实现；
 `mobile_scanner` 使用 bundled 模型，无 Google Play 服务也能扫码；Markdown 用 `flutter_markdown_plus`（`flutter_markdown` 已停止维护），
-HTML 按原文显示。
+HTML 按原文显示；LaTeX 公式用 `flutter_math_fork`（纯 Dart 绘制，无 WebView/JS/网络）+ 自写 Markdown 语法（`lib/ui/widgets/math_markdown.dart`）：
+支持 `$..$`、`$$..$$`、`\(..\)`、`\[..\]`，块级公式居中并可横向滚动，非法/未闭合公式保持原文，规则与 Web 的 `math.ts` 对齐。
+`markdown` 包因直接导入而声明为直接依赖（版本与既有锁定一致）。引入公式后 release split-abi 体积：arm64-v8a 26.4MB → 27.9MB（+1.4MB，约 5%），
+armeabi-v7a 22.4MB → 23.9MB，x86_64 28.9MB → 30.3MB。
 
 代码结构：`lib/core`（网络指纹绑定、配对、RPC、存储、API 模型）、`lib/features`（连接、会话、聊天、审批、子 agent、电脑设置）、
 `lib/ui`（主题 tokens、自有图标集与共用组件）。

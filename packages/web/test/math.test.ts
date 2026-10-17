@@ -77,3 +77,45 @@ it("模型伪造的占位符不会被回填", () => {
 	const html = renderMarkdownHtml('<span data-math="x:0"></span> $a$');
 	expect(html).toContain('data-math="x:0"');
 });
+
+it("括号定界符：行内 \\(..\\) 与块级 \\[..\\]", () => {
+	const html = renderMarkdownHtml("速度 \\(v = \\frac{s}{t}\\) 如下\n\n\\[\\sum_{i=1}^{n} i\\]\n");
+	expect(html.match(/class="katex"/g)?.length).toBe(2);
+	expect(html).toContain("katex-display");
+	expect(html).not.toContain("\\(");
+	expect(html).not.toContain("\\[");
+	const multiline = renderMarkdownHtml("\\[\n\\sum_{i=1}^{10}\\alpha_i\n\n+ 1\n\\]");
+	expect(multiline).toContain("katex-display");
+});
+
+it("括号定界符：代码中保持原文，转义反斜杠不是定界符", () => {
+	const html = renderMarkdownHtml("`\\(x\\)` 与\n\n```\n\\[x\\]\n```\n\n字面 \\\\(x\\\\)");
+	expect(html).not.toContain("katex");
+	expect(html).toContain("\\(x\\)");
+	expect(html).toContain("\\[x\\]");
+	expect(html).toContain("\\(x\\)</p>");
+});
+
+it("括号定界符：非法与未闭合降级为原文", () => {
+	const bad = renderMarkdownHtml("坏 \\(\\frac{a\\) 之后 \\(x^2\\)");
+	expect(bad).toContain("\\(\\frac{a\\)");
+	expect(bad).toContain('class="katex"');
+	const open = renderMarkdownHtml("流式 \\(\\frac{a\n\n\\[\\sum_{i=1}\n\n最后一段");
+	expect(open).not.toContain("katex");
+	expect(open).toContain("\\(\\frac{a");
+	expect(open).toContain("\\[\\sum_{i=1}");
+	expect(open).toContain("最后一段");
+});
+
+it("括号定界符消毒：脚本与链接命令不生效", () => {
+	const html = renderMarkdownHtml("\\(\\href{https://evil.test}{x}\\) \\(<img src=x onerror=alert(1)>\\)");
+	expect(html).not.toContain("<a");
+	expect(html).not.toContain("<img");
+	expect(html).not.toMatch(/<[a-z][^>]*\sonerror/i);
+});
+
+it("货币符号不与后面行内代码里的 $ 配成公式", () => {
+	const html = renderMarkdownHtml("价格 $10 以及行内 `$x$`");
+	expect(html).not.toContain("katex");
+	expect(html).toContain("$10");
+});
