@@ -2,6 +2,7 @@ import type { NekoSkillInfo } from "@neko-harness/core";
 import { replaceMention } from "@neko-harness/core/file-mentions";
 import { compactInstructions, type ImageFile } from "@neko-harness/core/image-transfer";
 import { promptHistory } from "@neko-harness/core/input-history";
+import type { WireQueuedInput } from "@neko-harness/gateway/contract";
 import { Link } from "@tanstack/react-router";
 import {
 	type KeyboardEvent,
@@ -23,6 +24,7 @@ import { ComposerSuggestions } from "./composer-suggestions";
 import { useFileMentions } from "./file-mentions";
 import { ModelPicker } from "./model-picker";
 import { Icon } from "./primitives";
+import { QueueBar } from "./queue-bar";
 
 type Attachment = { id: string; file: File; error?: string; processing?: boolean };
 type Draft = { text: string; files: Attachment[]; requestId: string };
@@ -127,6 +129,8 @@ function SessionComposer(props: Props & { sessionId: string }) {
 
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState("");
+	const [note, setNote] = useState("");
+	const [withdrawing, setWithdrawing] = useState<number | null>(null);
 	const [menu, setMenu] = useState(false);
 	const [skills, setSkills] = useState<readonly NekoSkillInfo[]>([]);
 	const [commandSelected, setCommandSelected] = useState(0);
@@ -384,14 +388,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		}
 		const before = current.current;
 		drafts.set(props.sessionId, before);
-		if (
-			locked.current ||
-			props.disabled ||
-			props.busy ||
-			missingKey ||
-			noVision ||
-			(!before.text.trim() && !before.files.length)
-		)
+		if (locked.current || props.disabled || missingKey || noVision || (!before.text.trim() && !before.files.length))
 			return;
 		if (before.files.length > 4 || before.files.reduce((n, a) => n + a.file.size, 0) > 40 * 1024 * 1024) {
 			setError("每条消息最多 4 张图片，总大小不超过 40 MiB");
@@ -406,6 +403,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		setPending(true);
 		submitting.add(props.sessionId);
 		setError("");
+		setNote("");
 		try {
 			const files: ImageFile[] = [];
 			for (const a of before.files)
@@ -451,6 +449,48 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		setMenu(false);
 		textarea.current?.focus();
 	};
+	const queued = view?.queued ?? [];
+	const steerQueued = async (item: WireQueuedInput) => {
+		if (withdrawing !== null) return;
+		setWithdrawing(item.id);
+		setError("");
+		setNote("");
+		try {
+			const outcome = await appActions.steer(props.sessionId, item.id);
+			if (outcome.result === "withdrawn") {
+				const base = current.current.text;
+				const text = outcome.text ?? item.preview;
+				edit({ text: base.trim() ? `${base}\n${text}` : text });
+				setNote("无法改为引导，消息已撤回到输入框");
+			} else if (outcome.result === "unknown") setNote("该消息已不在队列中");
+			else if (outcome.result !== "steered") setNote("该消息已发送，无法引导");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "引导失败，请重试");
+		} finally {
+			setWithdrawing(null);
+		}
+	};
+	const withdraw = async (item: WireQueuedInput) => {
+		if (withdrawing !== null) return;
+		setWithdrawing(item.id);
+		setError("");
+		setNote("");
+		try {
+			const outcome = await appActions.withdraw(props.sessionId, item.id);
+			if (outcome.result === "withdrawn") {
+				const base = current.current.text;
+				const text = outcome.text ?? item.preview;
+				edit({ text: base.trim() ? `${base}\n${text}` : text });
+				if (outcome.images) setNote("图片未恢复，请重新添加");
+				textarea.current?.focus();
+			} else if (outcome.result === "unknown") setNote("该消息已不在队列中");
+			else setNote("该消息已发送，无法撤回");
+		} catch (e) {
+			setError(e instanceof Error ? e.message : "撤回失败，请重试");
+		} finally {
+			setWithdrawing(null);
+		}
+	};
 	const busyCard = props.busy || active.some((c) => c.reason === "manual" || c.blocking);
 	return (
 		<section
@@ -472,6 +512,12 @@ function SessionComposer(props: Props & { sessionId: string }) {
 			}}
 		>
 			<div className="chat-column">
+				<QueueBar
+					queued={queued}
+					busy={withdrawing !== null}
+					onSteer={(item) => void steerQueued(item)}
+					onWithdraw={(item) => void withdraw(item)}
+				/>
 				<div
 					ref={card}
 					className={`composer-card ${busyCard ? "is-busy" : ""} ${drag ? "ring-2 ring-sakura-300" : ""}`}
@@ -491,6 +537,7 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						{!model?.input.includes("image") && view?.items.some((i) => i.type === "user" && i.images?.length) && (
 							<p className="text-xs text-ink-500">当前模型无法查看历史原图，仍可使用已有文字分析。</p>
 						)}
+						{note && <output className="block break-words text-sm text-ink-600">{note}</output>}
 						{error && (
 							<p role="alert" className="break-words text-sm text-sakura-700">
 								{error}
@@ -524,7 +571,9 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						disabled={props.disabled}
 						value={draft.text}
 						rows={1}
-						placeholder="输入消息，@ 引用文件，/ 命令"
+						placeholder={
+							props.busy ? "运行中：消息将在回答结束后排队，可在排队条中引导或撤回" : "输入消息，@ 引用文件，/ 命令"
+						}
 						aria-label="消息输入"
 						aria-autocomplete="list"
 						aria-controls={mentions.controls ?? (menu ? commandId : undefined)}
@@ -688,12 +737,12 @@ function SessionComposer(props: Props & { sessionId: string }) {
 									props.disabled ||
 									(!draft.text.trim() && !draft.files.length) ||
 									(compactInstructions(draft.text) === null &&
-										(props.busy || missingKey || noVision || draft.files.some((a) => !!a.error || a.processing)))
+										(missingKey || noVision || draft.files.some((a) => !!a.error || a.processing)))
 								}
 								onClick={() => void submit()}
 								className="btn-primary focus-neko h-10 shrink-0 rounded-full px-3 text-sm disabled:opacity-50"
 							>
-								{pending ? "处理中" : "发送"}
+								{pending ? "处理中" : props.busy ? "排队" : "发送"}
 							</button>
 							{busyCard && (
 								<button

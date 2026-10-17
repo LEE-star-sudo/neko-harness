@@ -20,6 +20,14 @@
 			],
 			"status": {
 				"busy": true,
+				"queued": [
+					{
+						"id": 14,
+						"mode": "followUp",
+						"preview": "稍后再帮我跑一遍测试",
+						"images": 0
+					}
+				],
 				"status": "运行 bash…",
 				"usage": {
 					"input": 12040,

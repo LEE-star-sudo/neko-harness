@@ -63,13 +63,15 @@
 
 所有 chat/approvals/media 方法都携带 `subscriptionId`；它只在最近一次 `chat.attach` 有效，旧 id 返回 `gone`。同一连接同时只有一个主会话订阅与一个子 agent 订阅。
 
-- `chat.attach { sessionId } → { subscriptionId, sessionId, snapshot }`：快照 = 状态（`busy/status/usage/taskUsage/contextUsage/agent/subagents/agents/approvalCount/compaction`）+ 尾部 ≤ `pageItems` 条且 ≤ 128 KiB 的 `items` + `historyBefore`（无更早历史为 `null`）+ `streaming`（流式区，文本只带尾部 16K 字符，`textOmitted/thinkingOmitted` 为省略的前缀长度）。
+- `chat.attach { sessionId } → { subscriptionId, sessionId, snapshot }`：快照 = 状态（`busy/queued?/status/usage/taskUsage/contextUsage/agent/subagents/agents/approvalCount/compaction`；`queued` 为用户排队输入 `[{ id, mode: steer|followUp, preview, images }]`，预览有界，系统输入不出现）+ 尾部 ≤ `pageItems` 条且 ≤ 128 KiB 的 `items` + `historyBefore`（无更早历史为 `null`）+ `streaming`（流式区，文本只带尾部 16K 字符，`textOmitted/thinkingOmitted` 为省略的前缀长度）。
 - `chat.detach { subscriptionId } → null`。
 - `chat.history { subscriptionId, before, limit? } → { items, historyBefore }`：游标不存在 → `stale_ref`（重新 attach）。
 - `chat.content { ref, offset } → { data, nextOffset, total, done }`：按 contentRef 读 UTF-8 字节的 base64 分块（≤ `chunkBytes`）；digest 不符 → `content_changed`。
 - `chat.submit { subscriptionId, requestId, text, mode? } → { accepted: true, queued }`：`mode` 缺省 = 忙碌时持久排队（`queued=true`）；`steer` = 引导当前运行。同 `requestId` 重复提交（含断线/gateway 重启后）只产生一条输入；电脑拒绝 → `rejected`。
 - `chat.submissionStatus { subscriptionId, requestId } → { status: "accepted" | "unknown" }`；`unknown` 不推断为失败。
-- `chat.abort { subscriptionId } → { accepted }`：显式停止；断线绝不映射为 abort。
+- `chat.abort { subscriptionId } → { accepted }`：显式停止；断线绝不映射为 abort。停止会撤回全部排队输入并中止当前运行。
+- `chat.steer { subscriptionId, id } → { result, id?, text?, images? }`：把状态 `queued` 中一条仍排队的用户输入改为引导（当前工具轮后放入）。`result` 为 `steered | withdrawn | placed | settled | unknown`；`steered` 时 `id` 为新的提交 id（原 id 随之失效，以状态列表为准），已是引导则原样返回；`placed` 表示已进入会话；仅当电脑无法重新受理时返回 `withdrawn` 并带原文 `text`。不中止当前运行、不影响其他排队项。App 提交时不再预选引导，`chat.submit` 的 `mode` 保留仅为兼容。
+- `chat.withdraw { subscriptionId, id } → { result, text?, images? }`：撤回状态 `queued` 中的一条用户排队输入（`id` 取自该列表）；`result` 为 `withdrawn | placed | settled | unknown`，`withdrawn` 时返回完整原文 `text`（技能输入为 `/skill:<name> <args>`）与图片数 `images`，供 App 取回草稿；`placed` 表示已进入会话，不能撤回；不属于该订阅会话的 `id` 为 `unknown`。不撤销当前运行与其他排队项。`queued` 缺省表示电脑端不支持该能力，App 应隐藏排队条与撤回入口。
 - 通知 `chat.patch { subscriptionId, seq, upserts, status?, streaming?, streamingAppend? }`：`upserts` 为窗口内变化或新追加条目（整条替换，按 key 定位，新 key 追加到末尾）；`status` 为整块状态；`streaming` 整段替换流式区（`null` 表示结束）；`streamingAppend { text?, thinking? }` 追加到流式区末尾。
 - 通知 `chat.reset { subscriptionId, seq }`：已加载条目消失/重排或补丁超限；App 丢弃缓存并重新 attach。
 

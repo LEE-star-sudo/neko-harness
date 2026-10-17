@@ -6,6 +6,7 @@ import { type DefaultImagePrompt, savedDefaultImagePrompt } from "./image-prompt
 import type { ImageInfo } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
 import type { JobSummary } from "./jobs.ts";
+import { projectQueued, type QueuedInput } from "./queued.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
 import type { SkillInvocation } from "./skill-invocation.ts";
 import type { Delegation, SubagentSummary } from "./subagents.ts";
@@ -37,6 +38,8 @@ export type ChatView = {
 	agents?: SubagentSummary[];
 	/** Absent on a gateway without background jobs. */
 	jobs?: JobSummary[];
+	/** User inputs waiting in the inbox, in acceptance order; absent on a gateway without queue visibility. */
+	queued?: QueuedInput[];
 	rounds?: Delegation[];
 	taskUsage?: UsageTotals;
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
@@ -498,6 +501,7 @@ export function projectChatView(
 		},
 		cwd: savedWorkspace(agent?.cwd),
 		busy: live.run !== undefined,
+		queued: projectQueued(view),
 		status,
 		usage: {
 			input: usage.input,

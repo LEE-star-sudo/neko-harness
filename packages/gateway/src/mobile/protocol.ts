@@ -218,8 +218,17 @@ export const MobileAgentSchema = Type.Object({
 	approvalCount: int,
 });
 
+export const MobileQueuedSchema = Type.Object({
+	id: int,
+	mode: Type.Union([Type.Literal("steer"), Type.Literal("followUp")]),
+	preview: Type.String(),
+	images: int,
+});
+
 export const MobileChatStatusSchema = Type.Object({
 	busy: Type.Boolean(),
+	/** Absent on a computer without queue visibility; empty means supported with none. */
+	queued: opt(Type.Array(MobileQueuedSchema)),
 	status: nullable(str),
 	usage: MobileUsageSchema,
 	taskUsage: opt(MobileUsageSchema),
@@ -310,6 +319,34 @@ export const MOBILE_API_V1_METHODS: Readonly<Record<string, { readonly params: u
 	"chat.submissionStatus": {
 		params: Type.Object({ ...subscription, requestId: Type.String({ minLength: 1, maxLength: 128 }) }),
 		result: Type.Object({ status: Type.Union([Type.Literal("accepted"), Type.Literal("unknown")]) }),
+	},
+	"chat.steer": {
+		params: Type.Object({ ...subscription, id: int }),
+		result: Type.Object({
+			result: Type.Union([
+				Type.Literal("steered"),
+				Type.Literal("withdrawn"),
+				Type.Literal("placed"),
+				Type.Literal("settled"),
+				Type.Literal("unknown"),
+			]),
+			id: opt(int),
+			text: opt(Type.String()),
+			images: opt(int),
+		}),
+	},
+	"chat.withdraw": {
+		params: Type.Object({ ...subscription, id: int }),
+		result: Type.Object({
+			result: Type.Union([
+				Type.Literal("withdrawn"),
+				Type.Literal("placed"),
+				Type.Literal("settled"),
+				Type.Literal("unknown"),
+			]),
+			text: opt(Type.String()),
+			images: opt(int),
+		}),
 	},
 	"chat.abort": { params: Type.Object(subscription), result: Type.Object({ accepted: Type.Boolean() }) },
 	"subagents.open": {

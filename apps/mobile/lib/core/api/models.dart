@@ -340,9 +340,36 @@ class AgentSummary {
   final int approvalCount;
 }
 
+/// 电脑上仍在排队、尚未进入会话的用户输入。
+class QueuedInput {
+  const QueuedInput({
+    required this.id,
+    required this.mode,
+    required this.preview,
+    required this.images,
+  });
+
+  factory QueuedInput.fromJson(Json json) => QueuedInput(
+    id: _int(json['id']),
+    mode: _str(json['mode'], 'followUp'),
+    preview: _str(json['preview']),
+    images: _int(json['images']),
+  );
+
+  final int id;
+
+  /// `steer`（引导当前运行）或 `followUp`（回答结束后排队）。
+  final String mode;
+  final String preview;
+  final int images;
+
+  bool get steer => mode == 'steer';
+}
+
 class ChatStatus {
   const ChatStatus({
     this.busy = false,
+    this.queued,
     this.status,
     this.usage = const Usage(),
     this.taskUsage,
@@ -360,6 +387,9 @@ class ChatStatus {
     final context = _map(json['contextUsage']);
     return ChatStatus(
       busy: _bool(json['busy']),
+      queued: json['queued'] is List
+          ? _list(json['queued']).map(QueuedInput.fromJson).toList()
+          : null,
       status: _strOrNull(json['status']),
       usage: Usage.fromJson(_map(json['usage'])),
       taskUsage: json['taskUsage'] is Map
@@ -376,6 +406,9 @@ class ChatStatus {
   }
 
   final bool busy;
+
+  /// 缺省表示电脑端不支持排队列表（旧版本）；空列表表示支持且无排队项。
+  final List<QueuedInput>? queued;
   final String? status;
   final Usage usage;
   final Usage? taskUsage;

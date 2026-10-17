@@ -11,7 +11,7 @@ it("lists commands and context-specific shortcuts, with platform clipboard keys"
 	const text = helpLines("darwin").map(stripTerminalSequences).join("\n");
 	for (const command of commands) expect(text).toContain(`/${command.name}`);
 	for (const action of [
-		"Alt+Enter",
+		"Alt+↑",
 		"Esc Esc",
 		"Browse previous inputs",
 		"Ctrl+S",

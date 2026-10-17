@@ -60,6 +60,7 @@ export {
 	userText,
 } from "./projection.ts";
 export { stripFrontmatter } from "./prompt/frontmatter.ts";
+export { QUEUED_PREVIEW_CHARS, type QueuedInput } from "./queued.ts";
 export {
 	createNekoRuntime,
 	DEFAULT_MODEL,
@@ -75,7 +76,10 @@ export {
 	type NekoRuntimeOptions,
 	type NekoSession,
 	type NekoSkillInfo,
+	type NekoSteering,
 	type NekoSubmitOptions,
+	type NekoWithdrawal,
+	type NekoWithdrawResult,
 } from "./runtime.ts";
 export {
 	DEFAULT_SEARCH_PROVIDER,

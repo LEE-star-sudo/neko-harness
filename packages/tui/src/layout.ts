@@ -15,6 +15,9 @@ export function createAppLayout(parts: {
 	approvalVisible?: () => boolean;
 	busy?: Component;
 	busyVisible?: () => boolean;
+	/** Queued messages above the editor; only while there are any. */
+	queue?: Component;
+	queueVisible?: () => boolean;
 }): VStack {
 	const normal = (v: { width: number; height: number }) => {
 		if (parts.approval) parts.approval.height = Math.min(10, Math.max(7, Math.floor(v.height / 2)));
@@ -27,7 +30,8 @@ export function createAppLayout(parts: {
 				Math.min(7, Math.max(3, parts.editor.render(v.width).length)) -
 				2 -
 				Math.min(1, parts.notices.render(v.width).length) -
-				(parts.busyVisible?.() ? Math.min(2, parts.busy?.render(v.width).length ?? 0) : 0),
+				(parts.busyVisible?.() ? Math.min(2, parts.busy?.render(v.width).length ?? 0) : 0) -
+				(parts.queueVisible?.() ? Math.min(3, parts.queue?.render(v.width).length ?? 0) : 0),
 		);
 		return usableSize(v.width, v.height);
 	};
@@ -45,6 +49,12 @@ export function createAppLayout(parts: {
 			maxSize: 2,
 			shrink: 0,
 			visible: (v) => normal(v) && (parts.busyVisible?.() ?? false),
+		},
+		{
+			component: parts.queue ?? new Text("", 0, 0),
+			maxSize: 3,
+			shrink: 0,
+			visible: (v) => normal(v) && (parts.queueVisible?.() ?? false),
 		},
 		{
 			component: parts.approval ?? new Text("", 0, 0),

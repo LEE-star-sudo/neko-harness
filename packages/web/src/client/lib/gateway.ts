@@ -4,7 +4,12 @@ import type { CredentialProviderId } from "@neko-harness/core/credential-provide
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import type { SearchProviderId } from "@neko-harness/core/search-providers";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
-import { createGatewayConnection, jobsClient, type NekoGatewayConnection } from "@neko-harness/gateway/client-session";
+import {
+	createGatewayConnection,
+	jobsClient,
+	type NekoGatewayConnection,
+	queueClient,
+} from "@neko-harness/gateway/client-session";
 import { boundedWebSocketLink } from "@neko-harness/gateway/link";
 import type {
 	NekoBrowseOptions,
@@ -28,6 +33,8 @@ import type {
 	NekoWorkspaceFiles,
 	NekoWorkspaceState,
 	NekoWorkspaces,
+	WireSteerResult,
+	WireWithdrawResult,
 } from "./contract.ts";
 
 export type ConnPhase = "connecting" | "ready" | "reconnecting" | "error";
@@ -316,6 +323,15 @@ export class GatewayConnection {
 	#jobs(sessionId: string) {
 		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换");
 		return jobsClient(this.#chat!);
+	}
+	/** Queued-input calls are bound to the session the queue bar shows. */
+	async steer(sessionId: string, id: number): Promise<WireSteerResult> {
+		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换");
+		return queueClient(this.#chat!).steer(id);
+	}
+	async withdraw(sessionId: string, id: number): Promise<WireWithdrawResult> {
+		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换");
+		return queueClient(this.#chat!).withdraw(id);
 	}
 	async jobOutput(sessionId: string, jobId: string, since?: number) {
 		return this.#jobs(sessionId).output(jobId, since);

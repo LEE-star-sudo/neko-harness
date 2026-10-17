@@ -316,6 +316,10 @@ export class MobileAdapter {
 				return this.chatSubmit(params);
 			case "chat.submissionStatus":
 				return this.chatSubmissionStatus(params);
+			case "chat.steer":
+				return this.chatSteer(params);
+			case "chat.withdraw":
+				return this.chatWithdraw(params);
 			case "chat.abort":
 				return this.chatAbort(params);
 			case "subagents.open":
@@ -573,6 +577,18 @@ export class MobileAdapter {
 		if (this.runtime === undefined) return { status: "unknown" };
 		const accepted = await this.runtime.submissionAccepted(state.sessionId, params.requestId);
 		return { status: accepted ? "accepted" : "unknown" };
+	}
+
+	private async chatSteer(params: { subscriptionId: string; id: number }): Promise<unknown> {
+		const state = this.requireChat(params);
+		this.assertAuthorized();
+		return remote(() => state.chat.steer({ id: params.id }), "rejected");
+	}
+
+	private async chatWithdraw(params: { subscriptionId: string; id: number }): Promise<unknown> {
+		const state = this.requireChat(params);
+		this.assertAuthorized();
+		return remote(() => state.chat.withdraw({ id: params.id }), "rejected");
 	}
 
 	private async chatAbort(params: { subscriptionId: string }): Promise<unknown> {

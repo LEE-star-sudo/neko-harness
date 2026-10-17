@@ -47,11 +47,13 @@ Map<String, dynamic> fixtureMessage(String name) {
 Map<String, dynamic> snapshotOf(
   List<Map<String, dynamic>> items, {
   bool busy = false,
+  List<Map<String, dynamic>>? queued,
   String? historyBefore,
   List<Map<String, dynamic>> subagents = const <Map<String, dynamic>>[],
   Map<String, dynamic>? streaming,
 }) => <String, dynamic>{
   'busy': busy,
+  'queued': ?queued,
   'status': busy ? '思考中…' : null,
   'usage': <String, dynamic>{
     'input': 1,

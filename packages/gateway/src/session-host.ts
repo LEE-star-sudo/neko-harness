@@ -55,6 +55,7 @@ const emptyView: ChatView = {
 	agent: { model: null, thinkingLevel: null },
 	cwd: "",
 	busy: false,
+	queued: [],
 	status: null,
 	usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 	items: [],
@@ -372,6 +373,8 @@ export function serveSessions(host: Host<GatewayPrincipal>, runtime: NekoRuntime
 				await projection.value.session.abort();
 				return null;
 			},
+			withdraw: ({ id }) => projection.value.session.withdraw(id),
+			steer: ({ id }) => projection.value.session.steer(id),
 			skills: () => runtime.listSkills(projection.value.session.id),
 			jobOutput: async ({ jobId, since }) => {
 				try {

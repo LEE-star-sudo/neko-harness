@@ -78,7 +78,6 @@ void main() {
       for (final key in <String>[
         'composer-send',
         'composer-stop',
-        'composer-steer',
         'sessions-new',
         'open-switcher',
         'connection-indicator',

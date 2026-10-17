@@ -100,6 +100,8 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
   String? _error;
   bool _loadingOlder = false;
   bool _sending = false;
+  int? _withdrawingId;
+  String? _notice;
   List<Approval> _approvals = <Approval>[];
   List<PendingSubmission> _pendingList = <PendingSubmission>[];
   Timer? _draftTimer;
@@ -129,6 +131,19 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
   /// 当前会话的待确认发送。
   List<PendingSubmission> get pending =>
       _pendingList.where((p) => p.sessionId == _sessionId).toList();
+
+  /// 电脑上的排队输入；null 表示电脑端不支持（隐藏排队条）。
+  List<QueuedInput>? get queued => transcript.status.queued;
+
+  int? get withdrawingId => _withdrawingId;
+
+  /// 撤回的非错误提示（已发送、图片未恢复等）。
+  String? get notice => _notice;
+
+  void clearNotice() {
+    _notice = null;
+    notifyListeners();
+  }
 
   void clearError() {
     _error = null;
@@ -275,7 +290,7 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
   // ——— 发送 ———
 
   /// 发送输入框内容；受理后仅在输入框仍为原文时清空。
-  Future<void> send({bool steer = false}) async {
+  Future<void> send() async {
     final text = input.text.trim();
     final sessionId = _sessionId;
     final serverId = _serverId;
@@ -290,7 +305,7 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
       requestId: _uuid.v4(),
       sessionId: sessionId,
       text: text,
-      steer: steer,
+      steer: false,
       createdAt: DateTime.now().millisecondsSinceEpoch,
     );
     _pendingList = <PendingSubmission>[..._pendingList, record];
@@ -390,6 +405,92 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
       }
     }
     if (generation == _generation) notifyListeners();
+  }
+
+  /// 把一条排队输入改为引导；电脑返回新的提交 id，列表以状态更新为准。
+  Future<void> steer(QueuedInput item) async {
+    final api = _api;
+    final subscriptionId = _subscriptionId;
+    if (!canControl ||
+        api == null ||
+        subscriptionId == null ||
+        _withdrawingId != null) {
+      return;
+    }
+    _withdrawingId = item.id;
+    _error = null;
+    _notice = null;
+    notifyListeners();
+    try {
+      final result = asJson(
+        await api.call('chat.steer', <String, Object?>{
+          'subscriptionId': subscriptionId,
+          'id': item.id,
+        }),
+      );
+      switch (result['result']) {
+        case 'steered':
+          break;
+        case 'withdrawn':
+          final text = result['text'] as String? ?? item.preview;
+          input.text = input.text.trim().isEmpty
+              ? text
+              : '${input.text}\n$text';
+          input.selection = TextSelection.collapsed(offset: input.text.length);
+          _notice = '无法改为引导，消息已撤回到输入框';
+        case 'unknown':
+          _notice = '该消息已不在队列中';
+        default:
+          _notice = '该消息已发送，无法引导';
+      }
+    } catch (error) {
+      _setError(error);
+    } finally {
+      _withdrawingId = null;
+      notifyListeners();
+    }
+  }
+
+  /// 撤回一条排队输入；成功后把电脑返回的完整原文取回草稿（草稿非空时追加到新行）。
+  Future<void> withdraw(QueuedInput item) async {
+    final api = _api;
+    final subscriptionId = _subscriptionId;
+    if (!canControl ||
+        api == null ||
+        subscriptionId == null ||
+        _withdrawingId != null) {
+      return;
+    }
+    _withdrawingId = item.id;
+    _error = null;
+    _notice = null;
+    notifyListeners();
+    try {
+      final result = asJson(
+        await api.call('chat.withdraw', <String, Object?>{
+          'subscriptionId': subscriptionId,
+          'id': item.id,
+        }),
+      );
+      switch (result['result']) {
+        case 'withdrawn':
+          final text = result['text'] as String? ?? item.preview;
+          input.text = input.text.trim().isEmpty
+              ? text
+              : '${input.text}\n$text';
+          input.selection = TextSelection.collapsed(offset: input.text.length);
+          if ((result['images'] as int? ?? 0) > 0) _notice = '图片未恢复，请重新添加';
+        case 'unknown':
+          _notice = '该消息已不在队列中';
+        default:
+          _notice = '该消息已发送，无法撤回';
+      }
+    } catch (error) {
+      _setError(error);
+    } finally {
+      _withdrawingId = null;
+      notifyListeners();
+    }
   }
 
   Future<void> abort() async {

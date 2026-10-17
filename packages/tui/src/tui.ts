@@ -22,7 +22,7 @@ import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { promptHistory } from "@neko-harness/core/input-history";
 import { sessionName } from "@neko-harness/core/session-display";
-import { JOBS_UNSUPPORTED, jobsClient } from "@neko-harness/gateway/client-session";
+import { JOBS_UNSUPPORTED, jobsClient, queueClient } from "@neko-harness/gateway/client-session";
 import type { NekoChat } from "@neko-harness/gateway/contract";
 import { ApprovalDock } from "./approval-dock.ts";
 import { copyLastAnswer } from "./clipboard-write.ts";
@@ -49,6 +49,7 @@ import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./ima
 import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
+import { QueueRow, queueKeyAction, restoreText, steerNotice, withdrawNotice } from "./queue-ui.ts";
 import { openSearchPanel } from "./search-ui.ts";
 import { openSkillMarket } from "./skill-market-ui.ts";
 import { SubagentDetail, subagentItems } from "./subagents-ui.ts";
@@ -128,6 +129,8 @@ class NekoTuiApp {
 	#chat: NekoChat | undefined;
 	#agentsPanel = false;
 	#jobsPanel = false;
+	#queueBusy = false;
+	readonly #queueRow = new QueueRow();
 	#searchStop: (() => void) | undefined;
 	#contextStop: (() => void) | undefined;
 	#agentDetails = new Map<string, SubagentDetail>();
@@ -282,6 +285,8 @@ class NekoTuiApp {
 				return undefined;
 			}
 			if (this.#sessionOperation) return { consume: true };
+			const queueKey = this.#queueKey(data);
+			if (queueKey) return queueKey;
 			if (
 				matchesKey(data, "right") &&
 				this.#lastView?.subagents?.length &&
@@ -333,10 +338,6 @@ class NekoTuiApp {
 				this.openSessionsOverlay();
 				return { consume: true };
 			}
-			if (this.#busyText !== undefined && matchesKey(data, "alt+enter")) {
-				this.submitFollowUp();
-				return { consume: true };
-			}
 			return undefined;
 		});
 	}
@@ -381,6 +382,8 @@ class NekoTuiApp {
 				notices,
 				busy: this.#busyLoader,
 				busyVisible: () => this.#busyText !== undefined,
+				queue: this.#queueRow,
+				queueVisible: () => this.#queueRow.visible,
 				panelOpen: () => this.#panel.open || this.#login.open,
 			}),
 		);
@@ -556,11 +559,7 @@ class NekoTuiApp {
 			this.addNotice("Configure DeepSeek with /login before sending.", "warning");
 			return;
 		}
-		void this.sendImages(text, this.#busyText !== undefined ? "steer" : undefined);
-	}
-	submitFollowUp(): void {
-		const text = this.#editor.getText();
-		if (text.trim()) void this.sendImages(text, "followUp");
+		void this.sendImages(text);
 	}
 	private async addImagePaths(paths: string[]): Promise<string> {
 		return paths
@@ -608,7 +607,7 @@ class NekoTuiApp {
 			this.#clipboardPending = false;
 		}
 	}
-	private async sendImages(text: string, whenBusy?: "steer" | "followUp"): Promise<void> {
+	private async sendImages(text: string): Promise<void> {
 		const chat = this.#chat;
 		const session = this.#sessionId;
 		if (!chat || this.#sending.has(session)) return;
@@ -642,7 +641,7 @@ class NekoTuiApp {
 				);
 				content = content.replaceAll(ref, "");
 			}
-			await chat.submit({ content: content.trim(), images: ids, requestId, ...(whenBusy ? { whenBusy } : {}) });
+			await chat.submit({ content: content.trim(), images: ids, requestId });
 			if (session === this.#sessionId && this.#editor.getText() === before) this.#editor.setText("");
 			if (this.#texts.get(session) === before) this.#texts.delete(session);
 			const remaining = session === this.#sessionId ? this.#editor.getText() : (this.#texts.get(session) ?? "");
@@ -722,6 +721,7 @@ class NekoTuiApp {
 	async switchSession(id: string): Promise<void> {
 		this.#approval.close();
 		this.#chat = undefined;
+		this.#queueRow.setItems([]);
 		if (this.#jobsPanel && this.#panel.open) this.#panel.close();
 		if (this.#sessionId) this.#texts.set(this.#sessionId, this.#editor.getText());
 		this.#viewUnsubscribe?.();
@@ -968,6 +968,60 @@ class NekoTuiApp {
 		);
 		this.#ui.setFocus(this.#panel);
 	}
+	/** Alt+Up selects the queued messages above the editor; Enter steers, Esc withdraws, other keys leave. */
+	#queueKey(data: string): { consume: true } | undefined {
+		const row = this.#queueRow;
+		if (this.#queueBusy && row.selecting) return { consume: true };
+		const action = queueKeyAction(row, data, this.#editor.isShowingAutocomplete());
+		if (action === undefined) return undefined;
+		if (action === "steer" || action === "withdraw") return this.#queueAct(action);
+		if (action === "select") row.select();
+		else if (action === "up") row.move(-1);
+		else if (action === "down") row.move(1);
+		else {
+			row.clear();
+			this.#ui.requestRender();
+			return undefined;
+		}
+		this.#ui.requestRender();
+		return { consume: true };
+	}
+	#queueAct(action: "steer" | "withdraw"): { consume: true } {
+		const chat = this.#chat;
+		const item = this.#queueRow.current;
+		if (!chat || !item) return { consume: true };
+		if (action === "steer" && item.mode === "steer") {
+			this.addNotice("That message already steers the current run.", "info");
+			return { consume: true };
+		}
+		const queue = queueClient(chat);
+		const session = this.#sessionId;
+		this.#queueBusy = true;
+		const restore = (outcome: { result: string; text?: string | undefined }) => {
+			if (outcome.result === "withdrawn") this.#editor.setText(restoreText(this.#editor.getText(), outcome.text ?? ""));
+		};
+		const run =
+			action === "steer"
+				? queue.steer(item.id).then((outcome) => {
+						if (session !== this.#sessionId) return;
+						restore(outcome);
+						const notice = steerNotice(outcome);
+						this.addNotice(notice.message, notice.level);
+					})
+				: queue.withdraw(item.id).then((outcome) => {
+						if (session !== this.#sessionId) return;
+						restore(outcome);
+						const notice = withdrawNotice(outcome);
+						this.addNotice(notice.message, notice.level);
+					});
+		void run
+			.catch((error) => this.addNotice(messageOf(error), "error"))
+			.finally(() => {
+				this.#queueBusy = false;
+				this.#ui.requestRender();
+			});
+		return { consume: true };
+	}
 	#showSearch(): void {
 		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
 		this.#searchStop = openSearchPanel(this.#panel, this.#gateway.client, (message) => this.addNotice(message));
@@ -1047,6 +1101,7 @@ class NekoTuiApp {
 		else this.#approval.close();
 		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? [], view.agents));
 		if (this.#jobsPanel) this.#panel.update(jobItems(view.jobs ?? []));
+		this.#queueRow.setItems(view.queued ?? []);
 		for (const identity of view.agents ?? []) {
 			const detail = this.#agentDetails.get(identity.agentId);
 			if (detail) {

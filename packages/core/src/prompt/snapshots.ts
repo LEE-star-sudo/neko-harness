@@ -49,6 +49,14 @@ export const createResourceSnapshots = (
 		discard(id: ConversationId, requestId: string) {
 			conversations.get(id)?.pending.delete(requestId);
 		},
+		/** A resubmitted input keeps the snapshot staged for its original request. */
+		move(id: ConversationId, from: string, to: string) {
+			const pending = conversations.get(id)?.pending;
+			const snapshot = pending?.get(from);
+			if (!pending || !snapshot) return;
+			pending.delete(from);
+			pending.set(to, snapshot);
+		},
 		forget(id: ConversationId) {
 			conversations.delete(id);
 		},

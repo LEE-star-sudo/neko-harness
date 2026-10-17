@@ -154,6 +154,12 @@ export const appActions = {
 	submit(content: string, files: ImageFile[] = [], requestId?: string, sessionId?: string): Promise<void> {
 		return requireConnection().submit(content, files, requestId, sessionId);
 	},
+	steer(sessionId: string, id: number) {
+		return requireConnection().steer(sessionId, id);
+	},
+	withdraw(sessionId: string, id: number) {
+		return requireConnection().withdraw(sessionId, id);
+	},
 	searchFiles(query: string, workspaceRoot: string, signal: AbortSignal) {
 		return requireConnection().searchFiles(query, workspaceRoot, signal);
 	},

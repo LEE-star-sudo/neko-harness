@@ -1,0 +1,11 @@
+{
+	"description": "chat.steer 结果：steered 时返回新的提交 id（原 id 随之失效，以状态列表为准）；placed/settled/unknown 不带 id；仅当无法重新受理时为 withdrawn 并带原文。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 28,
+		"result": {
+			"result": "steered",
+			"id": 17
+		}
+	}
+}

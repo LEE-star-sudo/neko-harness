@@ -24,9 +24,12 @@ import {
 	defineDoc,
 	type Extension,
 	Harness,
+	InboxDoc,
+	type InputEntry,
 	LiveDoc as importLiveDoc,
 	MemoryStorage,
 	type Submission,
+	type SubmissionId,
 	type Tx,
 	UsageDoc,
 	type UsageState,
@@ -69,6 +72,7 @@ import { createNekoPrompt } from "./prompt/prompt.ts";
 import { createResourceLoader, scanSkillsByLevel } from "./prompt/resources.ts";
 import type { SkillLevel } from "./prompt/skills.ts";
 import { createResourceSnapshots } from "./prompt/snapshots.ts";
+import { queuedUserInput } from "./queued.ts";
 import {
 	DEFAULT_SEARCH_PROVIDER,
 	isSearchProvider,
@@ -144,6 +148,13 @@ export type NekoSubmitOptions = {
 	readonly whenBusy?: "steer" | "followUp" | "reject";
 };
 
+/** `placed`: already in the transcript; `settled`: already finished; `unknown`: not a queued user input of this session. */
+export type NekoWithdrawResult = "withdrawn" | "placed" | "settled" | "unknown";
+/** A withdrawn input returns its full text (skills in their typed `/skill:` form) so a frontend can restore the draft. */
+export type NekoWithdrawal = { result: NekoWithdrawResult; text?: string; images?: number };
+/** `steered`: the queued input now waits as a steer (`id` is its new submission id); `withdrawn` only when it could not be re-admitted. */
+export type NekoSteering = { result: "steered" | NekoWithdrawResult; id?: number; text?: string; images?: number };
+
 /** Terminal outcome of one submitted input, with the answer text already extracted. */
 export type NekoAnswer =
 	| { readonly status: "done"; readonly text: string }
@@ -169,6 +180,10 @@ export type NekoSession = {
 	usage(): Promise<UsageState>;
 	/** Withdraw queued inputs and abort the current run. */
 	abort(): Promise<void>;
+	/** Withdraw one queued user input (`ChatView.queued[].id`) without touching the run or the other queued inputs. */
+	withdraw(submissionId: number): Promise<NekoWithdrawal>;
+	/** Turn one queued user input into a steer (placed after the current tool round) without stopping the run. */
+	steer(submissionId: number): Promise<NekoSteering>;
 	compact(instructions?: string): Promise<void>;
 	compactionRecord(): Promise<CompactionRecord | null>;
 	/** Background jobs of this session: running ones and the latest terminal ones, without output. */
@@ -768,6 +783,54 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		abort() {
 			return target.abort(context);
+		},
+		async withdraw(submissionId) {
+			const id = submissionId as SubmissionId;
+			const inbox = await harness.snapshot(InboxDoc, target.id, context);
+			const item = inbox?.items.find((i) => i.id === id);
+			const input = item ? queuedUserInput(item) : undefined;
+			if (item && !input) return { result: "unknown" };
+			const requestId = (await (await harness.submission(id, context))?.status(context))?.requestId;
+			const outcome = await harness.abortSubmission(id, context, target.id);
+			if (outcome !== "aborted") {
+				return { result: outcome === "already_placed" ? "placed" : outcome === "settled" ? "settled" : "unknown" };
+			}
+			if (requestId !== undefined) resourceSnapshots.discard(target.id, requestId);
+			await metadata.reconcile(target.id);
+			return { result: "withdrawn", ...(input ? { text: input.text, images: input.images } : {}) };
+		},
+		async steer(submissionId) {
+			const id = submissionId as SubmissionId;
+			const inbox = await harness.snapshot(InboxDoc, target.id, context);
+			const item = inbox?.items.find((i) => i.id === id);
+			const input = item ? queuedUserInput(item) : undefined;
+			if (item && (!input || item.mode === "write")) return { result: "unknown" };
+			if (item && input?.mode === "steer") return { result: "steered", id: submissionId };
+			const requestId = (await (await harness.submission(id, context))?.status(context))?.requestId;
+			const outcome = await harness.abortSubmission(id, context, target.id);
+			if (outcome !== "aborted" || !item || !input) {
+				return { result: outcome === "already_placed" ? "placed" : outcome === "settled" ? "settled" : "unknown" };
+			}
+			const steerRequestId = requestId !== undefined ? `steer:${requestId}` : crypto.randomUUID();
+			try {
+				const next = await target.submit(
+					{
+						type: "input",
+						content: item.content as UserMessage["content"],
+						...(item.entry ? { entry: item.entry as InputEntry } : {}),
+						requestId: steerRequestId,
+						whenBusy: "steer",
+					},
+					context,
+				);
+				if (requestId !== undefined) resourceSnapshots.move(target.id, requestId, steerRequestId);
+				await metadata.reconcile(target.id);
+				return { result: "steered", id: next.id };
+			} catch {
+				if (requestId !== undefined) resourceSnapshots.discard(target.id, requestId);
+				await metadata.reconcile(target.id);
+				return { result: "withdrawn", text: input.text, images: input.images };
+			}
 		},
 	});
 

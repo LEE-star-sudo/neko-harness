@@ -17,6 +17,9 @@ import {
 	NekoWorkspaces,
 	type WireJobOutput,
 	type WireJobSummary,
+	type WireQueuedInput,
+	type WireSteerResult,
+	type WireWithdrawResult,
 } from "./contract.ts";
 import { createClientHost } from "./link.ts";
 import { type SubagentClient, subagentClient } from "./subagent-client.ts";
@@ -63,6 +66,35 @@ export function jobsClient(chat: NekoChat): JobsClient {
 		async stop(jobId) {
 			require();
 			return chat.jobStop({ jobId });
+		},
+	};
+}
+export const QUEUE_UNSUPPORTED =
+	"This gateway does not support queued message controls. Restart the gateway to enable them.";
+export type QueueClient = {
+	/** False for a gateway built before queue visibility: the view carries no `queued` field at all. */
+	readonly supported: boolean;
+	/** Current queued user inputs; empty when unsupported. */
+	list(): readonly WireQueuedInput[];
+	/** Turn a queued message into a steer; the returned id replaces the old one. */
+	steer(id: number): Promise<WireSteerResult>;
+	withdraw(id: number): Promise<WireWithdrawResult>;
+};
+/** Capability-probed access to a chat's queued inputs; an old gateway degrades instead of failing. */
+export function queueClient(chat: NekoChat): QueueClient {
+	const supported = () => chat.view.value?.queued !== undefined;
+	return {
+		get supported() {
+			return supported();
+		},
+		list: () => chat.view.value?.queued ?? [],
+		async steer(id) {
+			if (!supported()) throw new Error(QUEUE_UNSUPPORTED);
+			return chat.steer({ id });
+		},
+		async withdraw(id) {
+			if (!supported()) throw new Error(QUEUE_UNSUPPORTED);
+			return chat.withdraw({ id });
 		},
 	};
 }

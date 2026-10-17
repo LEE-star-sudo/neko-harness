@@ -126,6 +126,77 @@ describe("mobile chat api", () => {
 		await phone.notification("chat.patch", hasAssistant("second answer"));
 	}, 30_000);
 
+	it("lists queued inputs in the status and withdraws one without stopping the run", async () => {
+		harness = await startMobileHarness();
+		const hold = gate();
+		harness.faux.setResponses([
+			async () => {
+				await hold.promise;
+				return fauxAssistantMessage("first answer");
+			},
+			fauxAssistantMessage("kept answer"),
+		]);
+		const phone = await harness.connect(await harness.pair());
+		const { subscriptionId, snapshot } = await phone.call<Attached & { snapshot: Snapshot & { queued?: unknown[] } }>(
+			"chat.attach",
+			{ sessionId: String(harness.gateway.runtime.root.id) },
+		);
+		expect(snapshot.queued).toEqual([]);
+		await phone.call("chat.submit", { subscriptionId, requestId: "w-1", text: "one" });
+		await phone.notification("chat.patch", (params) => (params as Patch).status?.busy === true);
+		await phone.call("chat.submit", { subscriptionId, requestId: "w-2", text: "drop me" });
+		await phone.call("chat.submit", { subscriptionId, requestId: "w-3", text: "keep me", mode: "steer" });
+		type Queued = { id: number; mode: string; preview: string; images: number };
+		const queuedOf = (params: Record<string, unknown>) => (params as { status?: { queued?: Queued[] } }).status?.queued;
+		const patch = await phone.notification("chat.patch", (params) => queuedOf(params)?.length === 2);
+		const queued = queuedOf(patch)!;
+		expect(queued.map((q) => [q.mode, q.preview, q.images])).toEqual([
+			["followUp", "drop me", 0],
+			["steer", "keep me", 0],
+		]);
+		expect(Check(MOBILE_API_V1_NOTIFICATIONS["chat.patch"] as never, patch)).toBe(true);
+		// 桌面前端看到同一份排队列表，并在手机撤回后同步消失。
+		const desktop = await harness.desktop();
+		const desktopChat = await desktop.attach(String(harness.gateway.runtime.root.id));
+		await eventually(() => desktopChat.view.value?.queued?.length === 2, "desktop sees the queue");
+		expect(desktopChat.view.value!.queued!.map((q) => q.id)).toEqual(queued.map((q) => q.id));
+
+		const steered = await phone.call<{ result: string; id?: number }>("chat.steer", {
+			subscriptionId,
+			id: queued[0]!.id,
+		});
+		resultOk("chat.steer", steered);
+		expect(steered.result).toBe("steered");
+		const afterSteer = await phone.notification(
+			"chat.patch",
+			(params) => queuedOf(params)?.some((q) => q.preview === "drop me" && q.mode === "steer") === true,
+		);
+		expect(queuedOf(afterSteer)!.map((q) => q.mode)).toEqual(["steer", "steer"]);
+		await eventually(
+			() => desktopChat.view.value?.queued?.every((q) => q.mode === "steer") === true,
+			"desktop sees the steer",
+		);
+		const droppedId = steered.id!;
+		const dropped = await phone.call<unknown>("chat.withdraw", { subscriptionId, id: droppedId });
+		resultOk("chat.withdraw", dropped);
+		expect(dropped).toEqual({ result: "withdrawn", text: "drop me", images: 0 });
+		const after = await phone.notification("chat.patch", (params) => queuedOf(params)?.length === 1);
+		await eventually(() => desktopChat.view.value?.queued?.length === 1, "desktop sees the withdrawal");
+		expect(queuedOf(after)![0]!.preview).toBe("keep me");
+		expect(((after as unknown as Patch).status as Snapshot).busy).toBe(true);
+		expect(await phone.call<{ result: string }>("chat.withdraw", { subscriptionId, id: droppedId })).not.toEqual(
+			expect.objectContaining({ result: "withdrawn" }),
+		);
+		hold.release();
+		await phone.notification("chat.patch", hasAssistant("kept answer"));
+		const chat = desktopChat;
+		await eventually(() => chat.view.value?.busy === false, "idle");
+		expect(chat.view.value?.items.flatMap((item) => (item.type === "user" ? [item.text] : []))).toEqual([
+			"one",
+			"keep me",
+		]);
+	}, 30_000);
+
 	it("invalidates the old subscription on re-attach and returns gone for archived sessions", async () => {
 		harness = await startMobileHarness();
 		harness.faux.setResponses([fauxAssistantMessage("desktop answer")]);

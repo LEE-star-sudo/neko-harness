@@ -40,7 +40,7 @@ export const labels = {
 		return shortcutHints(["↑↓", "Select"], ["Enter", "Open"], ["Esc", "Close"]);
 	},
 	idleHints: "Enter Send · /help Keys",
-	busyHints: "Enter Steer · Esc Stop",
+	busyHints: "Enter Queue · Esc Stop",
 	idleCompact: "Enter Send · /help Keys",
-	busyCompact: "Enter Steer · Esc Stop",
+	busyCompact: "Enter Queue · Esc Stop",
 };

@@ -241,6 +241,11 @@ export function mapStatus(view: ChatView, options: { readonly readonly?: boolean
 	const latest = view.compaction?.latest;
 	return {
 		busy: view.busy,
+		...(view.queued === undefined
+			? {}
+			: {
+					queued: view.queued.map(({ id, mode, preview, images }) => ({ id, mode, preview, images })),
+				}),
 		status: view.status,
 		usage: mapUsage(view.usage),
 		...(view.taskUsage === undefined ? {} : { taskUsage: mapUsage(view.taskUsage) }),

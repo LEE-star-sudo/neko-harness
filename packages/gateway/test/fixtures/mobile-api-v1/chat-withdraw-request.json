@@ -1,0 +1,12 @@
+{
+	"description": "chat.withdraw 请求：撤回一条仍在排队的用户输入（id 来自状态中的 queued 列表）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 27,
+		"method": "chat.withdraw",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"id": 14
+		}
+	}
+}

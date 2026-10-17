@@ -150,7 +150,7 @@ void main() {
     await settle(tester);
   });
 
-  testWidgets('忙碌时可选择引导并停止', (tester) async {
+  testWidgets('忙碌时发送一律排队（不带 mode），并可停止', (tester) async {
     h.snapshot = snapshotOf(<Map<String, dynamic>>[
       userItem('u-1', 'x'),
     ], busy: true);
@@ -163,12 +163,11 @@ void main() {
       ..on('chat.abort', (_) => <String, dynamic>{'accepted': true});
     await tester.pumpWidget(h.build());
     await settle(tester);
-    await tester.tap(find.byKey(const Key('composer-steer')));
     await tester.enterText(find.byKey(const Key('composer-input')), '换个方向');
     await settle(tester);
     await tester.tap(find.byKey(const Key('composer-send')));
     await settle(tester);
-    expect(h.api.callsOf('chat.submit').single?['mode'], 'steer');
+    expect(h.api.callsOf('chat.submit').single?.containsKey('mode'), isFalse);
     await tester.tap(find.byKey(const Key('composer-stop')));
     await settle(tester);
     expect(h.api.callsOf('chat.abort'), hasLength(1));

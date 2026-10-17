@@ -38,6 +38,13 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - Skills 目录：`~/.agents/skills/<name>/SKILL.md` 与 `<workspace>/.agents/skills/<name>/SKILL.md`（YAML frontmatter，同名项目级优先）；提示词只注入元数据，正文由模型用 read 工具自取。新用户输入提交时准备资源快照，只有该输入进入 transcript 后才激活；无新输入 placement 的工具轮复用活动快照。排队、被拒绝或撤回的输入不提前影响当前 run；快照按会话隔离，各节共享一次构建。进程重启后按当前磁盘资源重建。
 - 显式调用：`/skill:<name> [args]` 在 core 准入层展开为 `<skill>` 用户消息（未知技能透传）；被调用技能的元数据与正文同次读取，不常驻保存全部技能正文。同批多输入的系统资源以最后一个输入快照为准，已展开正文保持原样。前端经 `chat.skills(null)` 实时取列表做补全，查询不改变活动快照，不本地展开。
 
+## 排队与插队
+
+- 忙时输入由 pi-durable 持久排队：`whenBusy: "followUp"`（缺省，回答后放入）或 `"steer"`（当前工具轮后放入）。Web 与移动端发送一律排队，输入区不预选引导，引导/撤回在排队条上；TUI 同样忙时 Enter 只排队，排队区用 Alt+↑ 选中、↑/↓ 移动，Enter=Steer、Esc=只撤回选中项（`queueKeyAction`，选择期间 Esc 不停止运行）。
+- 排队真相是 `pi.inbox`：core 的 `projectQueued`（`queued.ts`）只投影用户输入（排除 `write`、`jobReport`、`subagentRoundId`），经 `ChatView.queued`（缺省 = 旧网关，空数组 = 支持且无排队）到各端；预览有界（`QUEUED_PREVIEW_CHARS`），不含图片数据与技能正文。
+- 单条撤回走 `NekoSession.withdraw` → gateway `chat.withdraw` / 移动 `chat.withdraw`，返回 `withdrawn | placed | settled | unknown`，`withdrawn` 时带完整原文用于取回草稿（图片不恢复）；`abort` 仍撤回全部排队并中止运行。
+- 排队项改引导走 `NekoSession.steer` → `chat.steer`：pi-durable 无改模式接口，core 撤回原项后以相同 content/entry 用 `whenBusy: "steer"` 重新受理（requestId `steer:<原>`，资源快照经 `resourceSnapshots.move` 迁移），返回新的提交 id，前端以视图列表为准；重新受理失败按撤回返回原文。前端用 `queueClient`（`QUEUE_UNSUPPORTED`）探测能力，沿用 jobs 的可选扩展模式，不提升应用协议。
+
 ## 后台任务
 
 - core 的 `job` 工具（`packages/core/src/jobs.ts`、`job-engine.ts`）基于 `env.exec` 运行后台命令（不用 pty）；任务状态存 `app.neko.jobs` 文档，运行中输出只在内存。任务结束/崩溃经 `jobReport` 输入回报并触发新一轮，投影为带 `jobId` 的 `system` 项，不进入输入历史。

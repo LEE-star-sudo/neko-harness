@@ -3,6 +3,7 @@ import type { ChatView } from "@neko-harness/core";
 import { Check } from "typebox/value";
 import {
 	MobileChatProjection,
+	mapStatus,
 	ProjectionError,
 	type ProjectionNotice,
 	type ProjectionSource,
@@ -318,5 +319,19 @@ describe("mobile chat projection", () => {
 		expect(snapshot.subagents[0]).toMatchObject({ agentId: "agent-4", approvalCount: 2, readonly: false });
 		expect(snapshot.approvalCount).toBe(2);
 		chat.dispose();
+	});
+});
+
+describe("mobile status queue", () => {
+	it("maps queued inputs without skills and omits the field for a view without queue visibility", () => {
+		const view = baseView([]);
+		expect("queued" in mapStatus(view)).toBe(false);
+		const queued = mapStatus({
+			...view,
+			queued: [{ id: 4, mode: "steer", preview: "hi", images: 1, skill: { name: "pdf", args: "x" } }],
+		});
+		expect(queued.queued).toEqual([{ id: 4, mode: "steer", preview: "hi", images: 1 }]);
+		expect(Check(MobileChatSnapshotSchema, { ...queued, items: [], historyBefore: null, streaming: null })).toBe(true);
+		expect(mapStatus({ ...view, queued: [] }).queued).toEqual([]);
 	});
 });

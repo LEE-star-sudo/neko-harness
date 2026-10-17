@@ -1,0 +1,12 @@
+{
+	"description": "chat.withdraw 结果：withdrawn 时返回完整原文以便取回草稿；placed/settled/unknown 不带文字。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 27,
+		"result": {
+			"result": "withdrawn",
+			"text": "稍后再帮我跑一遍测试",
+			"images": 0
+		}
+	}
+}

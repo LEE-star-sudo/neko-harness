@@ -139,11 +139,34 @@ export const JobOutputSchema = Type.Object({
 	truncated: bool,
 	dropped: integer,
 });
+/** A user input waiting in the inbox; the preview is clipped by the host so the view stays bounded. */
+export const QueuedInputSchema = Type.Object({
+	id: integer,
+	mode: Type.Enum(["steer", "followUp"]),
+	preview: str,
+	images: integer,
+	skill: Type.Optional(Type.Object({ name: str, args: str })),
+});
+/** `text` is the full original input of a withdrawn message, for restoring the draft. */
+export const WithdrawResultSchema = Type.Object({
+	result: Type.Enum(["withdrawn", "placed", "settled", "unknown"]),
+	text: Type.Optional(str),
+	images: Type.Optional(integer),
+});
+/** `steered` carries the input's new submission id; `withdrawn` only when it could not be re-admitted, with its text. */
+export const SteerResultSchema = Type.Object({
+	result: Type.Enum(["steered", "withdrawn", "placed", "settled", "unknown"]),
+	id: Type.Optional(integer),
+	text: Type.Optional(str),
+	images: Type.Optional(integer),
+});
 export const ChatViewSchema = Type.Object({
 	historyBefore: Type.Optional(Type.Union([integer, nil])),
 	agents: Type.Optional(Type.Array(SubagentSummarySchema)),
 	/** Absent on a gateway without background jobs; empty means supported with none. */
 	jobs: Type.Optional(Type.Array(JobSummarySchema)),
+	/** Absent on a gateway without queue visibility; empty means supported with none. */
+	queued: Type.Optional(Type.Array(QueuedInputSchema)),
 	rounds: Type.Optional(Type.Array(DelegationSchema)),
 	subagents: Type.Optional(Type.Array(DelegationSchema)),
 	taskUsage: Type.Optional(usage),
@@ -376,6 +399,8 @@ export const NekoChat = contract("neko.chat", {
 					nil,
 				),
 				abort: rpc(nil, nil),
+				withdraw: rpc(Type.Object({ id: integer }, { additionalProperties: false }), WithdrawResultSchema),
+				steer: rpc(Type.Object({ id: integer }, { additionalProperties: false }), SteerResultSchema),
 				usage: rpc(nil, usage),
 				skills: rpc(nil, Type.Array(Type.Object({ name: str, description: str, location: str, level }))),
 				jobOutput: rpc(
@@ -613,6 +638,9 @@ export type NekoModels = Ref<typeof NekoModels>;
 export type NekoChat = Ref<typeof NekoChat>;
 export type WireJobSummary = Static<typeof JobSummarySchema>;
 export type WireJobOutput = Static<typeof JobOutputSchema>;
+export type WireQueuedInput = Static<typeof QueuedInputSchema>;
+export type WireWithdrawResult = Static<typeof WithdrawResultSchema>;
+export type WireSteerResult = Static<typeof SteerResultSchema>;
 export type NekoWorkspaces = Ref<typeof NekoWorkspaces>;
 export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Ref<typeof NekoCredentials>;

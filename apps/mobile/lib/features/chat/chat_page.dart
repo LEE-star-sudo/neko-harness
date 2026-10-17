@@ -134,7 +134,10 @@ class ChatPage extends ConsumerWidget {
                   manager: manager,
                   error: chat.error,
                   onCloseError: chat.clearError,
+                  notice: chat.notice,
+                  onCloseNotice: chat.clearNotice,
                   pending: PendingTray(chat: chat),
+                  queue: QueueTray(chat: chat),
                 ),
                 if (chat.sessionId != null) Composer(chat: chat),
               ],
@@ -485,13 +488,19 @@ class StatusStrip extends StatelessWidget {
     required this.manager,
     this.error,
     this.onCloseError,
+    this.notice,
+    this.onCloseNotice,
     this.pending,
+    this.queue,
   });
 
   final ConnectionManager manager;
   final String? error;
   final VoidCallback? onCloseError;
+  final String? notice;
+  final VoidCallback? onCloseNotice;
   final Widget? pending;
+  final Widget? queue;
 
   @override
   Widget build(BuildContext context) {
@@ -501,8 +510,110 @@ class StatusStrip extends StatelessWidget {
         ConnectionBanner(manager: manager),
         if (error != null)
           ErrorBanner(text: error!, onClose: onCloseError ?? () {}),
+        if (notice != null)
+          NoticeBanner(text: notice!, onClose: onCloseNotice ?? () {}),
         ?pending,
+        ?queue,
       ],
+    );
+  }
+}
+
+class NoticeBanner extends StatelessWidget {
+  const NoticeBanner({super.key, required this.text, required this.onClose});
+
+  final String text;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = NekoTokens.of(context);
+    return Material(
+      key: const Key('notice-banner'),
+      color: tokens.surfaceMuted,
+      child: Row(
+        children: <Widget>[
+          const SizedBox(width: NekoSpace.md),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: NekoSpace.xs),
+              child: Text(text, style: context.small(tokens.textMuted)),
+            ),
+          ),
+          IconButton(
+            tooltip: '关闭',
+            onPressed: onClose,
+            icon: const NekoIcon(NekoIcons.close),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 电脑上排队或待引导、尚未进入会话的消息；电脑为唯一真相，软键盘弹出时限高以免挤占输入区。
+class QueueTray extends StatelessWidget {
+  const QueueTray({super.key, required this.chat});
+
+  final ChatController chat;
+
+  @override
+  Widget build(BuildContext context) {
+    final queued = chat.queued;
+    if (queued == null || queued.isEmpty) return const SizedBox.shrink();
+    final tokens = NekoTokens.of(context);
+    final keyboard = View.of(context).viewInsets.bottom > 0;
+    return Material(
+      key: const Key('queue-tray'),
+      color: tokens.surfaceMuted,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: keyboard ? 48 : 132),
+        child: ListView(
+          shrinkWrap: true,
+          padding: EdgeInsets.zero,
+          children: <Widget>[
+            for (final item in queued)
+              Padding(
+                key: Key('queued-${item.id}'),
+                padding: const EdgeInsets.only(left: NekoSpace.md),
+                child: Row(
+                  children: <Widget>[
+                    Text(
+                      item.steer ? '引导' : '排队',
+                      style: context.small(tokens.primary),
+                    ),
+                    const SizedBox(width: NekoSpace.sm),
+                    Expanded(
+                      child: Text(
+                        item.preview.isEmpty && item.images > 0
+                            ? '（仅图片）'
+                            : item.preview,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.small(tokens.textMuted),
+                      ),
+                    ),
+                    if (!item.steer)
+                      TextButton(
+                        key: Key('queued-steer-${item.id}'),
+                        onPressed: chat.canControl && chat.withdrawingId == null
+                            ? () => chat.steer(item)
+                            : null,
+                        child: const Text('引导'),
+                      ),
+                    TextButton(
+                      key: Key('queued-withdraw-${item.id}'),
+                      onPressed: chat.canControl && chat.withdrawingId == null
+                          ? () => chat.withdraw(item)
+                          : null,
+                      child: Text(chat.withdrawingId == item.id ? '撤回中' : '撤回'),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -557,7 +668,7 @@ class PendingTray extends StatelessWidget {
   }
 }
 
-/// 输入区：离线时仍可编辑草稿；忙碌时可选择排队或引导当前运行，并可停止。
+/// 输入区：离线时仍可编辑草稿；忙碌时发送一律排队（引导与撤回在排队条上），并可停止。
 class Composer extends StatefulWidget {
   const Composer({super.key, required this.chat});
 
@@ -568,8 +679,6 @@ class Composer extends StatefulWidget {
 }
 
 class _ComposerState extends State<Composer> {
-  bool _steer = false;
-
   @override
   Widget build(BuildContext context) {
     final chat = widget.chat;
@@ -599,28 +708,10 @@ class _ComposerState extends State<Composer> {
                     maxLines: 6,
                     textInputAction: TextInputAction.newline,
                     decoration: InputDecoration(
-                      prefixIcon: busy && can
-                          ? IconButton(
-                              key: const Key('composer-steer'),
-                              isSelected: _steer,
-                              tooltip: _steer
-                                  ? '引导当前运行（点按改为排队）'
-                                  : '排队处理（点按改为引导当前运行）',
-                              icon: NekoIcon(
-                                NekoIcons.bolt,
-                                color: tokens.textFaint,
-                              ),
-                              selectedIcon: NekoIcon(
-                                NekoIcons.bolt,
-                                color: tokens.primary,
-                              ),
-                              onPressed: () => setState(() => _steer = !_steer),
-                            )
-                          : null,
                       hintText: !can
                           ? '未连接，可继续编辑草稿'
                           : busy
-                          ? (_steer ? '引导当前运行…' : '回答结束后排队处理')
+                          ? '回答结束后排队处理，可在上方排队条引导或撤回'
                           : '发消息给 Agent',
                     ),
                   ),
@@ -636,12 +727,12 @@ class _ComposerState extends State<Composer> {
                   listenable: chat.input,
                   builder: (context, _) => IconButton.filled(
                     key: const Key('composer-send'),
-                    tooltip: busy && _steer ? '引导' : '发送',
+                    tooltip: busy ? '排队' : '发送',
                     onPressed:
                         can &&
                             !chat.sending &&
                             chat.input.text.trim().isNotEmpty
-                        ? () => chat.send(steer: busy && _steer)
+                        ? chat.send
                         : null,
                     icon: chat.sending
                         ? const SizedBox.square(

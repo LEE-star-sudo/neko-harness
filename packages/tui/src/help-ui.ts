@@ -18,8 +18,7 @@ export function helpLines(platform: string = process.platform): string[] {
 		rows.push(theme.accent(title), ...hints.map(([key, description]) => shortcutHints([key, description])), "");
 	};
 	section("Chat", [
-		["Enter", "Send; steer while running"],
-		["Alt+Enter", "Queue while running"],
+		["Enter", "Send; queue while running"],
 		["Esc", "Stop a running task or blocking compaction"],
 		["Esc Esc", "Clear draft when idle (press twice quickly)"],
 		["Up / Down", "Browse previous inputs in this session"],
@@ -55,6 +54,12 @@ export function helpLines(platform: string = process.platform): string[] {
 		["S", "Stop selected running job (Enter confirms)"],
 		["End", "Jump to the newest output"],
 		["←", "Back"],
+	]);
+	section("Queue", [
+		["Alt+↑", "Select queued messages above the editor"],
+		["↑ / ↓", "Move between queued messages"],
+		["Enter", "Steer the selected message (joins the run after the current tool round)"],
+		["Esc", "Withdraw the selected message into the editor; the run keeps going"],
 	]);
 	section("Web search", [
 		["/search", "Choose the web search provider"],
