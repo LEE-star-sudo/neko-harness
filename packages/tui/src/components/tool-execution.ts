@@ -1,4 +1,6 @@
 import { Box, Container, MouseRegion, Text, type TuiMouseEvent } from "@earendil-works/pi-tui";
+import type { ToolInteraction } from "@neko-harness/core";
+import { plainLine, plainText } from "../plain-text.ts";
 import { getActiveThemeMode, theme } from "../theme/index.ts";
 import { languageForPath } from "../theme/syntax.ts";
 import { diffTargetPath, highlightDiffLines } from "./diff-view.ts";
@@ -64,9 +66,17 @@ export type ToolCardState = {
 	/** diff 删除行数;无 diff 时为 null。 */
 	readonly diffRemoved: number | null;
 	readonly diffTruncated?: boolean;
+	/** Structured outcome of `todo` / `ask_user`, from the persisted tool details; never parsed from text. */
+	readonly interaction?: ToolInteraction;
 };
 
 type Phase = ToolCardState["phase"];
+
+/** One line for a settled `ask_user` card: the user's labels and note, clipped. */
+function answerSummary(interaction: Extract<ToolInteraction, { kind: "ask_user" }>): string {
+	const parts = [...(interaction.labels ?? []), ...(interaction.text ? [interaction.text] : [])];
+	return plainLine(parts.join(", "), 80);
+}
 
 /** 展开区 diff 行数上限,超出截断并提示剩余行数。 */
 const DIFF_MAX_LINES = 50;
@@ -92,6 +102,7 @@ export class ToolExecutionComponent extends Container {
 	#renderTheme = getActiveThemeMode();
 	#state: ToolCardState;
 	#expanded = false;
+	#waiting = false;
 	onOpen: (() => void) | undefined;
 	#box: Box;
 	#text: Text;
@@ -118,9 +129,19 @@ export class ToolExecutionComponent extends Container {
 	get isRunning(): boolean {
 		return this.#state.phase === "running";
 	}
+	get name(): string {
+		return this.#state.name;
+	}
 
 	sync(state: ToolCardState): void {
 		this.#state = state;
+		this.rebuild();
+	}
+
+	/** An `ask_user` call that is still running while the user's answer is awaited. */
+	setWaiting(waiting: boolean): void {
+		if (waiting === this.#waiting) return;
+		this.#waiting = waiting;
 		this.rebuild();
 	}
 
@@ -137,6 +158,17 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	#statusLine(phase: Phase): string {
+		const interaction = this.#state.interaction;
+		if (interaction?.kind === "ask_user") {
+			if (interaction.status === "pending") return theme.warning("? Waiting for your answer");
+			if (interaction.status === "answered") {
+				const answer = answerSummary(interaction);
+				return theme.ok(`✓ Answered${answer ? `: ${answer}` : ""}`);
+			}
+			return interaction.status === "skipped" ? theme.muted("↷ Skipped") : theme.dim("✗ Cancelled");
+		}
+		if (interaction?.kind === "todo") return theme.ok(`✓ Todos ${interaction.completed}/${interaction.total}`);
+		if (this.#waiting && phase !== "done") return theme.warning("? Waiting for your answer");
 		if (phase === "pending") return theme.dim("…");
 		if (phase === "running") return theme.accent(`${currentToolFrame()} Running...`);
 		return this.#state.isError
@@ -146,16 +178,18 @@ export class ToolExecutionComponent extends Container {
 
 	rebuild(): void {
 		const state = this.#state;
+		// Question and todo text comes from the model: show it as plain text, never as terminal control.
+		const plain = state.name === "ask_user" || state.name === "todo";
 		const parts = [
 			`${theme.toolTitle(`⚡ ${state.name}`)}`,
-			theme.dim(state.summary + diffCountSuffix(state)),
+			theme.dim((plain ? plainLine(state.summary) : state.summary) + diffCountSuffix(state)),
 			this.#statusLine(state.phase),
 		];
 		let text = parts.join("  ");
 
 		if (this.#expanded) {
 			// 完整 write diff 可替代 detail;截断时仍保留参数预览。
-			const detail = state.detail;
+			const detail = state.detail !== null && plain ? plainText(state.detail) : state.detail;
 			if (detail !== null && !(state.diff !== null && state.name === "write" && !state.diffTruncated)) {
 				const clipped = clipLines(detail, 20);
 				text += `\n${theme.dim("---- Arguments ----")}\n${clipped.visible}`;
@@ -172,7 +206,8 @@ export class ToolExecutionComponent extends Container {
 		}
 
 		// 默认单行折叠(design D12):标题行 + 行数提示;点击展开参数详情与输出原文全文。
-		const body = state.phase === "running" ? state.output : state.result;
+		const rawBody = state.phase === "running" ? state.output : state.result;
+		const body = rawBody !== null && plain ? plainText(rawBody) : rawBody;
 		if (!this.#expanded && body !== null && body !== "") {
 			text += theme.dim(`  +${body.split("\n").length} lines`);
 		}

@@ -1,0 +1,12 @@
+{
+	"description": "questions.get 请求：读取一道问题的完整记录（id 取自 questions.list；不属于该订阅会话的 id 返回 not_found）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 42,
+		"method": "questions.get",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"id": 612
+		}
+	}
+}

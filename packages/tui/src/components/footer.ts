@@ -10,6 +10,12 @@ export type FooterStats = {
 	readonly approvalCount?: number;
 	/** Running background jobs; omitted or 0 shows nothing. */
 	readonly jobCount?: number;
+	/** Questions waiting for the user's answer; omitted or 0 shows nothing. */
+	readonly questionCount?: number;
+	/** The question panel is open, so Esc closes it rather than stopping the run. */
+	readonly questionOpen?: boolean;
+	/** Compact todo progress such as `Todos 2/5`; omitted while the list is empty or unsupported. */
+	readonly todoProgress?: string;
 	readonly model: string;
 	readonly thinkingLevel: string | null;
 	readonly busy: string | undefined;
@@ -55,7 +61,7 @@ export class StatusFooter implements Component {
 			if (["Compacting", "Waiting", "Retrying", "Applying"].some((w) => s.compaction!.includes(w))) return "warning";
 			return "ok";
 		}
-		return s.busy ? "accent" : "ok";
+		return s.busy ? (s.questionCount ? "warning" : "accent") : "ok";
 	}
 
 	render(width: number): string[] {
@@ -106,14 +112,24 @@ export class StatusFooter implements Component {
 				: `→ Agents ${s.subagentCount}${s.approvalCount ? ` · Approval ${s.approvalCount}` : ""}`
 			: "";
 		const jobHint = s.jobCount && !this.panelOpen ? `Jobs ${s.jobCount}` : "";
+		const questionHint = s.questionCount ? `${s.questionCount} question${s.questionCount > 1 ? "s" : ""} waiting` : "";
+		const todoHint = s.todoProgress ?? "";
 		const hints = this.panelOpen
 			? ""
+			: s.questionOpen
+				? "Esc Close · Ctrl+C Stop"
+				: s.canAbort && !s.busy
+					? "Esc Stop"
+					: s.busy
+						? labels.busyHints
+						: labels.idleHints;
+		const compactHints = s.questionOpen
+			? "Esc Close · Ctrl+C Stop"
 			: s.canAbort && !s.busy
 				? "Esc Stop"
 				: s.busy
-					? labels.busyHints
-					: labels.idleHints;
-		const compactHints = s.canAbort && !s.busy ? "Esc Stop" : s.busy ? labels.busyCompact : labels.idleCompact;
+					? labels.busyCompact
+					: labels.idleCompact;
 		const context = s.contextUsage;
 		const contextText =
 			context && context.window > 0
@@ -124,20 +140,28 @@ export class StatusFooter implements Component {
 		const essentials = [contextText, cost].filter(Boolean).join(" · ");
 		const shortContext = contextText.split("/")[0] ?? "";
 		const shortEssentials = [shortContext, cost].filter(Boolean).join(" · ");
-		const minimalHints = this.panelOpen ? "" : s.canAbort || s.busy ? "Esc Stop" : "/help Keys";
-		const joinHints = (metric: string, hint: string) => [metric, agentHint, jobHint, hint].filter(Boolean).join(" · ");
+		const minimalHints = this.panelOpen
+			? ""
+			: s.questionOpen
+				? "Esc Close"
+				: s.canAbort || s.busy
+					? "Esc Stop"
+					: "/help Keys";
+		// A waiting question is blocking, so its count outlives every other hint when the row is short.
+		const joinHints = (metric: string, hint: string, todo = true) =>
+			[metric, questionHint, todo ? todoHint : "", agentHint, jobHint, hint].filter(Boolean).join(" · ");
 		const candidates = this.panelOpen
-			? [joinHints(essentials, hints), joinHints(shortEssentials, hints), joinHints("", hints)]
+			? [joinHints(essentials, hints), joinHints(shortEssentials, hints), joinHints("", hints, false)]
 			: [
 					joinHints(usage, compactHints),
 					joinHints(essentials, compactHints),
 					joinHints(essentials, minimalHints),
-					joinHints(shortEssentials, minimalHints),
-					joinHints("", minimalHints),
+					joinHints(shortEssentials, minimalHints, false),
+					joinHints("", minimalHints, false),
 				];
 		const second =
 			candidates.find((line) => visibleWidth(line) <= space) ??
-			([agentHint, jobHint].filter(Boolean).join(" · ") || minimalHints);
+			([questionHint, agentHint, jobHint].filter(Boolean).join(" · ") || minimalHints);
 		// Ctx 占比阈值配色:>90% error、>75% warning,否则随副行弱化。
 		// 分段着色,而非 dim 包裹后字符串替换(SGR [39m 会截断外层的 dim)。
 		const shownContext = second.includes(contextText) ? contextText : shortContext;

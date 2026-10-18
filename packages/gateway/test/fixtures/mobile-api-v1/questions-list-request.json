@@ -1,0 +1,11 @@
+{
+	"description": "questions.list 请求：读取当前订阅会话仍在等待回答的问题摘要（能力 questions）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 41,
+		"method": "questions.list",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1"
+		}
+	}
+}

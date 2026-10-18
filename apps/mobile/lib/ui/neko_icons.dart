@@ -110,6 +110,18 @@ class NekoIcons {
     'radioOn',
     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM15 12a3 3 0 1 0-6 0 3 3 0 0 0 6 0',
   );
+  static const checkboxOff = NekoIconData(
+    'checkboxOff',
+    'M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4Z',
+  );
+  static const checkboxOn = NekoIconData(
+    'checkboxOn',
+    'M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4ZM7.5 12.5l3 3 6-6.5',
+  );
+  static const help = NekoIconData(
+    'help',
+    'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM9.4 9.6a2.7 2.7 0 0 1 5.2.9c0 1.7-2.6 2.2-2.6 3.8M12 17h.01',
+  );
 
   static const List<NekoIconData> all = <NekoIconData>[
     plus,
@@ -146,6 +158,9 @@ class NekoIcons {
     shieldAlert,
     radioOff,
     radioOn,
+    checkboxOff,
+    checkboxOn,
+    help,
   ];
 }
 

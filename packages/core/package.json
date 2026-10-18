@@ -59,6 +59,11 @@
 			"types": "./dist/application-updates.d.ts",
 			"import": "./dist/application-updates.js"
 		},
+		"./interactions": {
+			"neko-source": "./src/interactions.ts",
+			"types": "./dist/interactions.d.ts",
+			"import": "./dist/interactions.js"
+		},
 		"./job-summary": {
 			"neko-source": "./src/job-summary.ts",
 			"types": "./dist/job-summary.d.ts",

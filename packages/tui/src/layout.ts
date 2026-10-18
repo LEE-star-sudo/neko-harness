@@ -1,4 +1,5 @@
 import { type Component, Text, VStack } from "@earendil-works/pi-tui";
+import { QUESTION_MAX_ROWS } from "./question-dock.ts";
 
 export const usableSize = (width: number, height: number): boolean => width >= 40 && height >= 10;
 
@@ -18,20 +19,32 @@ export function createAppLayout(parts: {
 	/** Queued messages above the editor; only while there are any. */
 	queue?: Component;
 	queueVisible?: () => boolean;
+	/** The assistant's question: a one-line bar, or the answer panel limited to the rows that are left over. */
+	question?: Component & { height: number };
+	questionVisible?: () => boolean;
 }): VStack {
 	const normal = (v: { width: number; height: number }) => {
 		if (parts.approval) parts.approval.height = Math.min(10, Math.max(7, Math.floor(v.height / 2)));
 		parts.footer.panelOpen = parts.panelOpen();
 		parts.editor.maxRows = parts.panelOpen() ? 3 : v.height >= 24 ? 7 : 5;
+		const approvalRows = parts.approvalVisible?.() ? (parts.approval?.height ?? 0) : 0;
+		const editorRows = Math.min(7, Math.max(3, parts.editor.render(v.width).length));
+		const noticeRows = Math.min(1, parts.notices.render(v.width).length);
+		const busyRows = parts.busyVisible?.() ? Math.min(2, parts.busy?.render(v.width).length ?? 0) : 0;
+		const queueRows = parts.queueVisible?.() ? Math.min(3, parts.queue?.render(v.width).length ?? 0) : 0;
+		// The question gets what is left after the fixed rows and one transcript row, so footer and editor survive.
+		if (parts.question)
+			parts.question.height = Math.max(
+				0,
+				Math.min(QUESTION_MAX_ROWS, v.height - approvalRows - editorRows - 2 - noticeRows - busyRows - queueRows - 1),
+			);
+		const questionRows =
+			parts.questionVisible?.() && parts.question
+				? Math.min(parts.question.height, parts.question.render(v.width).length)
+				: 0;
 		parts.panel.height = Math.max(
 			1,
-			v.height -
-				(parts.approvalVisible?.() ? (parts.approval?.height ?? 0) : 0) -
-				Math.min(7, Math.max(3, parts.editor.render(v.width).length)) -
-				2 -
-				Math.min(1, parts.notices.render(v.width).length) -
-				(parts.busyVisible?.() ? Math.min(2, parts.busy?.render(v.width).length ?? 0) : 0) -
-				(parts.queueVisible?.() ? Math.min(3, parts.queue?.render(v.width).length ?? 0) : 0),
+			v.height - approvalRows - editorRows - 2 - noticeRows - busyRows - queueRows - questionRows,
 		);
 		return usableSize(v.width, v.height);
 	};
@@ -60,6 +73,11 @@ export function createAppLayout(parts: {
 			component: parts.approval ?? new Text("", 0, 0),
 			shrink: 0,
 			visible: (v) => normal(v) && (parts.approvalVisible?.() ?? false),
+		},
+		{
+			component: parts.question ?? new Text("", 0, 0),
+			shrink: 0,
+			visible: (v) => normal(v) && (parts.questionVisible?.() ?? false) && (parts.question?.height ?? 0) > 0,
 		},
 		{ component: parts.editor, minSize: 3, maxSize: 7, shrink: 0, visible: normal },
 		{ component: parts.footer, basis: 2, minSize: 2, shrink: 0, visible: normal },

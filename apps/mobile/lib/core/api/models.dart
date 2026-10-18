@@ -38,6 +38,7 @@ class SessionSummary {
     required this.preview,
     required this.lastUsedAt,
     this.lastMessageAt,
+    this.awaitingAnswer,
   });
 
   factory SessionSummary.fromJson(Json json) => SessionSummary(
@@ -47,6 +48,9 @@ class SessionSummary {
     preview: _str(json['preview']),
     lastUsedAt: _int(json['lastUsedAt']),
     lastMessageAt: _intOrNull(json['lastMessageAt']),
+    awaitingAnswer: json['awaitingAnswer'] is bool
+        ? json['awaitingAnswer'] as bool
+        : null,
   );
 
   final String id;
@@ -57,6 +61,11 @@ class SessionSummary {
 
   /// 旧网关不返回该字段，此时回退到最近使用时间。
   final int? lastMessageAt;
+
+  /// 会话有问题在等用户回答；缺省表示电脑端无法判断，列表不显示任何标记。
+  final bool? awaitingAnswer;
+
+  bool get waitingForAnswer => awaitingAnswer == true;
 
   /// 列表排序与展示用的时间：最近消息时间（无消息为创建时间），由服务端决定顺序。
   int get messageAt => lastMessageAt ?? lastUsedAt;
@@ -147,6 +156,7 @@ class ToolInfo {
     this.diffTruncated = false,
     this.durationMs,
     this.note,
+    this.interaction,
   });
 
   factory ToolInfo.fromJson(Json json) => ToolInfo(
@@ -167,6 +177,7 @@ class ToolInfo {
     diffTruncated: _bool(json['diffTruncated']),
     durationMs: _intOrNull(json['durationMs']),
     note: _strOrNull(json['note']),
+    interaction: ToolInteraction.fromJson(json['interaction']),
   );
 
   final String callId;
@@ -182,6 +193,294 @@ class ToolInfo {
   final bool diffTruncated;
   final int? durationMs;
   final String? note;
+
+  /// `todo` / `ask_user` 调用的结构化状态；其他工具缺省。
+  final ToolInteraction? interaction;
+}
+
+enum TodoStatus { pending, inProgress, completed }
+
+class TodoItem {
+  const TodoItem({required this.id, required this.text, required this.status});
+
+  factory TodoItem.fromJson(Json json) => TodoItem(
+    id: _str(json['id']),
+    text: _str(json['text']),
+    status: switch (json['status']) {
+      'in_progress' => TodoStatus.inProgress,
+      'completed' => TodoStatus.completed,
+      _ => TodoStatus.pending,
+    },
+  );
+
+  final String id;
+  final String text;
+  final TodoStatus status;
+}
+
+/// `todos.get` 的结果：只读、有序，revision 只增。
+class TodoList {
+  const TodoList({required this.revision, required this.items});
+
+  factory TodoList.fromJson(Json json) => TodoList(
+    revision: _int(json['revision']),
+    items: _list(json['items']).map(TodoItem.fromJson).toList(),
+  );
+
+  final int revision;
+  final List<TodoItem> items;
+
+  int get total => items.length;
+
+  int get completed =>
+      items.where((item) => item.status == TodoStatus.completed).length;
+}
+
+/// 状态里的待办摘要；缺省表示电脑端不支持，存在且 `count == 0` 表示支持但为空。
+class TodoSummary {
+  const TodoSummary({
+    required this.revision,
+    required this.count,
+    required this.completed,
+  });
+
+  factory TodoSummary.fromJson(Json json) => TodoSummary(
+    revision: _int(json['revision']),
+    count: _int(json['count']),
+    completed: _int(json['completed']),
+  );
+
+  final int revision;
+  final int count;
+  final int completed;
+}
+
+/// 状态里的问题摘要；缺省表示电脑端不支持，`pendingCount == 0` 表示支持但没有未决问题。
+class QuestionsSummary {
+  const QuestionsSummary({required this.revision, required this.pendingCount});
+
+  factory QuestionsSummary.fromJson(Json json) => QuestionsSummary(
+    revision: _int(json['revision']),
+    pendingCount: _int(json['pendingCount']),
+  );
+
+  final int revision;
+  final int pendingCount;
+}
+
+enum QuestionStatus { pending, answered, skipped, cancelled }
+
+QuestionStatus _questionStatus(Object? value) => switch (value) {
+  'pending' => QuestionStatus.pending,
+  'answered' => QuestionStatus.answered,
+  'skipped' => QuestionStatus.skipped,
+  // 未知终态按已取消处理：不暴露任何无法提交的控件。
+  _ => QuestionStatus.cancelled,
+};
+
+class QuestionOption {
+  const QuestionOption({
+    required this.id,
+    required this.label,
+    this.description,
+    this.recommended = false,
+  });
+
+  factory QuestionOption.fromJson(Json json) => QuestionOption(
+    id: _str(json['id']),
+    label: _str(json['label']),
+    description: _strOrNull(json['description']),
+    recommended: _bool(json['recommended']),
+  );
+
+  final String id;
+  final String label;
+  final String? description;
+
+  /// 仅是提示：界面标注“推荐”，从不预选。
+  final bool recommended;
+}
+
+/// `questions.list` 的条目；完整题目用 `questions.get`。
+class QuestionSummary {
+  const QuestionSummary({
+    required this.id,
+    required this.version,
+    required this.preview,
+    required this.multiple,
+    required this.optionCount,
+    required this.createdAt,
+  });
+
+  factory QuestionSummary.fromJson(Json json) => QuestionSummary(
+    id: _int(json['id']),
+    version: _str(json['version']),
+    preview: _str(json['preview']),
+    multiple: _bool(json['multiple']),
+    optionCount: _int(json['optionCount']),
+    createdAt: _int(json['createdAt']),
+  );
+
+  final int id;
+  final String version;
+  final String preview;
+  final bool multiple;
+  final int optionCount;
+  final int createdAt;
+}
+
+class QuestionList {
+  const QuestionList({required this.revision, required this.pending});
+
+  factory QuestionList.fromJson(Json json) => QuestionList(
+    revision: _int(json['revision']),
+    pending: _list(json['pending']).map(QuestionSummary.fromJson).toList(),
+  );
+
+  final int revision;
+  final List<QuestionSummary> pending;
+}
+
+class QuestionAnswer {
+  const QuestionAnswer({required this.optionIds, this.text});
+
+  factory QuestionAnswer.fromJson(Json json) => QuestionAnswer(
+    optionIds: json['optionIds'] is List
+        ? (json['optionIds'] as List).whereType<String>().toList()
+        : <String>[],
+    text: _strOrNull(json['text']),
+  );
+
+  /// 按问题选项顺序。
+  final List<String> optionIds;
+  final String? text;
+}
+
+/// 一道问题的完整持久记录（`questions.get` / `questions.respond` 的结果）。
+class QuestionRecord {
+  const QuestionRecord({
+    required this.id,
+    required this.callId,
+    required this.version,
+    required this.question,
+    required this.multiple,
+    required this.options,
+    required this.status,
+    required this.createdAt,
+    this.answer,
+    this.settledAt,
+  });
+
+  factory QuestionRecord.fromJson(Json json) => QuestionRecord(
+    id: _int(json['id']),
+    callId: _str(json['callId']),
+    version: _str(json['version']),
+    question: _str(json['question']),
+    multiple: _bool(json['multiple']),
+    options: _list(json['options']).map(QuestionOption.fromJson).toList(),
+    status: _questionStatus(json['status']),
+    answer: json['answer'] is Map
+        ? QuestionAnswer.fromJson(_map(json['answer']))
+        : null,
+    createdAt: _int(json['createdAt']),
+    settledAt: _intOrNull(json['settledAt']),
+  );
+
+  final int id;
+  final String callId;
+  final String version;
+  final String question;
+  final bool multiple;
+  final List<QuestionOption> options;
+  final QuestionStatus status;
+  final QuestionAnswer? answer;
+  final int createdAt;
+  final int? settledAt;
+
+  bool get pending => status == QuestionStatus.pending;
+
+  QuestionOption? option(String id) {
+    for (final option in options) {
+      if (option.id == id) return option;
+    }
+    return null;
+  }
+
+  /// 已选选项的标签；题目已不再列出的 id 退回 id 本身。
+  List<String> get answerLabels => <String>[
+    for (final id in answer?.optionIds ?? const <String>[])
+      option(id)?.label ?? id,
+  ];
+}
+
+/// 转录里 `todo` / `ask_user` 工具项的结构化状态（不解析 `result` 文案）。
+sealed class ToolInteraction {
+  const ToolInteraction();
+
+  static ToolInteraction? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final json = value.cast<String, dynamic>();
+    return switch (json['kind']) {
+      'ask_user' => AskUserInteraction(
+        id: _int(json['id']),
+        question: _str(json['question']),
+        multiple: _bool(json['multiple']),
+        options: _list(json['options']).map(QuestionOption.fromJson).toList(),
+        status: _questionStatus(json['status']),
+        optionIds: json['optionIds'] is List
+            ? (json['optionIds'] as List).whereType<String>().toList()
+            : const <String>[],
+        labels: json['labels'] is List
+            ? (json['labels'] as List).whereType<String>().toList()
+            : const <String>[],
+        text: _strOrNull(json['text']),
+      ),
+      'todo' => TodoInteraction(
+        action: _str(json['action'], 'list'),
+        revision: _int(json['revision']),
+        completed: _int(json['completed']),
+        total: _int(json['total']),
+      ),
+      _ => null,
+    };
+  }
+}
+
+class AskUserInteraction extends ToolInteraction {
+  const AskUserInteraction({
+    required this.id,
+    required this.question,
+    required this.multiple,
+    required this.options,
+    required this.status,
+    required this.optionIds,
+    required this.labels,
+    this.text,
+  });
+
+  final int id;
+  final String question;
+  final bool multiple;
+  final List<QuestionOption> options;
+  final QuestionStatus status;
+  final List<String> optionIds;
+  final List<String> labels;
+  final String? text;
+}
+
+class TodoInteraction extends ToolInteraction {
+  const TodoInteraction({
+    required this.action,
+    required this.revision,
+    required this.completed,
+    required this.total,
+  });
+
+  /// `list` 或 `replace`。
+  final String action;
+  final int revision;
+  final int completed;
+  final int total;
 }
 
 enum ChatItemType { user, assistant, tool, system }
@@ -380,6 +679,8 @@ class ChatStatus {
     this.agents = const <AgentSummary>[],
     this.approvalCount = 0,
     this.readonly = false,
+    this.todos,
+    this.questions,
   });
 
   factory ChatStatus.fromJson(Json json) {
@@ -402,6 +703,12 @@ class ChatStatus {
       agents: _list(json['agents']).map(AgentSummary.fromJson).toList(),
       approvalCount: _int(json['approvalCount']),
       readonly: _bool(json['readonly']),
+      todos: json['todos'] is Map
+          ? TodoSummary.fromJson(_map(json['todos']))
+          : null,
+      questions: json['questions'] is Map
+          ? QuestionsSummary.fromJson(_map(json['questions']))
+          : null,
     );
   }
 
@@ -419,6 +726,12 @@ class ChatStatus {
   final List<AgentSummary> agents;
   final int approvalCount;
   final bool readonly;
+
+  /// 缺省表示电脑端不支持待办；`count == 0` 表示支持但为空。
+  final TodoSummary? todos;
+
+  /// 缺省表示电脑端不支持提问；`pendingCount == 0` 表示支持但没有未决问题。
+  final QuestionsSummary? questions;
 }
 
 class StreamingToolCall {

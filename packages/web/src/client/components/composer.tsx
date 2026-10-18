@@ -18,6 +18,7 @@ import { appActions } from "../lib/bootstrap";
 import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
 import { fitHeight } from "../lib/composer-height";
 import { type HistoryBrowse, stepHistory } from "../lib/input-history";
+import { questionUi } from "../lib/question-ui";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { readUpgradeDraft, removeUpgradeDraft, saveUpgradeDraft } from "../lib/upgrade-draft";
 import { ComposerSuggestions } from "./composer-suggestions";
@@ -31,6 +32,13 @@ type Draft = { text: string; files: Attachment[]; requestId: string };
 const drafts = new Map<string, Draft>();
 const draftListeners = new Set<() => void>();
 const submitting = new Set<string>();
+/** Whether the user is composing here (a non-empty draft or the input has focus); a question card then stays folded. */
+export function composerEngaged(sessionId: string): boolean {
+	const draft = drafts.get(sessionId);
+	if (draft && (draft.text.trim() !== "" || draft.files.length > 0)) return true;
+	const active = document.activeElement;
+	return active?.tagName === "TEXTAREA" && active.getAttribute("aria-label") === "消息输入";
+}
 export function reloadForUpgrade(): void {
 	const state = getState(),
 		session = state.currentSessionId,
@@ -450,6 +458,12 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		textarea.current?.focus();
 	};
 	const queued = view?.queued ?? [];
+	const waitingQuestions = view?.questions?.pending ?? [];
+	const openQuestion = () => {
+		const active = questionUi.state.active[props.sessionId];
+		const target = waitingQuestions.find((q) => q.id === active) ?? waitingQuestions[0];
+		if (target) questionUi.open(props.sessionId, target);
+	};
 	const steerQueued = async (item: WireQueuedInput) => {
 		if (withdrawing !== null) return;
 		setWithdrawing(item.id);
@@ -524,6 +538,23 @@ function SessionComposer(props: Props & { sessionId: string }) {
 				>
 					{/* 通知/错误行：固定位于卡片顶部，集中间距 */}
 					<div className="flex flex-col gap-1 px-4 pt-2.5 empty:pt-0">
+						{waitingQuestions.length > 0 && (
+							<output
+								data-question-hint
+								className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-snug text-tianyi-900 sm:text-sm"
+							>
+								<span className="min-w-0 break-words">
+									助手正在等待你的回答。此处发送的消息仍会排队（含引导），回答或跳过后才进入上下文，不会当作答案。
+								</span>
+								<button
+									type="button"
+									className="focus-neko shrink-0 rounded-full border border-tianyi-300 bg-tianyi-50 px-2.5 py-0.5 text-xs text-tianyi-900 hover:bg-tianyi-100"
+									onClick={openQuestion}
+								>
+									打开问题
+								</button>
+							</output>
+						)}
 						{drag && <p className="text-sm text-sakura-700">松开以添加图片，不会自动发送</p>}
 						{missingKey && (
 							<p className="text-sm text-sakura-700">
@@ -572,7 +603,11 @@ function SessionComposer(props: Props & { sessionId: string }) {
 						value={draft.text}
 						rows={1}
 						placeholder={
-							props.busy ? "运行中：消息将在回答结束后排队，可在排队条中引导或撤回" : "输入消息，@ 引用文件，/ 命令"
+							waitingQuestions.length > 0
+								? "助手在等你回答，此处消息将排队"
+								: props.busy
+									? "运行中：消息将在回答结束后排队，可在排队条中引导或撤回"
+									: "输入消息，@ 引用文件，/ 命令"
 						}
 						aria-label="消息输入"
 						aria-autocomplete="list"

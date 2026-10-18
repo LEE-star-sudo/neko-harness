@@ -1,4 +1,5 @@
 import { RUNNING_VERSION } from "@neko-harness/core/application-version";
+import { QUESTION_LIMITS, TODO_LIMITS } from "@neko-harness/core/interactions";
 import { type Static, Type } from "typebox";
 import { Check } from "typebox/value";
 
@@ -20,6 +21,8 @@ export const MOBILE_CAPABILITIES: readonly string[] = [
 	"subagents",
 	"approvals",
 	"media",
+	"todos",
+	"questions",
 ];
 export const MOBILE_CLOSE_REVOKED = 4401;
 export const MOBILE_CLOSE_INCOMPATIBLE = 4402;
@@ -122,6 +125,35 @@ export const MobileImageRefSchema = Type.Object({
 	contentIndex: int,
 });
 
+const questionStatus = Type.Union([
+	Type.Literal("pending"),
+	Type.Literal("answered"),
+	Type.Literal("skipped"),
+	Type.Literal("cancelled"),
+]);
+
+/** Structured state of a todo / ask_user call in history; present only for those tools. */
+export const MobileToolInteractionSchema = Type.Union([
+	Type.Object({
+		kind: Type.Literal("ask_user"),
+		id: int,
+		question: str,
+		multiple: Type.Boolean(),
+		options: Type.Array(Type.Object({ id: str, label: str, recommended: opt(Type.Boolean()) })),
+		status: questionStatus,
+		optionIds: opt(Type.Array(str)),
+		labels: opt(Type.Array(str)),
+		text: opt(nullable(str)),
+	}),
+	Type.Object({
+		kind: Type.Literal("todo"),
+		action: Type.Union([Type.Literal("list"), Type.Literal("replace")]),
+		revision: int,
+		completed: int,
+		total: int,
+	}),
+]);
+
 export const MobileToolItemSchema = Type.Object({
 	callId: str,
 	name: str,
@@ -136,6 +168,7 @@ export const MobileToolItemSchema = Type.Object({
 	diffTruncated: opt(Type.Boolean()),
 	durationMs: opt(Type.Number()),
 	note: opt(str),
+	interaction: opt(MobileToolInteractionSchema),
 });
 
 /** 超过 8 KiB 的字符串字段只留 2 KiB 预览，并在 `refs` 中给出完整内容引用（每个字段至多一个）。 */
@@ -229,6 +262,10 @@ export const MobileChatStatusSchema = Type.Object({
 	busy: Type.Boolean(),
 	/** Absent on a computer without queue visibility; empty means supported with none. */
 	queued: opt(Type.Array(MobileQueuedSchema)),
+	/** Absent on a computer without todos; present with `count: 0` when supported with none. */
+	todos: opt(Type.Object({ revision: int, count: int, completed: int })),
+	/** Absent on a computer without questions; `pendingCount: 0` means supported with none. */
+	questions: opt(Type.Object({ revision: int, pendingCount: int })),
 	status: nullable(str),
 	usage: MobileUsageSchema,
 	taskUsage: opt(MobileUsageSchema),
@@ -260,6 +297,8 @@ export const MobileSessionSummarySchema = Type.Object({
 	lastUsedAt: Type.Integer(),
 	lastMessageAt: Type.Integer(),
 	archived: Type.Boolean(),
+	/** A question of this session waits for an answer; absent when the computer cannot tell. */
+	awaitingAnswer: opt(Type.Boolean()),
 });
 
 export const MobileApprovalSchema = Type.Object({
@@ -273,6 +312,63 @@ export const MobileApprovalSchema = Type.Object({
 	timeoutSeconds: opt(Type.Number({ minimum: 0 })),
 	requestedAt: Type.Number(),
 });
+
+export const MobileTodoItemSchema = Type.Object({
+	id: Type.String({ minLength: 1, maxLength: TODO_LIMITS.idChars }),
+	text: Type.String({ minLength: 1, maxLength: TODO_LIMITS.textChars }),
+	status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
+});
+export const MobileTodoListSchema = Type.Object({
+	revision: int,
+	items: Type.Array(MobileTodoItemSchema, { maxItems: TODO_LIMITS.maxItems }),
+});
+export const MobileQuestionOptionSchema = Type.Object({
+	id: Type.String({ minLength: 1, maxLength: QUESTION_LIMITS.optionIdChars }),
+	label: Type.String({ minLength: 1, maxLength: QUESTION_LIMITS.labelChars }),
+	description: opt(Type.String({ maxLength: QUESTION_LIMITS.descriptionChars })),
+	recommended: opt(Type.Boolean()),
+});
+/** Bounded list entry; `questions.get` returns the full record. */
+export const MobileQuestionSummarySchema = Type.Object({
+	id: int,
+	version: str,
+	preview: Type.String({ maxLength: QUESTION_LIMITS.previewChars }),
+	multiple: Type.Boolean(),
+	optionCount: int,
+	createdAt: Type.Number(),
+});
+export const MobileQuestionListSchema = Type.Object({
+	revision: int,
+	pending: Type.Array(MobileQuestionSummarySchema, { maxItems: QUESTION_LIMITS.maxPending }),
+});
+export const MobileQuestionSchema = Type.Object({
+	id: int,
+	callId: str,
+	version: str,
+	question: Type.String({ maxLength: QUESTION_LIMITS.questionChars }),
+	multiple: Type.Boolean(),
+	options: Type.Array(MobileQuestionOptionSchema, { maxItems: QUESTION_LIMITS.maxOptions }),
+	status: questionStatus,
+	answer: nullable(
+		Type.Object({
+			optionIds: Type.Array(Type.String(), { maxItems: QUESTION_LIMITS.maxOptions }),
+			text: nullable(Type.String({ maxLength: QUESTION_LIMITS.textChars })),
+		}),
+	),
+	createdAt: Type.Number(),
+	settledAt: nullable(Type.Number()),
+});
+export const MobileQuestionResponseSchema = Type.Union([
+	Type.Object(
+		{
+			kind: Type.Literal("answer"),
+			optionIds: opt(Type.Array(Type.String(), { maxItems: QUESTION_LIMITS.maxOptions })),
+			text: opt(Type.String({ maxLength: QUESTION_LIMITS.textChars })),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object({ kind: Type.Literal("skip") }, { additionalProperties: false }),
+]);
 
 const sessionListParams = Type.Object({
 	workspace: str,
@@ -395,6 +491,18 @@ export const MOBILE_API_V1_METHODS: Readonly<Record<string, { readonly params: u
 			]),
 		}),
 	},
+	"todos.get": { params: Type.Object(subscription), result: MobileTodoListSchema },
+	"questions.list": { params: Type.Object(subscription), result: MobileQuestionListSchema },
+	"questions.get": { params: Type.Object({ ...subscription, id: int }), result: MobileQuestionSchema },
+	"questions.respond": {
+		params: Type.Object({
+			...subscription,
+			id: int,
+			version: Type.String({ minLength: 1 }),
+			response: MobileQuestionResponseSchema,
+		}),
+		result: MobileQuestionSchema,
+	},
 	"media.read": {
 		params: Type.Object({
 			...subscription,
@@ -443,4 +551,7 @@ export const MOBILE_API_V1_NOTIFICATIONS: Readonly<Record<string, unknown>> = {
 	"subagents.patch": Type.Object({ subagentSubscriptionId: str, ...patchBody }),
 	"subagents.reset": Type.Object({ subagentSubscriptionId: str, seq: Type.Integer({ minimum: 1 }) }),
 	"approvals.changed": Type.Object({ subscriptionId: str, revision: Type.Integer({ minimum: 1 }) }),
+	/** Invalidation hint: read `todos.get`; revisions only grow, so accept a result no older than the one held. */
+	"todos.changed": Type.Object({ subscriptionId: str, revision: Type.Integer({ minimum: 1 }) }),
+	"questions.changed": Type.Object({ subscriptionId: str, revision: Type.Integer({ minimum: 1 }) }),
 };

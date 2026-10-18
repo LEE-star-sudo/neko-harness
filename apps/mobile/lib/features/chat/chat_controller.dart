@@ -7,6 +7,7 @@ import 'package:flutter/widgets.dart';
 import 'package:neko_mobile/core/api/models.dart';
 import 'package:neko_mobile/core/rpc/rpc_client.dart';
 import 'package:neko_mobile/core/storage/prefs_store.dart';
+import 'package:neko_mobile/features/chat/interactions_controller.dart';
 import 'package:neko_mobile/features/chat/transcript.dart';
 import 'package:uuid/uuid.dart';
 
@@ -90,6 +91,9 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
   final Transcript transcript = Transcript();
   final TextEditingController input = TextEditingController();
 
+  /// 当前会话的待办与用户提问；能力随 hello 声明，旧电脑不会产生任何相关请求。
+  final InteractionsController interactions = InteractionsController();
+
   MobileApi? _api;
   StreamSubscription<RpcNotification>? _notifications;
   String? _serverId;
@@ -155,17 +159,24 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
     notifyListeners();
   }
 
-  /// 连接就绪：绑定 API 并恢复会话（若有）。
-  Future<void> bind(MobileApi api, String serverId) async {
+  /// 连接就绪：绑定 API 并恢复会话（若有）。[capabilities] 取自 `server.hello`，
+  /// 缺 `todos` / `questions` 的旧电脑不会收到对应请求。
+  Future<void> bind(
+    MobileApi api,
+    String serverId, {
+    Iterable<String> capabilities = const <String>[],
+  }) async {
     final serverChanged = _serverId != serverId;
     _api = api;
     _serverId = serverId;
+    interactions.setCapabilities(capabilities);
     await _notifications?.cancel();
     _notifications = api.notifications.listen(_onNotification);
     _pendingList = await _pending.load(serverId);
     if (serverChanged) {
       _sessionId = null;
       transcript.clear();
+      interactions.reset();
     }
     final session = _sessionId;
     if (session != null) {
@@ -185,6 +196,7 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
     if (_phase != ChatPhase.idle) _phase = ChatPhase.offline;
     _sending = false;
     _loadingOlder = false;
+    interactions.suspend();
     notifyListeners();
   }
 
@@ -198,9 +210,12 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
       await _flushDraft();
       _sessionId = sessionId;
       transcript.clear();
+      interactions.reset();
       _approvals = <Approval>[];
       _images.clear();
       await _restoreDraft();
+    } else {
+      interactions.suspend();
     }
     _phase = ChatPhase.attaching;
     _subscriptionId = null;
@@ -217,6 +232,16 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
       transcript.applySnapshot(asJson(result['snapshot']));
       _phase = ChatPhase.ready;
       await prefs.set(PrefKeys.session(serverId), sessionId);
+      if (generation != _generation) return;
+      final subscriptionId = _subscriptionId;
+      if (subscriptionId != null) {
+        interactions.attach(
+          api: api,
+          subscriptionId: subscriptionId,
+          serverId: serverId,
+          sessionId: sessionId,
+        );
+      }
       notifyListeners();
       unawaited(_refreshApprovals(generation));
       await _settlePending(generation);
@@ -235,11 +260,20 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
     }
     switch (event.method) {
       case 'chat.patch':
-        if (!transcript.applyPatch(event.params)) _reattach();
+        if (!transcript.applyPatch(event.params)) {
+          _reattach();
+        } else if (event.params['status'] is Map) {
+          interactions.onStatus(transcript.status);
+        }
       case 'chat.reset':
         _reattach();
       case 'approvals.changed':
         unawaited(_refreshApprovals(_generation));
+      case 'todos.changed' || 'questions.changed':
+        interactions.onNotification(
+          event.method,
+          event.params['revision'] as int?,
+        );
     }
   }
 
@@ -637,6 +671,7 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
     _subscriptionId = null;
     _phase = ChatPhase.idle;
     transcript.clear();
+    interactions.reset();
     _approvals = <Approval>[];
     _images.clear();
     _restoringDraft = true;
@@ -660,6 +695,7 @@ class ChatController extends ChangeNotifier implements TranscriptActions {
     unawaited(_notifications?.cancel());
     input.dispose();
     transcript.dispose();
+    interactions.dispose();
     super.dispose();
   }
 }

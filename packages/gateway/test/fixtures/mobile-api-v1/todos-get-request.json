@@ -1,0 +1,11 @@
+{
+	"description": "todos.get 请求：读取当前订阅会话的待办（只读；能力 todos）。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 40,
+		"method": "todos.get",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1"
+		}
+	}
+}

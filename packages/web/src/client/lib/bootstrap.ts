@@ -3,7 +3,7 @@ import { ApplicationProtocolError } from "@neko-harness/core/application-version
 import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { SearchProviderId } from "@neko-harness/core/search-providers";
-import type { NekoBrowseOptions, NekoContextSettingsPatch } from "./contract.ts";
+import type { NekoBrowseOptions, NekoContextSettingsPatch, WireQuestionResponse } from "./contract.ts";
 import { GatewayConnection } from "./gateway.ts";
 import { storeActions } from "./store.ts";
 import { readUpgradeDraft } from "./upgrade-draft";
@@ -159,6 +159,12 @@ export const appActions = {
 	},
 	withdraw(sessionId: string, id: number) {
 		return requireConnection().withdraw(sessionId, id);
+	},
+	questionGet(sessionId: string, id: number) {
+		return requireConnection().questionGet(sessionId, id);
+	},
+	questionRespond(sessionId: string, input: { id: number; version: string; response: WireQuestionResponse }) {
+		return requireConnection().questionRespond(sessionId, input);
 	},
 	searchFiles(query: string, workspaceRoot: string, signal: AbortSignal) {
 		return requireConnection().searchFiles(query, workspaceRoot, signal);

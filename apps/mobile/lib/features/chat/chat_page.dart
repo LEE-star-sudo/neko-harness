@@ -7,19 +7,54 @@ import 'package:neko_mobile/features/app_controller.dart';
 import 'package:neko_mobile/features/approvals/approval_sheet.dart';
 import 'package:neko_mobile/features/chat/chat_controller.dart';
 import 'package:neko_mobile/features/chat/neko_drawer.dart';
+import 'package:neko_mobile/features/questions/question_sheet.dart';
 import 'package:neko_mobile/features/sessions/session_picker.dart';
 import 'package:neko_mobile/features/sessions/sessions_controller.dart';
 import 'package:neko_mobile/features/subagents/subagent_page.dart';
+import 'package:neko_mobile/features/todos/todo_sheet.dart';
 import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 import 'package:neko_mobile/ui/widgets/transcript_view.dart';
 
-/// 主会话页：标题打开会话切换器，抽屉只放电脑/配对，单列转录 + 审批条 + 输入区（design D10）。
-class ChatPage extends ConsumerWidget {
+/// 主会话页：标题打开会话切换器，抽屉只放电脑/配对，单列转录 + 审批条 + 问题条 + 输入区（design D10）。
+class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChatPage> createState() => _ChatPageState();
+}
+
+class _ChatPageState extends ConsumerState<ChatPage> {
+  final FocusNode _composerFocus = FocusNode(debugLabel: 'composer');
+  bool _presentScheduled = false;
+
+  @override
+  void dispose() {
+    _composerFocus.dispose();
+    super.dispose();
+  }
+
+  /// 问题首次出现或进入会话页时，只在输入未聚焦、草稿为空且没有其他面板时自动展开一次；
+  /// 否则只显示问题条。无论是否展开，候选都被消费，之后不会突然弹出。
+  void _scheduleAutoPresent(ChatController chat) {
+    if (!chat.interactions.hasArmed || _presentScheduled) return;
+    _presentScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _presentScheduled = false;
+      if (!mounted) return;
+      final topmost = ModalRoute.of(context)?.isCurrent ?? true;
+      final summary = chat.interactions.takeAutoPresent(
+        canPresent:
+            topmost && !_composerFocus.hasFocus && chat.input.text.isEmpty,
+      );
+      if (summary != null) {
+        showQuestionSheet(context, chat.interactions, initialId: summary.id);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final chat = ref.watch(chatControllerProvider);
     final sessions = ref.watch(sessionsControllerProvider);
     final manager = ref.watch(connectionManagerProvider);
@@ -28,10 +63,13 @@ class ChatPage extends ConsumerWidget {
         chat,
         sessions,
         chat.transcript,
+        chat.interactions,
       ]),
       builder: (context, _) {
         final session = sessions.known(chat.sessionId);
         final status = chat.transcript.status;
+        final waiting = chat.interactions.pendingCount > 0;
+        _scheduleAutoPresent(chat);
         return Scaffold(
           drawer: NekoDrawer(manager: manager),
           appBar: AppBar(
@@ -66,7 +104,9 @@ class ChatPage extends ConsumerWidget {
                               ),
                               Text(
                                 status.busy
-                                    ? (status.status ?? '运行中…')
+                                    ? (waiting
+                                          ? '等待你的回答'
+                                          : (status.status ?? '运行中…'))
                                     : (sessions.currentWorkspace?.name ?? ''),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -90,6 +130,7 @@ class ChatPage extends ConsumerWidget {
               ),
             ),
             actions: <Widget>[
+              TodoEntry(interactions: chat.interactions),
               const ConnectionIndicator(),
               IconButton(
                 key: const Key('sessions-new'),
@@ -123,6 +164,13 @@ class ChatPage extends ConsumerWidget {
                           actions: chat,
                           onOpenSubagent: (round) =>
                               openSubagent(context, round),
+                          onOpenQuestion: chat.interactions.questionsSupported
+                              ? (id) => showQuestionSheet(
+                                  context,
+                                  chat.interactions,
+                                  initialId: id,
+                                )
+                              : null,
                         ),
                 ),
                 ApprovalBar(
@@ -130,6 +178,7 @@ class ChatPage extends ConsumerWidget {
                   onDecide: chat.decide,
                   enabled: chat.canControl,
                 ),
+                QuestionBar(interactions: chat.interactions),
                 StatusStrip(
                   manager: manager,
                   error: chat.error,
@@ -139,7 +188,8 @@ class ChatPage extends ConsumerWidget {
                   pending: PendingTray(chat: chat),
                   queue: QueueTray(chat: chat),
                 ),
-                if (chat.sessionId != null) Composer(chat: chat),
+                if (chat.sessionId != null)
+                  Composer(chat: chat, focusNode: _composerFocus),
               ],
             ),
           ),
@@ -669,10 +719,12 @@ class PendingTray extends StatelessWidget {
 }
 
 /// 输入区：离线时仍可编辑草稿；忙碌时发送一律排队（引导与撤回在排队条上），并可停止。
+/// 有未决问题时提示消息会排队到回答之后，并提供打开问题的入口（聊天文字从不当作答案）。
 class Composer extends StatefulWidget {
-  const Composer({super.key, required this.chat});
+  const Composer({super.key, required this.chat, this.focusNode});
 
   final ChatController chat;
+  final FocusNode? focusNode;
 
   @override
   State<Composer> createState() => _ComposerState();
@@ -685,6 +737,9 @@ class _ComposerState extends State<Composer> {
     final tokens = NekoTokens.of(context);
     final busy = chat.transcript.status.busy;
     final can = chat.canControl;
+    final interactions = chat.interactions;
+    final waiting =
+        interactions.questionsSupported && interactions.pendingCount > 0;
     return Material(
       color: tokens.base,
       child: Padding(
@@ -697,6 +752,46 @@ class _ComposerState extends State<Composer> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
+            if (waiting)
+              InkWell(
+                key: const Key('composer-open-question'),
+                borderRadius: BorderRadius.circular(NekoTokens.radiusControl),
+                onTap: () => showQuestionSheet(
+                  context,
+                  interactions,
+                  initialId: interactions.pending.first.id,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: NekoSpace.touch),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: NekoSpace.xs,
+                    ),
+                    child: Row(
+                      key: const Key('composer-question-hint'),
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            View.of(context).viewInsets.bottom > 0
+                                ? '消息会排队，回答后才处理'
+                                : '助手正在等待你的回答；此处发送的消息会排队，回答后才处理。',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.small(tokens.textMuted),
+                          ),
+                        ),
+                        const SizedBox(width: NekoSpace.sm),
+                        Text('回答问题', style: context.small(tokens.primary)),
+                        NekoIcon(
+                          NekoIcons.chevronUp,
+                          size: 16,
+                          color: tokens.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: <Widget>[
@@ -704,12 +799,15 @@ class _ComposerState extends State<Composer> {
                   child: TextField(
                     key: const Key('composer-input'),
                     controller: chat.input,
+                    focusNode: widget.focusNode,
                     minLines: 1,
                     maxLines: 6,
                     textInputAction: TextInputAction.newline,
                     decoration: InputDecoration(
                       hintText: !can
                           ? '未连接，可继续编辑草稿'
+                          : waiting
+                          ? '消息会排队，回答问题后才处理'
                           : busy
                           ? '回答结束后排队处理，可在上方排队条引导或撤回'
                           : '发消息给 Agent',

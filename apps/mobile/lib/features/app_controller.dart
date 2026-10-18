@@ -65,7 +65,7 @@ class AppController {
     _serverId = serverId;
     await sessions.bind(api, serverId);
     if (generation != _generation) return;
-    await chat.bind(api, serverId);
+    await chat.bind(api, serverId, capabilities: state.hello.capabilities);
     if (generation != _generation) return;
     if (chat.sessionId == null) await _restoreSession(generation);
   }

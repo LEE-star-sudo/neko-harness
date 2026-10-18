@@ -6,6 +6,7 @@ import 'package:neko_mobile/core/pairing/pairing_models.dart';
 import 'package:neko_mobile/core/pairing/pairing_service.dart';
 import 'package:neko_mobile/core/rpc/rpc_client.dart';
 
+import '../../helpers/fake_api.dart';
 import '../../helpers/tls_server.dart';
 import '../../helpers/tracking_pinned_client.dart';
 
@@ -132,6 +133,26 @@ void main() {
       expect(states[0], isA<RpcConnecting>());
       expect(states[1], isA<RpcReady>());
       await sub.cancel();
+    });
+
+    test('hello 接受含 todos / questions 的新能力列表（fixture）', () async {
+      final server = await startTlsServer();
+      _WsHarness(
+        helloResult: Map<String, Object?>.from(
+          fixtureMessage('hello-result.json')['result'] as Map,
+        ),
+      ).attach(server);
+      final client = NekoRpcClient(
+        computer: _computerFor(server),
+        clientFactory: defaultPinnedClientFactory,
+      );
+      addTearDown(client.dispose);
+      await client.connect();
+      expect(
+        client.hello.capabilities,
+        containsAll(<String>['approvals', 'todos', 'questions']),
+      );
+      expect(client.hello.apiVersion, 1);
     });
 
     test('平台可注入（如桌面测试用）', () async {

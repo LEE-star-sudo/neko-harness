@@ -7,6 +7,9 @@
 //
 // 指令（在手机发送的消息中包含关键字）：
 //   「委派」→ 主会话调用子 agent，子 agent 执行需审批的 bash（echo neko-e2e-approved）
+//   「待办」→ 主会话用 todo 工具写入 3 项待办（1 完成、1 进行中、1 待办）
+//   「提问」→ 主会话调用 ask_user 提出单选题（选项 PostgreSQL 为推荐、MySQL、SQLite），等待手机/桌面回答
+//   「多选」→ 主会话调用 ask_user 提出多选题（需要至少选一项或填写文字）
 //   「慢」  → 回答前等待 8 s（用于忙碌排队、steer、停止与断线恢复）
 //   「长」  → 返回超过 8 KiB 的回答（contentRef 展开）
 //   其他    → 流式回答 "pong: <原文>"
@@ -57,6 +60,9 @@ const respond = async (context: { messages: Message[] }, options: { signal?: Abo
 	if (last?.role === "toolResult") {
 		if (last.toolName === "bash") return fauxAssistantMessage(`子 agent 报告：${textOf(last).trim()}`);
 		if (last.toolName === "subagent") return fauxAssistantMessage("主会话总结：子 agent 已完成。");
+		if (last.toolName === "todo") return fauxAssistantMessage("待办已更新。");
+		if (last.toolName === "ask_user")
+			return fauxAssistantMessage(`提问结束：${textOf(last).replace(/\s+/g, " ").trim()}`);
 		return fauxAssistantMessage("工具完成。");
 	}
 	const text = textOf(last);
@@ -64,6 +70,37 @@ const respond = async (context: { messages: Message[] }, options: { signal?: Abo
 		return fauxAssistantMessage([fauxToolCall("bash", { command: "echo neko-e2e-approved", timeout: 60 })], {
 			stopReason: "toolUse",
 		});
+	}
+	if (text.includes("待办")) {
+		return fauxAssistantMessage(
+			[
+				fauxToolCall("todo", {
+					action: "replace",
+					items: [
+						{ id: "read", text: "阅读现有实现", status: "completed" },
+						{ id: "design", text: "设计迁移步骤", status: "in_progress" },
+						{ id: "verify", text: "运行回归测试", status: "pending" },
+					],
+				}),
+			],
+			{ stopReason: "toolUse" },
+		);
+	}
+	if (text.includes("提问") || text.includes("多选")) {
+		return fauxAssistantMessage(
+			[
+				fauxToolCall("ask_user", {
+					question: text.includes("多选") ? "需要哪些数据库？" : "使用哪种数据库？",
+					...(text.includes("多选") ? { multiple: true } : {}),
+					options: [
+						{ id: "pg", label: "PostgreSQL", recommended: true },
+						{ id: "my", label: "MySQL" },
+						{ id: "lite", label: "SQLite", description: "嵌入式，无需服务" },
+					],
+				}),
+			],
+			{ stopReason: "toolUse" },
+		);
 	}
 	if (text.includes("委派")) {
 		return fauxAssistantMessage(

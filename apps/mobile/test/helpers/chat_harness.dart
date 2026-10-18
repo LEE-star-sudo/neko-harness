@@ -52,6 +52,13 @@ class ChatHarness {
         },
       )
       ..on('approvals.list', (_) => <String, dynamic>{'approvals': approvals})
+      ..on('todos.get', (_) => todoList)
+      ..on('questions.list', (_) => questionList)
+      ..on('questions.get', (params) {
+        final record = questionRecords[params!['id']];
+        if (record == null) throw const MobileApiException('not_found', '');
+        return record;
+      })
       ..on(
         'chat.attach',
         (params) => <String, dynamic>{
@@ -68,6 +75,18 @@ class ChatHarness {
   late final AppController app;
   int attachCount = 0;
   List<Object> approvals = <Object>[];
+
+  /// `todos.get` / `questions.list` / `questions.get` 的脚本化数据（仅声明能力时才会被调用）。
+  Map<String, dynamic> todoList = <String, dynamic>{
+    'revision': 1,
+    'items': <Object>[],
+  };
+  Map<String, dynamic> questionList = <String, dynamic>{
+    'revision': 1,
+    'pending': <Object>[],
+  };
+  Map<int, Map<String, dynamic>> questionRecords =
+      <int, Map<String, dynamic>>{};
   Map<String, dynamic> snapshot = snapshotOf(<Map<String, dynamic>>[
     userItem('u-1', '你好'),
     assistantItem('a-2', '**你好**，有什么可以帮忙？'),
@@ -75,9 +94,13 @@ class ChatHarness {
 
   ChatController get chat => app.chat;
 
-  Future<void> bind({String? attach = '7'}) async {
+  /// [capabilities] 为 hello 声明的能力；缺省 = 旧电脑（不会产生 todos.* / questions.* 请求）。
+  Future<void> bind({
+    String? attach = '7',
+    Iterable<String> capabilities = const <String>[],
+  }) async {
     await app.sessions.bind(api, 'srv');
-    await app.chat.bind(api, 'srv');
+    await app.chat.bind(api, 'srv', capabilities: capabilities);
     if (attach != null) await app.chat.attach(attach);
   }
 

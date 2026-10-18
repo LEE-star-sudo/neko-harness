@@ -78,6 +78,24 @@ PROPS
 keystore 与密码请离线备份：丢失后无法以同一签名覆盖安装，用户只能卸载重装并重新扫码（已配对凭据在 Keystore 中，不随备份迁移）。
 同签名覆盖安装会保留配对与草稿。
 
+## 待办与用户提问（add-todos-and-user-questions）
+
+- 能力来自 `server.hello.capabilities` 的 `todos` / `questions`（`ChatController.bind(..., capabilities:)`）：缺少时隐藏全部入口且从不调用
+  `todos.get` / `questions.*`（旧电脑只会省略它们）。`chat.attach` 快照与 `chat.patch` 状态里的 `todos` / `questions` 摘要（缺省 = 不支持，
+  存在且为 0 = 支持但为空）与 `*.changed` 通知一样只是失效提示。
+- 状态在 `lib/features/chat/interactions_controller.dart`：attach 后无条件首查，之后按 revision 重读（只接受不低于已持有的结果；读取期间收到更高
+  revision 再读，重读有界）；订阅代次（`_epoch`）隔离切换会话/重连后的迟到结果；离线保留已加载内容但标记为非最新。
+- 待办只读：顶栏 `TodoEntry`（如 1/3，列表为空不显示）+ 底部 sheet（`lib/features/todos/todo_sheet.dart`，三态图标+文字、可滚动、全文可见）。
+- 问题：输入区上方“等待回答 · N”条 + bottom sheet（`lib/features/questions/question_sheet.dart`）。题目/选项为纯文本，推荐项只标记不预选，
+  文字输入始终可见，显式“提交回答”与独立“跳过”；关闭/下拉只关闭（草稿按 server/session/question/version 留在内存，不落盘）；提交中禁用控件，
+  失败保留草稿并提示，无回执不做乐观终态、断线后绝不自动重发；他端已结算/停止时显示真实终态。校验与服务端同一规则
+  （`question_draft.dart`，长度按 UTF-16 码元，空白判断沿用 JS `trim`，回答 JSON ≤ 16384 字节）。
+- 自动展开：进入会话页或问题首次出现，且聊天输入未聚焦、草稿为空、没有其他面板时展开一次；关闭过的版本不再自动展开。有未决问题时输入区提示
+  消息会排队到回答之后，并提供打开问题的入口；转录里的 `ask_user` / `todo` 卡片由 `tool.interaction` 渲染（只读）。会话列表在 `awaitingAnswer`
+  为真时显示“等待回答”。
+- 测试：`test/core/api/interaction_models_test.dart`（fixtures 对拍）、`test/features/chat/interactions_controller_test.dart`、
+  `test/features/questions/`、`test/features/todos/`、`test/ui/interaction_layout_test.dart`（窄屏/大字体/软键盘/安全区/共存）等。
+
 ## 真机回归
 
 `scripts/mobile-e2e-gateway.ts` 启动隔离数据目录与脚本化 faux 模型的 gateway（不访问外部模型）：
@@ -89,7 +107,9 @@ cd apps/mobile && flutter test integration_test/mobile_e2e_test.dart -d <设备>
 ```
 
 集成测试经回环取新鲜配对文本，随后走真实局域网 TLS 指纹绑定、配对、WSS 与 JSON-RPC，覆盖新建会话、流式回答、
-子 agent 审批、子详情、忙碌排队与停止、长内容展开。手工验证 release 包时可直接扫码，或粘贴 `<数据目录>/pairing.txt`。
+子 agent 审批、子详情、忙碌排队与停止、长内容展开；另有一条待办/提问用例（消息含「待办」「提问」「多选」触发脚本化 faux 模型的 `todo` /
+`ask_user` 调用）：手机可见待办进度与只读列表、单选/多选回答、关闭不结算、经 `connectPaired` 真实重连后重新 attach/查询并显式提交、
+回答后再次重连同步最终状态。注意：该用例**尚未在真机/模拟器上执行**，执行后再把结果记在此处。手工验证 release 包时可直接扫码，或粘贴 `<数据目录>/pairing.txt`。
 
 ## M0 真机验证记录
 

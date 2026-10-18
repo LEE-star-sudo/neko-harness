@@ -1,7 +1,11 @@
 import type { ChatItem, ChatView, DefaultImagePrompt, StreamingView } from "@neko-harness/core";
 import { copyText } from "@neko-harness/core/conversation-export";
+import type { QuestionSummary } from "@neko-harness/core/interactions";
 import type { SkillInvocation } from "@neko-harness/core/skill-invocation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { questionUi } from "../lib/question-ui";
+import { getState } from "../lib/store";
+import { AskUserRow } from "./ask-user-row";
 import { CopyButton } from "./copy-button";
 import { ImageGallery } from "./image-gallery";
 import { JobReportCard } from "./job-report-card";
@@ -119,7 +123,32 @@ function SystemRow({ text }: { text: string }) {
 	);
 }
 
-function ToolRow({ item }: { item: Extract<ChatItem, { type: "tool" }> }) {
+function ToolRow({
+	item,
+	pending,
+}: {
+	item: Extract<ChatItem, { type: "tool" }>;
+	pending?: readonly QuestionSummary[];
+}) {
+	const interaction = item.interaction;
+	if (interaction?.kind === "ask_user") {
+		const waiting = interaction.status === "pending" ? pending?.find((q) => q.id === interaction.id) : undefined;
+		return (
+			<div className="chat-row anim-other">
+				<AskUserRow
+					interaction={interaction}
+					onLocate={
+						waiting
+							? () => {
+									const sessionId = getState().currentSessionId;
+									if (sessionId) questionUi.open(sessionId, waiting);
+								}
+							: undefined
+					}
+				/>
+			</div>
+		);
+	}
 	return (
 		<div className="chat-row anim-other">
 			<ToolCard
@@ -333,7 +362,7 @@ export function MessageList({
 									</button>
 								) : (
 									<div key={item.key}>
-										<ToolRow item={item} />
+										<ToolRow item={item} pending={view?.questions?.pending} />
 										{view?.approvals
 											?.filter((a) => a.callId === item.callId && a.status !== "pending")
 											.map((a) => (

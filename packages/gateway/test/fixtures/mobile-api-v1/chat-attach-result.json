@@ -8,6 +8,8 @@
 			"sessionId": "42",
 			"snapshot": {
 				"busy": true,
+				"todos": { "revision": 4, "count": 3, "completed": 1 },
+				"questions": { "revision": 5, "pendingCount": 1 },
 				"status": "运行 bash…",
 				"usage": {
 					"input": 12040,

@@ -17,8 +17,13 @@ import {
 	NekoWorkspaces,
 	type WireJobOutput,
 	type WireJobSummary,
+	type WireQuestionList,
+	type WireQuestionRecord,
+	type WireQuestionResponse,
+	type WireQuestionSummary,
 	type WireQueuedInput,
 	type WireSteerResult,
+	type WireTodoList,
 	type WireWithdrawResult,
 } from "./contract.ts";
 import { createClientHost } from "./link.ts";
@@ -95,6 +100,58 @@ export function queueClient(chat: NekoChat): QueueClient {
 		async withdraw(id) {
 			if (!supported()) throw new Error(QUEUE_UNSUPPORTED);
 			return chat.withdraw({ id });
+		},
+	};
+}
+export const TODOS_UNSUPPORTED = "This gateway does not support todos. Restart the gateway to enable them.";
+export type TodosClient = {
+	/** False for a gateway built before todos: the view carries no `todos` field at all. */
+	readonly supported: boolean;
+	/** The current list; empty when unsupported. */
+	list(): WireTodoList;
+};
+const NO_TODOS: WireTodoList = { revision: 0, items: [] };
+/** Capability-probed read access to a chat's todo list; users never write it. */
+export function todosClient(chat: NekoChat): TodosClient {
+	return {
+		get supported() {
+			return chat.view.value?.todos !== undefined;
+		},
+		list: () => chat.view.value?.todos ?? NO_TODOS,
+	};
+}
+export const QUESTIONS_UNSUPPORTED = "This gateway does not support questions. Restart the gateway to enable them.";
+export type QuestionsClient = {
+	/** False for a gateway built before ask_user: the view carries no `questions` field at all. */
+	readonly supported: boolean;
+	readonly revision: number;
+	/** Questions waiting for the user, oldest first; empty when unsupported. */
+	pending(): readonly WireQuestionSummary[];
+	/** The full record, or `null` when this session has no such question. */
+	get(id: number): Promise<WireQuestionRecord | null>;
+	/** Answer or skip; resolves to the saved record, which is the first valid decision and may not be this one. */
+	respond(input: { id: number; version: string; response: WireQuestionResponse }): Promise<WireQuestionRecord>;
+};
+const NO_QUESTIONS: WireQuestionList = { revision: 0, pending: [] };
+/** Capability-probed access to a chat's open questions; an old gateway degrades instead of failing. */
+export function questionsClient(chat: NekoChat): QuestionsClient {
+	const list = () => chat.view.value?.questions ?? NO_QUESTIONS;
+	const supported = () => chat.view.value?.questions !== undefined;
+	return {
+		get supported() {
+			return supported();
+		},
+		get revision() {
+			return list().revision;
+		},
+		pending: () => list().pending,
+		async get(id) {
+			if (!supported()) throw new Error(QUESTIONS_UNSUPPORTED);
+			return chat.questionGet({ id });
+		},
+		async respond(input) {
+			if (!supported()) throw new Error(QUESTIONS_UNSUPPORTED);
+			return chat.questionRespond(input);
 		},
 	};
 }

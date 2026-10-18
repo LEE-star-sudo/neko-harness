@@ -113,6 +113,9 @@ export const ROLE_PROMPTS: Record<SubagentRole, string> = {
 };
 export const SUBAGENT_DELIVERY =
 	" Work from the assigned task, your own prior conversation context and project resources; you cannot see the main conversation. Do not delegate or ask the user directly. Your final message must be a self-contained delivery to the main agent, including evidence, results and limitations. Skills never expand your allowed tools.";
+/** Tools only the main agent may use: a subagent reports to its parent instead of planning for or asking the user. */
+export const MAIN_ONLY_TOOLS: ReadonlySet<string> = new Set(["todo", "ask_user"]);
+export const MAIN_ONLY_EXTENSIONS: ReadonlySet<string> = new Set(["neko-todos", "neko-questions"]);
 const READ_TOOLS = new Set(["read", "find_files", "search_text", "web_search", "web_extract"]);
 
 export async function refreshDelegations(tx: Tx, id: ConversationId): Promise<Delegation[]> {
@@ -503,11 +506,14 @@ export function createSubagentExtension(
 								model: agent.model,
 								thinkingLevel: agent.thinkingLevel,
 								cwd: agent.cwd,
-								extensions: agent.extensions.filter((e) => e.name !== extension.name),
+								extensions: agent.extensions.filter(
+									(e) => e.name !== extension.name && !MAIN_ONLY_EXTENSIONS.has(e.name),
+								),
 								tools: agent.tools.filter(
 									(t) =>
 										t.name !== "subagent" &&
 										t.name !== "job" &&
+										!MAIN_ONLY_TOOLS.has(t.name) &&
 										(role === "coder" || READ_TOOLS.has(t.name) || (role === "explore" && t.name === "bash")),
 								),
 							});
@@ -617,6 +623,18 @@ export async function listDelegations(harness: Harness, parent: ConversationId, 
 export async function listSubagents(harness: Harness, parent: ConversationId, context: Context) {
 	const rounds = await listDelegations(harness, parent, context);
 	return summarizeSubagents(rounds, (await harness.snapshot(SubagentsDoc, parent, context))?.items);
+}
+/** Startup repair: a subagent that somehow lists a main-only tool loses it, whatever its stored configuration says. */
+export async function removeMainOnlyTools(harness: Harness, ids: ConversationId[], context: Context) {
+	for (const id of ids) {
+		if (!(await harness.snapshot(SubagentDoc, id, context))?.role) continue;
+		const agent = await (await harness.conversation(id, context))!.agent(context);
+		if (!agent.tools.some((t) => MAIN_ONLY_TOOLS.has(t.name))) continue;
+		await harness.commit(
+			(tx) => configure(tx, id, { tools: agent.tools.filter((t) => !MAIN_ONLY_TOOLS.has(t.name)) }),
+			context,
+		);
+	}
 }
 export async function installSubagentCoordinator(harness: Harness, parents: ConversationId[], context: Context) {
 	const known = new Set(parents);

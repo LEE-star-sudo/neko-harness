@@ -1,11 +1,11 @@
 import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import {
 	Container,
-	isKeyRelease,
 	Loader,
 	matchesKey,
 	ProcessTerminal,
 	ScrollView,
+	type SlashCommand,
 	type Text,
 	TuiAltScreen,
 } from "@earendil-works/pi-tui";
@@ -22,7 +22,13 @@ import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import { promptHistory } from "@neko-harness/core/input-history";
 import { sessionName } from "@neko-harness/core/session-display";
-import { JOBS_UNSUPPORTED, jobsClient, queueClient } from "@neko-harness/gateway/client-session";
+import {
+	JOBS_UNSUPPORTED,
+	jobsClient,
+	QUESTIONS_UNSUPPORTED,
+	questionsClient,
+	queueClient,
+} from "@neko-harness/gateway/client-session";
 import type { NekoChat } from "@neko-harness/gateway/contract";
 import { ApprovalDock } from "./approval-dock.ts";
 import { copyLastAnswer } from "./clipboard-write.ts";
@@ -46,9 +52,11 @@ import { formatTokens } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import { HelpDetail } from "./help-ui.ts";
 import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
+import { createInputRouter } from "./input-router.ts";
 import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
+import { canAutoOpen, QuestionDock } from "./question-dock.ts";
 import { QueueRow, queueKeyAction, restoreText, steerNotice, withdrawNotice } from "./queue-ui.ts";
 import { openSearchPanel } from "./search-ui.ts";
 import { openSkillMarket } from "./skill-market-ui.ts";
@@ -62,6 +70,7 @@ import {
 	type ThemePreference,
 	theme,
 } from "./theme/index.ts";
+import { showTodos, todoProgressText } from "./todos-ui.ts";
 import { openVersion, versionNotice } from "./version-ui.ts";
 import { recentlyVisited, sessionPickerItems } from "./workspace.ts";
 
@@ -108,6 +117,7 @@ class NekoTuiApp {
 	readonly #terminal = new ProcessTerminal();
 	readonly #panel: PickerPanel;
 	readonly #approval: ApprovalDock;
+	readonly #question: QuestionDock;
 	readonly #login: LoginPanel;
 	#thinkingModel: string | undefined;
 	#imageWarningModel: string | undefined;
@@ -130,6 +140,10 @@ class NekoTuiApp {
 	#agentsPanel = false;
 	#jobsPanel = false;
 	#queueBusy = false;
+	/** Skill completions of the attached session, and which optional commands its gateway supports. */
+	#skillCommands: SlashCommand[] = [];
+	#commandCaps = "";
+	#switching = false;
 	readonly #queueRow = new QueueRow();
 	#searchStop: (() => void) | undefined;
 	#contextStop: (() => void) | undefined;
@@ -178,6 +192,17 @@ class NekoTuiApp {
 		);
 		this.#busyLoader = new Loader(this.#ui, theme.accent, theme.muted);
 		this.#editor = new BoundedEditor(this.#ui, getEditorTheme(), { paddingX: 1, autocompleteMaxVisible: 3 });
+		this.#question = new QuestionDock({
+			changed: () => this.#ui.requestRender(),
+			notify: (message, level) => this.addNotice(message, level),
+			aside: () => (this.#approval.visible ? "Approval waiting: Esc closes this panel to review it." : undefined),
+			opened: (open) => {
+				this.#ui.setFocus(open ? this.#question : this.#editor);
+				if (open) this.#queueRow.clear();
+				if (this.#lastView) this.#syncFooter(this.#lastView);
+				this.#ui.requestRender();
+			},
+		});
 		this.#panel = new PickerPanel(
 			() => this.#ui.requestRender(),
 			() => {
@@ -190,13 +215,17 @@ class NekoTuiApp {
 				this.#contextStop = undefined;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
-				this.#ui.setFocus(this.#editor);
+				this.#ui.setFocus(this.#question.open ? this.#question : this.#editor);
 			},
 		);
 		// Pi consumes viewport paging before focused-component keys; route its public
 		// scrolling entry point to the visible detail (agents, skill previews or help).
 		const scrollMain = this.#ui.scrollBy.bind(this.#ui);
 		this.#ui.scrollBy = (lines) => {
+			if (this.#question.open) {
+				this.#question.scroll(lines);
+				return;
+			}
 			if (this.#approval.focused) {
 				this.#approval.scroll(lines);
 				return;
@@ -264,48 +293,38 @@ class NekoTuiApp {
 		this.#exited = new Promise<void>((resolve) => {
 			this.#resolveExit = resolve;
 		});
-		this.#ui.addInputListener((data) => {
-			if (isKeyRelease(data)) return { consume: true };
-			if (
-				!matchesKey(data, "escape") ||
-				this.#panel.open ||
-				this.#login.open ||
-				this.#busyText !== undefined ||
-				this.#lastView?.compaction?.active.length
-			)
-				this.#editor.resetEscapeSequence();
-
-			if (!usableSize(this.#terminal.columns, this.#terminal.rows)) {
-				if (matchesKey(data, "ctrl+c")) this.exit();
-				return { consume: true };
-			}
-			if (this.#approval.handleInput(data)) return { consume: true };
-			if (this.#panel.open || this.#login.open) {
-				// Let focused-component dispatch filter key releases before handling panel input.
-				return undefined;
-			}
-			if (this.#sessionOperation) return { consume: true };
-			const queueKey = this.#queueKey(data);
-			if (queueKey) return queueKey;
-			if (
-				matchesKey(data, "right") &&
-				this.#lastView?.subagents?.length &&
-				this.#editor.getText() === "" &&
-				!this.#editor.isShowingAutocomplete()
-			) {
-				this.#showAgents();
-				return { consume: true };
-			}
-			if (matchesKey(data, process.platform === "win32" ? "alt+v" : "ctrl+v")) {
-				if (isClipboardShortcut(data)) void this.pasteClipboard();
-				return { consume: true };
-			}
-			if (
-				(data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")) ||
-				(data.length > 3 && /^["']?[~/]/.test(data))
-			) {
-				const paths = imagePaths(data.startsWith("\x1b[200~") ? data.slice(6, -6) : data);
-				if (paths) {
+		this.#ui.addInputListener(
+			createInputRouter({
+				size: () => this.#terminal,
+				editor: this.#editor,
+				approval: this.#approval,
+				question: this.#question,
+				overlayOpen: () => this.#panel.open || this.#login.open,
+				busy: () => this.#busyText !== undefined,
+				compactionActive: () => !!this.#lastView?.compaction?.active.length,
+				// 会话浮层打开时把 Escape 留给浮层（SelectList 取消）。
+				compactionStoppable: () =>
+					!!this.#lastView?.compaction?.active.some((c) => c.reason === "manual" || c.blocking),
+				sessionOperation: () => this.#sessionOperation,
+				queueKey: (data) => this.#queueKey(data),
+				hasSubagents: () => !!this.#lastView?.subagents?.length,
+				showAgents: () => this.#showAgents(),
+				toggleQuestion: () => this.#toggleQuestion(),
+				clipboardKey: (data) => {
+					if (!matchesKey(data, process.platform === "win32" ? "alt+v" : "ctrl+v")) return false;
+					if (isClipboardShortcut(data)) void this.pasteClipboard();
+					return true;
+				},
+				pasteImages: (data) => {
+					if (
+						!(
+							(data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~")) ||
+							(data.length > 3 && /^["']?[~/]/.test(data))
+						)
+					)
+						return false;
+					const paths = imagePaths(data.startsWith("\x1b[200~") ? data.slice(6, -6) : data);
+					if (!paths) return false;
 					const session = this.#sessionId;
 					void this.addImagePaths(paths)
 						.then((refs) => {
@@ -313,39 +332,20 @@ class NekoTuiApp {
 							this.#ui.requestRender();
 						})
 						.catch((e) => this.addNotice(messageOf(e), "error"));
-					return { consume: true };
-				}
-			}
-			if (matchesKey(data, "escape") && this.#editor.isShowingAutocomplete()) {
-				this.#editor.resetEscapeSequence();
-				return undefined;
-			}
-			if (matchesKey(data, "ctrl+c")) {
-				if (this.#busyText !== undefined) this.abort();
-				else this.exit();
-				return { consume: true };
-			}
-			// 会话浮层打开时把 Escape 留给浮层（SelectList 取消）。
-			if (
-				matchesKey(data, "escape") &&
-				(this.#busyText !== undefined ||
-					this.#lastView?.compaction?.active.some((c) => c.reason === "manual" || c.blocking))
-			) {
-				this.abort();
-				return { consume: true };
-			}
-			if (matchesKey(data, "ctrl+s")) {
-				this.openSessionsOverlay();
-				return { consume: true };
-			}
-			return undefined;
-		});
+					return true;
+				},
+				openSessions: () => this.openSessionsOverlay(),
+				abort: () => this.abort(),
+				exit: () => this.exit(),
+			}),
+		);
 	}
 
 	async run(initialSessionId: string): Promise<void> {
 		this.#gateway.client.link.onClose(() => {
 			if (this.#exitStarted) return;
 			this.#chat = undefined;
+			this.#question.setOnline(false);
 			if (this.#lastView) this.applyView({ ...this.#lastView, busy: false, status: null, streaming: null });
 			this.addNotice("Gateway unavailable. Restart to reconnect.", "error");
 		});
@@ -376,7 +376,10 @@ class NekoTuiApp {
 					invalidate: () => {},
 				},
 				approval: this.#approval,
-				approvalVisible: () => this.#approval.visible,
+				// The open question panel owns the keys; a waiting approval folds into a hint inside it.
+				approvalVisible: () => this.#approval.visible && !this.#question.open,
+				question: this.#question,
+				questionVisible: () => this.#question.visible,
 				editor: this.#editor,
 				footer: this.#footer,
 				notices,
@@ -452,6 +455,14 @@ class NekoTuiApp {
 		}
 		if (trimmed === "/jobs") {
 			this.#showJobs();
+			return;
+		}
+		if (trimmed === "/todos") {
+			this.#showTodos();
+			return;
+		}
+		if (trimmed === "/question") {
+			this.#toggleQuestion();
 			return;
 		}
 		if (trimmed === "/search") {
@@ -711,6 +722,7 @@ class NekoTuiApp {
 		if (this.#exitStarted) return;
 		this.#exitStarted = true;
 		this.#approval.close();
+		this.#question.dispose();
 		for (const detail of this.#agentDetails.values()) detail.close();
 		this.#resolveExit();
 	}
@@ -720,6 +732,7 @@ class NekoTuiApp {
 	/** 切换 attach 的会话：重建转录（提交后的状态为准，重连即取最新快照）。 */
 	async switchSession(id: string): Promise<void> {
 		this.#approval.close();
+		this.#question.bind(id, undefined);
 		this.#chat = undefined;
 		this.#queueRow.setItems([]);
 		if (this.#jobsPanel && this.#panel.open) this.#panel.close();
@@ -731,13 +744,21 @@ class NekoTuiApp {
 		const handle = await this.#gateway.client.attach(id);
 		this.#chat = handle;
 		this.#sessionId = id;
+		this.#question.bind(id, questionsClient(handle));
 		void this.#refreshSkills(handle);
 		this.#editor.setText(this.#texts.get(id) ?? "");
 		this.#editor.setHistory([]);
 		this.#historyItems = undefined;
 		this.#resetTranscript();
 		const view = handle.view;
-		this.applyView(view.value);
+		// A question already waiting here may open once the sessions picker that led here has closed.
+		this.#switching = true;
+		try {
+			this.applyView(view.value);
+		} finally {
+			this.#switching = false;
+		}
+		setImmediate(() => this.#autoOpenQuestion());
 		this.#viewUnsubscribe = view.subscribe(() => {
 			this.scheduleApply();
 		});
@@ -747,15 +768,32 @@ class NekoTuiApp {
 
 	/** 拉取当前会话的技能列表进补全命令表（数组与 fileCompletion 共享，原地更新即生效）。 */
 	async #refreshSkills(handle: NekoChat): Promise<void> {
-		this.#commands.splice(0, this.#commands.length, ...commands);
+		this.#skillCommands = [];
+		this.#syncCommands(this.#lastView);
 		try {
 			const skills = await handle.skills(null);
 			if (handle !== this.#chat) return;
-			for (const skill of skills)
-				this.#commands.push({ name: `skill:${skill.name}`, description: skill.description, argumentHint: "[args]" });
+			this.#skillCommands = skills.map((skill) => ({
+				name: `skill:${skill.name}`,
+				description: skill.description,
+				argumentHint: "[args]",
+			}));
+			this.#syncCommands(this.#lastView);
 		} catch {
 			/* completion keeps the static commands */
 		}
+	}
+
+	/** Completion list: the static commands, minus those the gateway cannot serve, plus the session's skills. */
+	#syncCommands(view: ChatView | undefined): void {
+		const hidden = view ? hiddenCommands(view) : new Set<string>();
+		this.#commandCaps = [...hidden].join(",");
+		this.#commands.splice(
+			0,
+			this.#commands.length,
+			...commands.filter((c) => !hidden.has(c.name)),
+			...this.#skillCommands,
+		);
 	}
 
 	async #manage(operation: () => Promise<void>): Promise<void> {
@@ -938,6 +976,47 @@ class NekoTuiApp {
 		this.#ui.setFocus(this.#panel);
 		if (taskId !== undefined) this.#panel.showDetail(this.#agentDetail(taskId));
 	}
+	/** `/todos`: read-only list of the model's todos; an old gateway gets a notice instead. */
+	#showTodos(): void {
+		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
+		const opened = showTodos(this.#panel, () => this.#lastView?.todos, {
+			offline: () => this.#chat === undefined,
+			notify: (message, level) => this.addNotice(message, level),
+		});
+		if (opened) this.#ui.setFocus(this.#panel);
+	}
+	/** `/question` and Ctrl+O: open the assistant's question; the panel itself closes on Esc or Ctrl+O. */
+	#toggleQuestion(): void {
+		if (this.#exitStarted) return;
+		if (this.#question.open) {
+			this.#question.closePanel();
+			return;
+		}
+		if (!this.#question.supported) {
+			this.addNotice(QUESTIONS_UNSUPPORTED, "warning");
+			return;
+		}
+		if (!this.#question.openPanel()) this.addNotice("No question is waiting for your answer.");
+	}
+	/**
+	 * A new question opens by itself only when nothing else holds the keys: empty editor without completion, no
+	 * picker/login/approval, no queue selection. Otherwise the prompt bar is all that appears.
+	 */
+	#autoOpenQuestion(): void {
+		if (this.#exitStarted || this.#switching) return;
+		this.#question.autoOpen(
+			canAutoOpen({
+				online: this.#chat !== undefined,
+				usable: usableSize(this.#terminal.columns, this.#terminal.rows),
+				editorText: this.#editor.getText(),
+				autocomplete: this.#editor.isShowingAutocomplete(),
+				overlayOpen: this.#panel.open || this.#login.open,
+				approvalFocused: this.#approval.focused,
+				sessionOperation: this.#sessionOperation,
+				queueSelecting: this.#queueRow.selecting,
+			}),
+		);
+	}
 	#showJobs(): void {
 		if (this.#panel.open || this.#login.open) return;
 		const chat = this.#chat;
@@ -1102,6 +1181,8 @@ class NekoTuiApp {
 		if (this.#agentsPanel) this.#panel.update(subagentItems(view.subagents ?? [], view.agents));
 		if (this.#jobsPanel) this.#panel.update(jobItems(view.jobs ?? []));
 		this.#queueRow.setItems(view.queued ?? []);
+		this.#question.update(view.questions);
+		if (this.#commandCaps !== [...hiddenCommands(view)].join(",")) this.#syncCommands(view);
 		for (const identity of view.agents ?? []) {
 			const detail = this.#agentDetails.get(identity.agentId);
 			if (detail) {
@@ -1151,6 +1232,8 @@ class NekoTuiApp {
 			this.addNotice("Model changed. Open /think to choose its supported levels.");
 		}
 		this.#syncItems(view);
+		const waiting = this.#question.pendingCount > 0;
+		for (const card of this.#toolCards.values()) card.setWaiting(waiting && card.name === "ask_user");
 		for (const child of view.subagents ?? []) {
 			const card = this.#toolCards.get(child.callId);
 			if (card) card.onOpen = () => this.#showAgents(child.taskId);
@@ -1161,6 +1244,7 @@ class NekoTuiApp {
 		this.#syncWelcome(view);
 		if (this.#transcript !== undefined && this.#streamingComp !== undefined) this.#transcript.scrollToEnd();
 		this.#ui.requestRender();
+		this.#autoOpenQuestion();
 	}
 
 	#syncItems(view: ChatView): void {
@@ -1326,7 +1410,14 @@ class NekoTuiApp {
 		const active =
 			view.subagents?.filter((d) => d.historyThrough === undefined && (d.status === "running" || d.status === "queued"))
 				.length ?? 0;
-		this.#busyText = active ? `Agents ${active} running` : view.busy ? (view.status ?? "Thinking...") : undefined;
+		this.#busyText =
+			view.busy && this.#question.pendingCount > 0
+				? "Waiting for your answer"
+				: active
+					? `Agents ${active} running`
+					: view.busy
+						? (view.status ?? "Thinking...")
+						: undefined;
 		if (this.#busyText !== undefined) {
 			this.#busyLoader.setMessage(this.#busyText);
 			this.#busyLoader.start();
@@ -1360,10 +1451,14 @@ class NekoTuiApp {
 
 	#syncFooter(view: ChatView): void {
 		const usage = view.taskUsage ?? view.usage;
+		const todoProgress = todoProgressText(view.todos);
 		this.#footer.setStats({
 			subagentCount: view.agents?.length ?? 0,
 			jobCount: view.jobs?.filter((job) => job.status === "running").length ?? 0,
 			approvalCount: view.subagents?.reduce((n, d) => n + (d.approvalCount ?? 0), 0) ?? 0,
+			questionCount: this.#question.pendingCount,
+			questionOpen: this.#question.open,
+			...(todoProgress !== undefined ? { todoProgress } : {}),
 			model: view.model,
 			thinkingLevel: view.agent.thinkingLevel,
 			busy: this.#busyText,
@@ -1478,6 +1573,14 @@ function streamingCardState(call: {
 
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/** Commands a gateway without the matching optional capability cannot serve; they stay out of completion. */
+function hiddenCommands(view: ChatView): Set<string> {
+	const hidden = new Set<string>();
+	if (view.todos === undefined) hidden.add("todos");
+	if (view.questions === undefined) hidden.add("question");
+	return hidden;
 }
 
 function keyOf(model: NekoModelInfo): string {

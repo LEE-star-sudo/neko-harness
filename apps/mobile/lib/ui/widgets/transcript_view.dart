@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:neko_mobile/core/api/models.dart';
 import 'package:neko_mobile/features/chat/transcript.dart';
+import 'package:neko_mobile/features/questions/question_sheet.dart'
+    show questionStatusLabel;
 import 'package:neko_mobile/ui/neko_icons.dart';
 import 'package:neko_mobile/ui/theme.dart';
 import 'package:neko_mobile/ui/widgets/markdown_view.dart';
@@ -27,11 +29,15 @@ class TranscriptView extends StatefulWidget {
     super.key,
     required this.actions,
     this.onOpenSubagent,
+    this.onOpenQuestion,
     this.emptyText = '还没有消息',
   });
 
   final TranscriptActions actions;
   final void Function(SubagentRound round)? onOpenSubagent;
+
+  /// 打开未决问题的面板；只在主会话提供（回答控件只存在于面板，转录里没有）。
+  final void Function(int questionId)? onOpenQuestion;
   final String emptyText;
 
   @override
@@ -142,6 +148,7 @@ class _TranscriptViewState extends State<TranscriptView> {
             ? null
             : rounds.where((r) => r.callId == item.tool!.callId).firstOrNull,
         onOpenSubagent: widget.onOpenSubagent,
+        onOpenQuestion: widget.onOpenQuestion,
       ),
     );
     return Stack(
@@ -298,6 +305,7 @@ class ChatItemView extends StatelessWidget {
     required this.transcript,
     this.round,
     this.onOpenSubagent,
+    this.onOpenQuestion,
   });
 
   final ChatItem item;
@@ -305,6 +313,7 @@ class ChatItemView extends StatelessWidget {
   final Transcript transcript;
   final SubagentRound? round;
   final void Function(SubagentRound round)? onOpenSubagent;
+  final void Function(int questionId)? onOpenQuestion;
 
   String _full(String field, String preview) =>
       transcript.expanded(item.key, field) ?? preview;
@@ -406,6 +415,7 @@ class ChatItemView extends StatelessWidget {
           actions: actions,
           round: round,
           onOpenSubagent: onOpenSubagent,
+          onOpenQuestion: onOpenQuestion,
         );
       case ChatItemType.system:
         return Padding(
@@ -432,6 +442,7 @@ class ToolCard extends StatefulWidget {
     required this.actions,
     this.round,
     this.onOpenSubagent,
+    this.onOpenQuestion,
   });
 
   final ChatItem item;
@@ -441,6 +452,7 @@ class ToolCard extends StatefulWidget {
   final TranscriptActions actions;
   final SubagentRound? round;
   final void Function(SubagentRound round)? onOpenSubagent;
+  final void Function(int questionId)? onOpenQuestion;
 
   @override
   State<ToolCard> createState() => _ToolCardState();
@@ -459,6 +471,7 @@ class _ToolCardState extends State<ToolCard> {
       :actions,
       :round,
       :onOpenSubagent,
+      :onOpenQuestion,
     ) = widget;
     final tokens = NekoTokens.of(context);
     final (NekoIconData icon, Color color) = switch (tool.status) {
@@ -489,22 +502,27 @@ class _ToolCardState extends State<ToolCard> {
       ],
     );
     final linked = round;
+    final interaction = tool.interaction;
     final details = <Widget>[
-      if (tool.detail != null) mono('detail', tool.detail!),
-      if (tool.result != null)
-        mono('result', tool.result!)
-      else if (tool.output != null)
-        mono('output', tool.output!),
-      if (tool.diff != null) ...<Widget>[
-        Padding(
-          padding: const EdgeInsets.only(top: NekoSpace.xs),
-          child: Text(
-            '+${tool.diffAdded ?? 0} −${tool.diffRemoved ?? 0}'
-            '${tool.diffTruncated ? '（diff 已截断）' : ''}',
-            style: context.small(tokens.textMuted),
+      if (interaction != null)
+        ..._interactionDetails(context, interaction, onOpenQuestion)
+      else ...<Widget>[
+        if (tool.detail != null) mono('detail', tool.detail!),
+        if (tool.result != null)
+          mono('result', tool.result!)
+        else if (tool.output != null)
+          mono('output', tool.output!),
+        if (tool.diff != null) ...<Widget>[
+          Padding(
+            padding: const EdgeInsets.only(top: NekoSpace.xs),
+            child: Text(
+              '+${tool.diffAdded ?? 0} −${tool.diffRemoved ?? 0}'
+              '${tool.diffTruncated ? '（diff 已截断）' : ''}',
+              style: context.small(tokens.textMuted),
+            ),
           ),
-        ),
-        mono('diff', tool.diff!),
+          mono('diff', tool.diff!),
+        ],
       ],
       if (tool.note != null)
         Padding(
@@ -547,7 +565,11 @@ class _ToolCardState extends State<ToolCard> {
                   ),
                   const SizedBox(width: NekoSpace.sm),
                   Text(
-                    linked != null ? '子 agent · ${linked.title}' : tool.name,
+                    linked != null
+                        ? '子 agent · ${linked.title}'
+                        : interaction != null
+                        ? interactionTitle(interaction)
+                        : tool.name,
                     style: context.text.titleSmall,
                   ),
                   const SizedBox(width: NekoSpace.sm),
@@ -555,6 +577,8 @@ class _ToolCardState extends State<ToolCard> {
                     child: Text(
                       linked != null
                           ? '${linked.role} · ${linked.status}'
+                          : interaction != null
+                          ? interactionSummary(interaction)
                           : tool.summary,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -598,6 +622,109 @@ class _ToolCardState extends State<ToolCard> {
         ],
       ),
     );
+  }
+}
+
+/// `ask_user` / `todo` 工具项的标题；状态来自结构化 `interaction`，不解析 result 文案。
+String interactionTitle(ToolInteraction interaction) => switch (interaction) {
+  AskUserInteraction() => '助手提问',
+  TodoInteraction() => '待办',
+};
+
+String _answerLine(AskUserInteraction ask) {
+  final labels = ask.labels.isNotEmpty
+      ? ask.labels
+      : <String>[
+          for (final id in ask.optionIds)
+            ask.options.where((o) => o.id == id).firstOrNull?.label ?? id,
+        ];
+  final text = ask.text;
+  return <String>[
+    if (labels.isNotEmpty) labels.join('、'),
+    if (text != null && text.isNotEmpty) text,
+  ].join(' · ');
+}
+
+String interactionSummary(ToolInteraction interaction) {
+  switch (interaction) {
+    case AskUserInteraction():
+      final answer = interaction.status == QuestionStatus.answered
+          ? _answerLine(interaction)
+          : '';
+      return <String>[
+        questionStatusLabel(interaction.status),
+        interaction.question,
+        if (answer.isNotEmpty) answer,
+      ].join(' · ');
+    case TodoInteraction():
+      return '${interaction.action == 'replace' ? '更新待办' : '读取待办'}'
+          ' · 已完成 ${interaction.completed}/${interaction.total}'
+          '（修订 ${interaction.revision}）';
+  }
+}
+
+/// 展开后的结构化内容：只读展示，没有回答控件（回答只在问题面板里）。
+List<Widget> _interactionDetails(
+  BuildContext context,
+  ToolInteraction interaction,
+  void Function(int questionId)? onOpenQuestion,
+) {
+  final tokens = NekoTokens.of(context);
+  switch (interaction) {
+    case TodoInteraction():
+      return <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: NekoSpace.xs),
+          child: Text(interactionSummary(interaction)),
+        ),
+      ];
+    case AskUserInteraction():
+      final answered = interaction.status == QuestionStatus.answered;
+      return <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: NekoSpace.xs),
+          // 问题与选项都是纯文本：保留换行，不解析 Markdown/HTML，不生成链接。
+          child: Text(
+            interaction.question,
+            key: const Key('interaction-question'),
+          ),
+        ),
+        for (final option in interaction.options)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '${interaction.optionIds.contains(option.id) ? '✓ ' : '· '}'
+              '${option.label}${option.recommended ? '（推荐）' : ''}',
+              style: context.small(tokens.textMuted),
+            ),
+          ),
+        Padding(
+          padding: const EdgeInsets.only(top: NekoSpace.xs),
+          child: Text(
+            switch (interaction.status) {
+              QuestionStatus.pending => '等待回答',
+              QuestionStatus.answered =>
+                '已回答：${_answerLine(interaction).isEmpty ? '（无内容）' : _answerLine(interaction)}',
+              QuestionStatus.skipped => '已跳过，未提供答案',
+              QuestionStatus.cancelled => '已取消',
+            },
+            key: const Key('interaction-status'),
+            style: TextStyle(
+              color: answered ? tokens.success : tokens.textMuted,
+            ),
+          ),
+        ),
+        if (interaction.status == QuestionStatus.pending &&
+            onOpenQuestion != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: Key('open-question-${interaction.id}'),
+              onPressed: () => onOpenQuestion(interaction.id),
+              child: const Text('查看问题'),
+            ),
+          ),
+      ];
   }
 }
 

@@ -64,6 +64,7 @@ import { ImageDetails } from "./image-metadata.ts";
 import { addDefaultImagePrompt } from "./image-prompt.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
+import type { QuestionList, QuestionRecord, QuestionResponse, TodoList } from "./interactions.ts";
 import { JobManager } from "./job-engine.ts";
 import { type JobOutputRead, type JobSummary, JobsDoc, summarizeJobRecord } from "./jobs.ts";
 import { totalUsage } from "./projection.ts";
@@ -86,8 +87,11 @@ import {
 	DelegationsDoc,
 	installSubagentCoordinator,
 	refreshDelegations,
+	removeMainOnlyTools,
 } from "./subagents.ts";
+import { createTodoExtension, TodosDoc } from "./todos.ts";
 import { createApprovalExtension, prepareApprovalConversations, ToolApprovals } from "./tool-approvals.ts";
+import { createQuestionExtension, UserQuestions } from "./user-questions.ts";
 import { createDeepseekProvider } from "./web-search/deepseek.ts";
 import { createWebSearchTools } from "./web-search/index.ts";
 import { createTavilyProvider } from "./web-search/tavily.ts";
@@ -192,6 +196,14 @@ export type NekoSession = {
 	jobOutput(jobId: string, since?: number): Promise<{ job: JobSummary; output: JobOutputRead }>;
 	/** Stop one job of this session; an ended job is returned as it is, an unknown one rejects. */
 	stopJob(jobId: string): Promise<JobSummary>;
+	/** The model-maintained todo list; empty before the first `todo` call. */
+	todos(): Promise<TodoList>;
+	/** Questions waiting for the user (bounded summaries) with the index revision. */
+	questions(): Promise<QuestionList>;
+	/** One full question record; `undefined` when this session has no such question. */
+	question(id: number): Promise<QuestionRecord | undefined>;
+	/** Answer or skip a question; the first valid decision wins and later calls return it unchanged. */
+	respondQuestion(id: number, version: string, response: QuestionResponse): Promise<QuestionRecord>;
 };
 
 /** Directory entry of `listConversations()`. */
@@ -207,6 +219,8 @@ export type NekoConversationInfo = {
 	readonly lastMessageAt: number | null;
 	readonly model: NekoModelRef | null;
 	readonly status: "idle" | "running" | "error";
+	/** A question of this running session waits for the user's answer. */
+	readonly awaitingAnswer: boolean;
 };
 
 /** A chat model offered by the runtime's Models registry, for frontend selectors. */
@@ -314,6 +328,7 @@ export type NekoRuntime = {
 	/** The underlying pi-durable Harness, for callers that need more. */
 	readonly harness: Harness;
 	readonly approvals: ToolApprovals;
+	readonly questions: UserQuestions;
 	/** The root conversation. */
 	readonly conversation: Conversation;
 	/** The root session: same conversation, bundled per-session operations. */
@@ -463,6 +478,9 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	);
 	const jobs = new JobManager();
 	registry.install(jobs.extension);
+	registry.install(createTodoExtension());
+	let questions!: UserQuestions;
+	registry.install(createQuestionExtension(() => questions));
 	for (const extension of options.extensions ?? []) registry.install(extension);
 	let approvals!: ToolApprovals;
 	const approvalExtension = createApprovalExtension(() => approvals);
@@ -504,10 +522,17 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			return records;
 		}, context);
 	approvals = new ToolApprovals(harness, context);
+	questions = new UserQuestions(harness, context);
 	const existing = await scanConversations();
+	questions.track(...existing.map((r) => r.id));
 
 	try {
 		await installSubagentCoordinator(
+			harness,
+			existing.map((r) => r.id),
+			context,
+		);
+		await removeMainOnlyTools(
 			harness,
 			existing.map((r) => r.id),
 			context,
@@ -533,6 +558,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		await harness.close(context);
 		throw error;
 	}
+	await questions.reconcileAll();
 	const conversation = await harness.root(context, {
 		agent: {
 			model,
@@ -767,6 +793,19 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			const job = await jobs.stop(jobIo(target.id), target.id, jobId, "user", context);
 			return summarizeJobRecord(job);
 		},
+		async todos() {
+			const saved = await harness.snapshot(TodosDoc, target.id, context);
+			return saved ? structuredClone(saved) : { revision: 0, items: [] };
+		},
+		questions() {
+			return questions.list(target.id, context);
+		},
+		question(id) {
+			return questions.get(target.id, id, context);
+		},
+		respondQuestion(id, version, response) {
+			return questions.respond(target.id, id, version, response, context);
+		},
 		async compact(instructions) {
 			const agent = await target.agent(context);
 			if (agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek")))
@@ -958,6 +997,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		harness,
 		approvals,
+		questions,
 		closed: harness.closed,
 		workspaceFiles,
 		conversation,
@@ -996,6 +1036,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 						createdAt: info.createdAt,
 						lastMessageAt: info.lastMessageAt,
 						status: info.status,
+						awaitingAnswer: info.awaiting === true,
 						model: (await target.agent(context)).model ?? null,
 						id: record.id,
 						archived: false,
@@ -1029,6 +1070,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		getConversation,
 		async archiveConversation(id) {
 			await (await sessionFor(id)).abort();
+			await questions.reconcile(id, context);
 			await jobs.stopAll(jobIo(id), id);
 			await metadata.archive(id);
 			await harness.commit(async (tx) => {

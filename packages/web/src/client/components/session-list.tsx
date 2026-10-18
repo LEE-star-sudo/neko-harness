@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { appActions, reportError } from "../lib/bootstrap";
 import { workspaceSessions } from "../lib/gateway";
+import { sessionStatusText } from "../lib/interactions";
 import { useSessionTime } from "../lib/session-time";
 import { useNekoState } from "../lib/store";
 import { folderName, Icon, Modal, Popover, useMobile } from "./primitives";
@@ -89,11 +90,13 @@ export function SessionList({ open, onClose }: { open: boolean; onClose: () => v
 								<Icon name="chat" />
 								<span className="session-copy">
 									<span className="truncate min-w-0">{sessionName(session, "新会话")}</span>
-									<span className="session-meta">
+									<span
+										className={`session-meta${session.awaitingAnswer === true ? " font-semibold text-tianyi-800" : ""}`}
+									>
 										<time dateTime={new Date(messageTime(session)).toISOString()}>
 											{relativeTime(messageTime(session), now, "zh")}
 										</time>
-										{session.status === "running" ? " · 运行中" : session.status === "error" ? " · 出错" : ""}
+										{sessionStatusText(session)}
 									</span>
 									<span className="session-tooltip" role="tooltip" id={`session-tip-${session.id}`}>
 										{sessionName(session, "新会话")}

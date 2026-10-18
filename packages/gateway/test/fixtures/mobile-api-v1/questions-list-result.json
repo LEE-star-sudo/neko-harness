@@ -1,0 +1,20 @@
+{
+	"description": "questions.list 结果：revision 与未决摘要（正文预览 ≤ 256 个 UTF-16 码元；至多 8 项）；完整题目用 questions.get。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 41,
+		"result": {
+			"revision": 5,
+			"pending": [
+				{
+					"id": 612,
+					"version": "6f1d0c52-8c1e-4f0d-9d55-1a2f3b4c5d6e",
+					"preview": "使用哪种数据库？",
+					"multiple": false,
+					"optionCount": 3,
+					"createdAt": 1730100000000
+				}
+			]
+		}
+	}
+}

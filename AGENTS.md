@@ -50,6 +50,13 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - core 的 `job` 工具（`packages/core/src/jobs.ts`、`job-engine.ts`）基于 `env.exec` 运行后台命令（不用 pty）；任务状态存 `app.neko.jobs` 文档，运行中输出只在内存。任务结束/崩溃经 `jobReport` 输入回报并触发新一轮，投影为带 `jobId` 的 `system` 项，不进入输入历史。
 - 前端入口：Web 顶栏「任务」面板、TUI `/jobs`；经网关 `jobOutput`/`jobStop`（`jobsClient`）和 `ChatView.jobs` 读取，`ChatView.jobs` 缺省表示旧网关。数值上限集中在 `JOB_LIMITS`，改动需同步 spec。
 
+## 待办与提问
+
+- `todo` / `ask_user`（`packages/core/src/todos.ts`、`user-questions.ts`）只给主 agent：`MAIN_ONLY_TOOLS`（`subagents.ts`）在子 agent 新建、启动修复中剔除，执行端再校验角色。限制、校验、答案草稿助手全在纯模块 `interactions.ts`（子路径 `@neko-harness/core/interactions`，前端与 `contract.ts` 共用，改数值需同步 spec 与 Dart 契约）。两工具均 `replay: "safe"`、`executionMode: "sequential"`（整轮串行）、`callers: ["model"]`。
+- Todo：`app.neko.todos`（rewindable / `fork: "asOf"`），模型整体 `replace`、用户只读；`replace` 的调用级回执（task 文档）与列表同次 commit，`list` 纯读取无回执。
+- 提问：问题记录是 `app.neko.question` 文档 family（key = 工具 task id，`fork: "initial"`），`app.neko.questions` 只存未决 id 索引。回答走 `NekoSession.respondQuestion` → gateway `questionRespond`，不是聊天输入；首次有效结算为准，之后返回原记录；`live()` 检查 task owner 链，停止/归档/重启对账把失效未决问题置 `cancelled`。回答 = `{ kind: "answer", optionIds?, text? } | { kind: "skip" }`（选项可与文字并存；`optionIds` 按选项顺序规范化）。`recommended` 只是提示，不预选。排队的 steer / followUp 都等问题结算后才进入上下文。
+- 可选能力：`ChatView.todos` / `ChatView.questions` 缺省 = 旧网关，空 = 支持且无内容；`SessionSummary.awaitingAnswer`（缺省 = 不支持，会话 `status` 仍是 `running`）。前端用 `todosClient` / `questionsClient`（`client-session.ts`）探测，不提升应用协议。问题与选项一律按纯文本显示。
+
 ## Pi 1.3 使用要点（以已安装发布包的类型与行为为准）
 
 - durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord 引用（`Ref`）方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root；ctx 只能给创建它的 host 的引用用（否则 `invalid/foreign_ctx`）。

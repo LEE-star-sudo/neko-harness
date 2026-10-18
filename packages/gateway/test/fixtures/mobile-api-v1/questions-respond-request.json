@@ -1,0 +1,14 @@
+{
+	"description": "questions.respond 请求：回答或跳过（不是聊天输入，不进入排队与历史）。response 为 {kind:\"answer\", optionIds?, text?}（选项与文字至少其一，单选至多一个选项）或 {kind:\"skip\"}；version 取自问题记录。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 43,
+		"method": "questions.respond",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"id": 612,
+			"version": "6f1d0c52-8c1e-4f0d-9d55-1a2f3b4c5d6e",
+			"response": { "kind": "answer", "optionIds": ["lite"], "text": "先用 SQLite，之后再迁移" }
+		}
+	}
+}

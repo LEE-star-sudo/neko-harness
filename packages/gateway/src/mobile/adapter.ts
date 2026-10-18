@@ -141,6 +141,9 @@ type ChatState = {
 	approvalsRevision: number;
 	approvalsRunning: boolean;
 	approvalsDirty: boolean;
+	/** Last revisions told to the app; a view change with a higher one sends the matching `*.changed`. */
+	todosRevision: number;
+	questionsRevision: number;
 };
 
 type SubagentState = {
@@ -336,6 +339,14 @@ export class MobileAdapter {
 				return this.approvalsGet(params);
 			case "approvals.decide":
 				return this.approvalsDecide(params);
+			case "todos.get":
+				return this.todosGet(params);
+			case "questions.list":
+				return this.questionsList(params);
+			case "questions.get":
+				return this.questionsGet(params);
+			case "questions.respond":
+				return this.questionsRespond(params);
 			case "media.read":
 				return this.mediaRead(params);
 			default:
@@ -400,6 +411,7 @@ export class MobileAdapter {
 				lastUsedAt: Math.round(session.lastUsedAt),
 				lastMessageAt: Math.round(messageTime(session)),
 				archived: false,
+				...(session.awaitingAnswer === undefined ? {} : { awaitingAnswer: session.awaitingAnswer }),
 			})),
 			...(offset + page.length < sessions.length ? { nextCursor: String(offset + page.length) } : {}),
 		};
@@ -419,6 +431,7 @@ export class MobileAdapter {
 			lastUsedAt: Math.round(created.lastUsedAt),
 			lastMessageAt: Math.round(messageTime(created)),
 			archived: false,
+			...(created.awaitingAnswer === undefined ? {} : { awaitingAnswer: created.awaitingAnswer }),
 		};
 	}
 
@@ -499,12 +512,16 @@ export class MobileAdapter {
 			approvalsRevision: 0,
 			approvalsRunning: false,
 			approvalsDirty: false,
+			todosRevision: chat.view.value?.todos?.revision ?? 0,
+			questionsRevision: chat.view.value?.questions?.revision ?? 0,
 		};
 		this.chatState = state;
 		const snapshot = projection.snapshot();
 		const stopApprovals = chat.view.subscribe(() => this.refreshApprovals(state));
+		const stopInteractions = chat.view.subscribe(() => this.refreshInteractions(state));
 		state.cleanup = () => {
 			stopApprovals();
+			stopInteractions();
 			stopView();
 		};
 		return { subscriptionId, sessionId: attachment.sessionId, snapshot };
@@ -700,6 +717,71 @@ export class MobileAdapter {
 		} finally {
 			handle.release();
 		}
+	}
+
+	// ——— todos / questions ———
+
+	/** The snapshot's revision is taken with the status in one step, so a later change always sends a notice. */
+	private refreshInteractions(state: ChatState): void {
+		if (this.chatState !== state) return;
+		const view = state.chat.view.value;
+		const todos = view?.todos?.revision;
+		if (todos !== undefined && todos > state.todosRevision) {
+			state.todosRevision = todos;
+			this.sendNotification("todos.changed", { subscriptionId: state.subscriptionId, revision: todos });
+		}
+		const questions = view?.questions?.revision;
+		if (questions !== undefined && questions > state.questionsRevision) {
+			state.questionsRevision = questions;
+			this.sendNotification("questions.changed", { subscriptionId: state.subscriptionId, revision: questions });
+		}
+	}
+
+	private async todosGet(params: { subscriptionId: string }): Promise<unknown> {
+		const state = this.requireChat(params);
+		this.assertAuthorized();
+		const todos = state.chat.view.value?.todos;
+		if (todos === undefined) throw new MobileMethodError("not_found", "todos are not available");
+		return todos;
+	}
+
+	private async questionsList(params: { subscriptionId: string }): Promise<unknown> {
+		const state = this.requireChat(params);
+		this.assertAuthorized();
+		const questions = state.chat.view.value?.questions;
+		if (questions === undefined) throw new MobileMethodError("not_found", "questions are not available");
+		return questions;
+	}
+
+	private async questionsGet(params: { subscriptionId: string; id: number }): Promise<unknown> {
+		const state = this.requireChat(params);
+		this.assertAuthorized();
+		if (state.chat.view.value?.questions === undefined)
+			throw new MobileMethodError("not_found", "questions are not available");
+		const record = await remote(() => state.chat.questionGet({ id: params.id }));
+		if (record === null) throw new MobileMethodError("not_found", "question not found in this session");
+		return record;
+	}
+
+	private async questionsRespond(params: {
+		subscriptionId: string;
+		id: number;
+		version: string;
+		response: unknown;
+	}): Promise<unknown> {
+		const state = this.requireChat(params);
+		this.assertAuthorized();
+		if (state.chat.view.value?.questions === undefined)
+			throw new MobileMethodError("not_found", "questions are not available");
+		return remote(
+			() =>
+				state.chat.questionRespond({
+					id: params.id,
+					version: params.version,
+					response: params.response as never,
+				}),
+			"rejected",
+		);
 	}
 
 	// ——— subagents ———

@@ -1,5 +1,6 @@
 import type { ChatView, NekoModelInfo } from "@neko-harness/core";
 import type { UpdateState } from "@neko-harness/core/application-version";
+import type { QuestionList, TodoList } from "@neko-harness/core/interactions";
 import { useSyncExternalStore } from "react";
 import type {
 	NekoContextSettingsState,
@@ -12,6 +13,17 @@ import type { NekoSessionSummary } from "./gateway.ts";
 export type ConnPhase = "connecting" | "ready" | "reconnecting" | "error";
 
 export type NekoNotice = { level: "info" | "error"; text: string };
+
+/**
+ * The last todo list / pending questions a session's view carried. A dropped connection clears `view`, but the
+ * todo panel and an open question keep showing what was last known (marked offline); `undefined` = the gateway
+ * did not support the field.
+ */
+export type RetainedInteractions = {
+	sessionId: string;
+	todos: TodoList | undefined;
+	questions: QuestionList | undefined;
+};
 
 export type NekoState = {
 	/** 网关连接阶段；error = /api/info 获取失败（不会自动恢复，需刷新页面）。 */
@@ -31,6 +43,7 @@ export type NekoState = {
 	currentSessionId: string | null;
 	/** 当前会话的 ChatView 快照（neko.chat.view 订阅）；切换/断线中可能为 null。 */
 	view: ChatView | null;
+	retained: RetainedInteractions | null;
 	notice: NekoNotice | null;
 };
 
@@ -48,6 +61,7 @@ let state: NekoState = {
 	models: [],
 	currentSessionId: null,
 	view: null,
+	retained: null,
 	notice: null,
 };
 const listeners = new Set<() => void>();
@@ -115,7 +129,12 @@ export const storeActions = {
 		emit({ ...state, currentSessionId });
 	},
 	setView(view: ChatView | null): void {
-		emit({ ...state, view });
+		const sessionId = state.currentSessionId;
+		const retained =
+			view !== null && sessionId !== null
+				? { sessionId, todos: view.todos, questions: view.questions }
+				: state.retained;
+		emit({ ...state, view, retained });
 	},
 	notice(notice: NekoNotice): void {
 		emit({ ...state, notice });

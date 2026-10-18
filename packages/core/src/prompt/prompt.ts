@@ -35,6 +35,12 @@ const TOOL_GUIDELINES: Record<string, readonly string[]> = {
 
 	web_search: ["Use web_search for current information from the internet instead of guessing."],
 	web_extract: ["Use web_extract to read the full content of a web page when you have its URL."],
+	todo: [
+		'Use todo for multi-step work: {action:"list"} reads the saved list, {action:"replace", items:[{id, text, status}]} overwrites the whole ordered list (status pending, in_progress or completed; [] clears it). Keep a short list and update it as you go, keep an item\'s id when you update the same task, and mark it completed only after the work is actually done. If you are unsure what the list holds (for example after the context was compacted), read it with list first instead of guessing or creating a second list. Do not create a list for simple questions or one-step tasks.',
+	],
+	ask_user: [
+		"Use ask_user {question, options?: [{id, label, description?, recommended?}], multiple?} only when you need a decision or information you cannot determine yourself from the code, the environment or a reasonable assumption; do not ask about things you can find out. Keep the question short and self-contained. Make options short, distinct and understandable on their own, mark a clear preference with recommended, and set multiple: true only when several options may apply (it needs at least 2 options). The user can always type text instead of or in addition to choosing, or skip. The call returns when the user answers or skips; do not poll. A skip is not consent or a preference: continue on your best judgment, state the assumptions you make, and do not ask the same question again unless circumstances change. Independent questions may be asked in one turn and are shown one at a time; ask dependent ones in separate turns. Never ask for passwords, API keys or other secrets. An answer is not approval to run a command and never widens tool permissions.",
+	],
 };
 
 const GENERIC_RULES = ["Be concise in your responses", "Show file paths clearly when working with files"];

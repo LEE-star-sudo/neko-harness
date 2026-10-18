@@ -5,6 +5,7 @@ import type { ImageMetadata } from "./image-metadata.ts";
 import { type DefaultImagePrompt, savedDefaultImagePrompt } from "./image-prompt.ts";
 import type { ImageInfo } from "./images.ts";
 import { type InputData, NekoInput } from "./input.ts";
+import type { QuestionList, TodoList } from "./interactions.ts";
 import type { JobSummary } from "./jobs.ts";
 import { projectQueued, type QueuedInput } from "./queued.ts";
 import type { NekoModelInfo, NekoModelRef } from "./runtime.ts";
@@ -40,6 +41,10 @@ export type ChatView = {
 	jobs?: JobSummary[];
 	/** User inputs waiting in the inbox, in acceptance order; absent on a gateway without queue visibility. */
 	queued?: QueuedInput[];
+	/** The model-maintained todo list; absent on a gateway without todos, empty items when supported with none. */
+	todos?: TodoList;
+	/** Questions waiting for the user (bounded summaries); absent on a gateway without ask_user. */
+	questions?: QuestionList;
 	rounds?: Delegation[];
 	taskUsage?: UsageTotals;
 	/** Latest successful answer in the active context; unknown after compaction until a new answer. */
@@ -123,9 +128,26 @@ export type ChatItem = { order?: number } & (
 			diffRemoved: number | null;
 			/** write diff 因行数或字节预算截断；缺省为 false。 */
 			diffTruncated?: boolean;
+			/** Structured state of `todo` / `ask_user` calls, from the persisted tool details; never parsed from text. */
+			interaction?: ToolInteraction;
 	  }
 	| { type: "system"; key: string; id: number; text: string; jobId?: string }
 );
+
+/** What a todo or ask_user call shows in history: its question and settlement, or its resulting list progress. */
+export type ToolInteraction =
+	| {
+			kind: "ask_user";
+			id: number;
+			question: string;
+			multiple: boolean;
+			options: { id: string; label: string; recommended?: boolean }[];
+			status: "pending" | "answered" | "skipped" | "cancelled";
+			optionIds?: string[];
+			labels?: string[];
+			text?: string | null;
+	  }
+	| { kind: "todo"; action: "list" | "replace"; revision: number; completed: number; total: number };
 
 /** 正在生成的一轮（live.generation.message + live.tools 的合并投影）。 */
 export type StreamingView = {
@@ -173,10 +195,84 @@ export function truncateMiddle(text: string, maxWidth: number): string {
 	return `${text.slice(0, half)}…${text.slice(text.length - (maxWidth - 1 - half))}`;
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+const strings = (value: unknown): string[] | undefined =>
+	Array.isArray(value) && value.every((v) => typeof v === "string") ? (value as string[]) : undefined;
+
+/** Read the structured `details` of a todo / ask_user result defensively; anything unexpected yields `undefined`. */
+export function toolInteraction(name: string, details: unknown): ToolInteraction | undefined {
+	if (!isRecord(details)) return undefined;
+	if (name === "todo") {
+		const { action, revision, completed, total } = details;
+		return (action === "list" || action === "replace") &&
+			typeof revision === "number" &&
+			typeof completed === "number" &&
+			typeof total === "number"
+			? { kind: "todo", action, revision, completed, total }
+			: undefined;
+	}
+	if (name !== "ask_user") return undefined;
+	const { id, question, multiple, options, status } = details;
+	if (
+		typeof id !== "number" ||
+		typeof question !== "string" ||
+		typeof multiple !== "boolean" ||
+		!Array.isArray(options) ||
+		(status !== "pending" && status !== "answered" && status !== "skipped" && status !== "cancelled")
+	)
+		return undefined;
+	const optionList = options.flatMap((o) =>
+		isRecord(o) && typeof o.id === "string" && typeof o.label === "string"
+			? [{ id: o.id, label: o.label, ...(o.recommended === true ? { recommended: true } : {}) }]
+			: [],
+	);
+	const optionIds = strings(details.optionIds);
+	const labels = strings(details.labels);
+	return {
+		kind: "ask_user",
+		id,
+		question,
+		multiple,
+		options: optionList,
+		status,
+		...(optionIds ? { optionIds } : {}),
+		...(labels ? { labels } : {}),
+		...(typeof details.text === "string" || details.text === null ? { text: details.text as string | null } : {}),
+	};
+}
+
+const interactionField = (name: string, details: unknown): { interaction?: ToolInteraction } => {
+	const interaction = toolInteraction(name, details);
+	return interaction ? { interaction } : {};
+};
+
 /** 内置工具的参数摘要；未知工具退回 JSON。 */
 export function summarizeToolCall(name: string, args: unknown): ToolSummary {
 	const record = (args ?? {}) as Record<string, unknown>;
 	switch (name) {
+		case "todo": {
+			const items = Array.isArray(record.items) ? record.items : [];
+			const lines = items.flatMap((item) => {
+				if (!isRecord(item)) return [];
+				const mark = item.status === "completed" ? "[x]" : item.status === "in_progress" ? "[~]" : "[ ]";
+				return [`${mark} ${String(item.id)}: ${String(item.text)}`];
+			});
+			return record.action === "replace"
+				? { args: `Update todos (${items.length} items)`, detail: lines.join("\n") }
+				: { args: "Read todos" };
+		}
+		case "ask_user": {
+			const question = typeof record.question === "string" ? record.question : "";
+			const options = Array.isArray(record.options) ? record.options : [];
+			const lines = options.flatMap((o) =>
+				isRecord(o) ? [`- ${String(o.label)}${o.recommended === true ? " (recommended)" : ""}`] : [],
+			);
+			return {
+				args: truncateMiddle(question.replace(/\s+/g, " "), 100),
+				detail: [question, ...(lines.length ? ["", ...lines] : [])].join("\n"),
+			};
+		}
 		case "subagent":
 			return {
 				args: record.action === "list" ? "List agents" : `${record.agentId ?? record.type}: ${record.title}`,
@@ -353,6 +449,7 @@ export function projectChatView(
 				diff,
 				diffAdded: counts?.added ?? null,
 				diffRemoved: counts?.removed ?? null,
+				...interactionField(message.toolName, message.details),
 			});
 		}
 	}
@@ -460,6 +557,7 @@ export function projectChatView(
 						diffAdded: synthesized?.added ?? null,
 						diffRemoved: synthesized?.removed ?? null,
 						diffTruncated: synthesized?.truncated ?? false,
+						...interactionField(block.name, (slot as { details?: unknown } | undefined)?.details),
 					});
 				}
 			}

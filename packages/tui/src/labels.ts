@@ -16,6 +16,8 @@ export const commands: SlashCommand[] = [
 	{ name: "model", description: "Choose a model" },
 	{ name: "agents", description: "View agent tasks and activity" },
 	{ name: "jobs", description: "View background jobs" },
+	{ name: "todos", description: "View the assistant's todo list" },
+	{ name: "question", description: "Answer the assistant's question (Ctrl+O)" },
 	{ name: "search", description: "Choose the web search provider (Tavily/DeepSeek)" },
 	{ name: "context", description: "Tune context compaction and tool result pruning" },
 	{ name: "theme", description: "Choose color theme (auto/light/dark)" },

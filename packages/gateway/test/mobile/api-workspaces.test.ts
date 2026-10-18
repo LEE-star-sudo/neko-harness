@@ -408,7 +408,16 @@ describe("mobile api v1 workspaces and sessions", () => {
 			const hello = (await client.nextMessage()) as {
 				result: { capabilities: string[]; limits: Record<string, number> };
 			};
-			expect(hello.result.capabilities).toEqual(["workspaces", "sessions", "chat", "subagents", "approvals", "media"]);
+			expect(hello.result.capabilities).toEqual([
+				"workspaces",
+				"sessions",
+				"chat",
+				"subagents",
+				"approvals",
+				"media",
+				"todos",
+				"questions",
+			]);
 			expect(hello.result.limits.maxFrameBytes).toBe(262144);
 			client.close(1000, "done");
 			await client.waitForClose();

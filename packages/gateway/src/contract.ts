@@ -1,5 +1,6 @@
 /** Browser-safe Chord 1.3 contracts. All wire values are validated schemas. */
 import { type HostNamed, hostNamed, method, type Ref, type RemoteContract, remote } from "@earendil-works/chord";
+import { QUESTION_LIMITS, TODO_LIMITS } from "@neko-harness/core/interactions";
 import { type Static, type TSchema, Type } from "typebox";
 
 /** Every gateway service lives on the one host that serves it; the server id is verified through application info. */
@@ -160,6 +161,91 @@ export const SteerResultSchema = Type.Object({
 	text: Type.Optional(str),
 	images: Type.Optional(integer),
 });
+export const TodoItemSchema = Type.Object(
+	{
+		id: Type.String({ minLength: 1, maxLength: TODO_LIMITS.idChars }),
+		text: Type.String({ minLength: 1, maxLength: TODO_LIMITS.textChars }),
+		status: Type.Enum(["pending", "in_progress", "completed"]),
+	},
+	{ additionalProperties: false },
+);
+export const TodoListSchema = Type.Object({
+	revision: integer,
+	items: Type.Array(TodoItemSchema, { maxItems: TODO_LIMITS.maxItems }),
+});
+export const QuestionOptionSchema = Type.Object(
+	{
+		id: Type.String({ minLength: 1, maxLength: QUESTION_LIMITS.optionIdChars }),
+		label: Type.String({ minLength: 1, maxLength: QUESTION_LIMITS.labelChars }),
+		description: Type.Optional(Type.String({ maxLength: QUESTION_LIMITS.descriptionChars })),
+		recommended: Type.Optional(bool),
+	},
+	{ additionalProperties: false },
+);
+const questionStatus = Type.Enum(["pending", "answered", "skipped", "cancelled"]);
+/** Bounded entry of the pending list; the full record is read with `questionGet`. */
+export const QuestionSummarySchema = Type.Object({
+	id: integer,
+	version: str,
+	preview: Type.String({ maxLength: QUESTION_LIMITS.previewChars }),
+	multiple: bool,
+	optionCount: integer,
+	createdAt: num,
+});
+export const QuestionListSchema = Type.Object({
+	revision: integer,
+	pending: Type.Array(QuestionSummarySchema, { maxItems: QUESTION_LIMITS.maxPending }),
+});
+export const QuestionRecordSchema = Type.Object({
+	id: integer,
+	callId: str,
+	version: str,
+	question: Type.String({ maxLength: QUESTION_LIMITS.questionChars }),
+	multiple: bool,
+	options: Type.Array(QuestionOptionSchema, { maxItems: QUESTION_LIMITS.maxOptions }),
+	status: questionStatus,
+	answer: Type.Union([
+		Type.Object({
+			optionIds: Type.Array(Type.String(), { maxItems: QUESTION_LIMITS.maxOptions }),
+			text: Type.Union([Type.String({ maxLength: QUESTION_LIMITS.textChars }), nil]),
+		}),
+		nil,
+	]),
+	createdAt: num,
+	settledAt: Type.Union([num, nil]),
+});
+export const QuestionResponseSchema = Type.Union([
+	Type.Object(
+		{
+			kind: Type.Literal("answer"),
+			optionIds: Type.Optional(Type.Array(Type.String(), { maxItems: QUESTION_LIMITS.maxOptions })),
+			text: Type.Optional(Type.String({ maxLength: QUESTION_LIMITS.textChars })),
+		},
+		{ additionalProperties: false },
+	),
+	Type.Object({ kind: Type.Literal("skip") }, { additionalProperties: false }),
+]);
+/** What a todo / ask_user call shows in history, from the persisted tool details. */
+export const ToolInteractionSchema = Type.Union([
+	Type.Object({
+		kind: Type.Literal("ask_user"),
+		id: integer,
+		question: str,
+		multiple: bool,
+		options: Type.Array(Type.Object({ id: str, label: str, recommended: Type.Optional(bool) })),
+		status: questionStatus,
+		optionIds: Type.Optional(Type.Array(str)),
+		labels: Type.Optional(Type.Array(str)),
+		text: Type.Optional(Type.Union([str, nil])),
+	}),
+	Type.Object({
+		kind: Type.Literal("todo"),
+		action: Type.Enum(["list", "replace"]),
+		revision: integer,
+		completed: integer,
+		total: integer,
+	}),
+]);
 export const ChatViewSchema = Type.Object({
 	historyBefore: Type.Optional(Type.Union([integer, nil])),
 	agents: Type.Optional(Type.Array(SubagentSummarySchema)),
@@ -167,6 +253,10 @@ export const ChatViewSchema = Type.Object({
 	jobs: Type.Optional(Type.Array(JobSummarySchema)),
 	/** Absent on a gateway without queue visibility; empty means supported with none. */
 	queued: Type.Optional(Type.Array(QueuedInputSchema)),
+	/** Absent on a gateway without todos; empty items means supported with none. */
+	todos: Type.Optional(TodoListSchema),
+	/** Absent on a gateway without ask_user; empty `pending` means supported with none. */
+	questions: Type.Optional(QuestionListSchema),
 	rounds: Type.Optional(Type.Array(DelegationSchema)),
 	subagents: Type.Optional(Type.Array(DelegationSchema)),
 	taskUsage: Type.Optional(usage),
@@ -245,6 +335,7 @@ export const ChatViewSchema = Type.Object({
 				diffAdded: Type.Union([num, nil]),
 				diffRemoved: Type.Union([num, nil]),
 				diffTruncated: Type.Optional(bool),
+				interaction: Type.Optional(ToolInteractionSchema),
 			}),
 			Type.Object({
 				type: Type.Literal("system"),
@@ -267,6 +358,8 @@ export const SessionSummarySchema = Type.Object({
 	lastMessageAt: Type.Union([num, nil]),
 	model: Type.Union([model, nil]),
 	status: Type.Enum(["idle", "running", "error"]),
+	/** A question of this session waits for an answer; absent on a gateway that cannot tell. */
+	awaitingAnswer: Type.Optional(bool),
 	id: str,
 });
 export const DirectoryStateSchema = Type.Object({ revision: integer, sessions: Type.Array(SessionSummarySchema) });
@@ -401,6 +494,14 @@ export const NekoChat = contract("neko.chat", {
 				abort: rpc(nil, nil),
 				withdraw: rpc(Type.Object({ id: integer }, { additionalProperties: false }), WithdrawResultSchema),
 				steer: rpc(Type.Object({ id: integer }, { additionalProperties: false }), SteerResultSchema),
+				questionGet: rpc(
+					Type.Object({ id: integer }, { additionalProperties: false }),
+					Type.Union([QuestionRecordSchema, nil]),
+				),
+				questionRespond: rpc(
+					Type.Object({ id: integer, version: str, response: QuestionResponseSchema }, { additionalProperties: false }),
+					QuestionRecordSchema,
+				),
 				usage: rpc(nil, usage),
 				skills: rpc(nil, Type.Array(Type.Object({ name: str, description: str, location: str, level }))),
 				jobOutput: rpc(
@@ -641,6 +742,12 @@ export type WireJobOutput = Static<typeof JobOutputSchema>;
 export type WireQueuedInput = Static<typeof QueuedInputSchema>;
 export type WireWithdrawResult = Static<typeof WithdrawResultSchema>;
 export type WireSteerResult = Static<typeof SteerResultSchema>;
+export type WireTodoList = Static<typeof TodoListSchema>;
+export type WireTodoItem = Static<typeof TodoItemSchema>;
+export type WireQuestionList = Static<typeof QuestionListSchema>;
+export type WireQuestionSummary = Static<typeof QuestionSummarySchema>;
+export type WireQuestionRecord = Static<typeof QuestionRecordSchema>;
+export type WireQuestionResponse = Static<typeof QuestionResponseSchema>;
 export type NekoWorkspaces = Ref<typeof NekoWorkspaces>;
 export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Ref<typeof NekoCredentials>;

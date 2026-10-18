@@ -1,21 +1,25 @@
 import type { SubagentSummary } from "@neko-harness/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ApprovalInbox } from "../components/approval-inbox";
 import { Composer } from "../components/composer";
 import { JobPanel } from "../components/job-panel";
 import { MessageList } from "../components/message-list";
 import { DismissButton, folderName, useMobile } from "../components/primitives";
+import { QuestionDock } from "../components/question-card";
 import { SessionList } from "../components/session-list";
 import { SubagentPanel } from "../components/subagent-panel";
+import { TodoPanel } from "../components/todo-panel";
 import { TopBar } from "../components/top-bar";
+import { useAwaitingTitle } from "../lib/awaiting-title";
 import { appActions, reportError } from "../lib/bootstrap";
+import { questionState, todoState } from "../lib/interactions";
 import { MOBILE_QUERY } from "../lib/layout";
 import { storeActions, useNekoState } from "../lib/store";
 
 const INFO_NOTICE_MS = 8000;
 
 export function ChatPage() {
-	const { view, phase, notice, operating, workspaceRoot, currentSessionId } = useNekoState();
+	const { view, phase, notice, operating, workspaceRoot, currentSessionId, retained } = useNekoState();
 	const mobile = useMobile();
 	useEffect(() => {
 		if (notice?.level !== "info") return;
@@ -52,6 +56,12 @@ export function ChatPage() {
 	// Tied to the session it was opened in, so switching sessions closes it.
 	const [jobsOpenFor, setJobsOpenFor] = useState<string | null>(null);
 	const jobsOpen = jobsOpenFor !== null && jobsOpenFor === currentSessionId;
+	// The todo list opens in the page flow for the session it was opened in; an empty list has no panel at all.
+	const todoPanelId = useId();
+	const [todosOpenFor, setTodosOpenFor] = useState<string | null>(null);
+	const todos = todoState({ view, phase, operating, currentSessionId, retained });
+	const todosOpen = todosOpenFor !== null && todosOpenFor === currentSessionId && (todos?.total ?? 0) > 0;
+	useAwaitingTitle(questionState({ view, phase, operating, currentSessionId, retained })?.pending.length ?? 0);
 	const selectIdentity = (id: string, taskId?: number) => {
 		if (!currentSessionId) return;
 		setJobsOpenFor(null);
@@ -90,6 +100,11 @@ export function ChatPage() {
 					conn={phase}
 					onToggleSessions={() => setSidebarOpen(!sidebarOpen)}
 					jobsOpen={jobsOpen}
+					todos={{
+						open: todosOpen,
+						panelId: todoPanelId,
+						onToggle: () => setTodosOpenFor(todosOpen ? null : (currentSessionId ?? null)),
+					}}
 					onToggleJobs={() => {
 						if (!jobsOpen && currentSessionId)
 							setPanels((previous) =>
@@ -114,6 +129,7 @@ export function ChatPage() {
 					</div>
 				)}
 				<main id="main-content" tabIndex={-1} className="flex min-h-0 flex-1 flex-col focus:outline-none">
+					{todosOpen && <TodoPanel id={todoPanelId} onClose={() => setTodosOpenFor(null)} />}
 					{!currentSessionId && phase === "ready" && !operating ? (
 						<div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
 							<h1 className="text-xl font-semibold text-ink-900">{folderName(workspaceRoot)}</h1>
@@ -154,7 +170,14 @@ export function ChatPage() {
 							}
 						/>
 					)}
-					{!approvalInPanel && <ApprovalInbox />}
+					{/* Gives way last: the todo panel and the message list shrink first, then this stack scrolls. */}
+					<div
+						className="flex max-h-[60dvh] shrink-[0.01] flex-col overflow-y-auto overscroll-contain"
+						data-attention-stack
+					>
+						{!approvalInPanel && <ApprovalInbox />}
+						<QuestionDock />
+					</div>
 					<Composer disabled={phase !== "ready" || operating} busy={busy} status={status} />
 				</main>
 			</div>

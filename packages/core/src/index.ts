@@ -37,6 +37,32 @@ export {
 export type { DefaultImagePrompt } from "./image-prompt.ts";
 export { decodeImage, IMAGE_LIMITS, type ImageInfo, prepareImage, terminalImage } from "./images.ts";
 export {
+	describeSettlement,
+	draftProblem,
+	draftResponse,
+	emptyQuestionDraft,
+	InteractionInputError,
+	QUESTION_LIMITS,
+	type QuestionAnswer,
+	type QuestionArgs,
+	type QuestionDraft,
+	type QuestionList,
+	type QuestionOption,
+	type QuestionRecord,
+	type QuestionResponse,
+	type QuestionStatus,
+	type QuestionSummary,
+	TODO_LIMITS,
+	TODO_STATUSES,
+	type TodoItem,
+	type TodoList,
+	type TodoStatus,
+	toggleDraftOption,
+	validateQuestionArgs,
+	validateQuestionResponse,
+	validateTodoItems,
+} from "./interactions.ts";
+export {
 	JOB_LIMITS,
 	type JobOutputRead,
 	type JobReason,
@@ -52,7 +78,9 @@ export {
 	type StreamingToolCall,
 	type StreamingView,
 	summarizeToolCall,
+	type ToolInteraction,
 	type ToolSummary,
+	toolInteraction,
 	toolResultText,
 	totalUsage,
 	truncateMiddle,
@@ -102,6 +130,8 @@ export {
 	SubagentsDoc,
 	summarizeSubagents,
 } from "./subagents.ts";
+export { TodosDoc } from "./todos.ts";
 export { ApprovalsDoc, type ToolApproval, ToolApprovals } from "./tool-approvals.ts";
 export { mergeTranscriptItems } from "./transcript-items.ts";
+export { QuestionDoc, QuestionsDoc, UserQuestions } from "./user-questions.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";

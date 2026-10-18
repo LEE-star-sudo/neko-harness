@@ -1,0 +1,11 @@
+{
+	"description": "questions.changed 通知：未决问题集合变化（新建、回答、跳过、取消）的失效提示；App 重新调用 questions.list，只接受 revision 不低于已持有的结果。",
+	"message": {
+		"jsonrpc": "2.0",
+		"method": "questions.changed",
+		"params": {
+			"subscriptionId": "chat-1a2b3c4d-1",
+			"revision": 6
+		}
+	}
+}

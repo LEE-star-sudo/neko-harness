@@ -3,6 +3,7 @@ import type { ConnPhase } from "../lib/store";
 import { useNekoState } from "../lib/store";
 import { ExportMenu } from "./export-menu";
 import { folderName, Icon } from "./primitives";
+import { TodoButton } from "./todo-panel";
 import { UpdateNotice } from "./update-notice";
 
 const phases: Record<ConnPhase, string> = {
@@ -17,6 +18,7 @@ export function TopBar(props: {
 	sidebarOpen?: boolean;
 	onToggleJobs?: () => void;
 	jobsOpen?: boolean;
+	todos?: { open: boolean; onToggle: () => void; panelId: string };
 }) {
 	const { workspaceRoot, currentSessionId, operating, sessions, view } = useNekoState();
 	// `jobs` is absent on a gateway without background jobs, so the entry stays hidden there.
@@ -49,6 +51,9 @@ export function TopBar(props: {
 				>
 					{operating ? "切换中…" : phases[props.conn]}
 				</output>
+				{props.todos && (
+					<TodoButton open={props.todos.open} onToggle={props.todos.onToggle} panelId={props.todos.panelId} />
+				)}
 				{jobs !== undefined && jobs.length > 0 && props.onToggleJobs && (
 					<button
 						type="button"

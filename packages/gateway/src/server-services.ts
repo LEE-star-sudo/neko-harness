@@ -148,6 +148,7 @@ export async function createNekoServerServices(options: {
 			lastMessageAt: info.lastMessageAt,
 			model: info.model,
 			status: info.status,
+			awaitingAnswer: info.awaitingAnswer,
 		}));
 
 	const readStatuses = async (): Promise<NekoCredentialState["statuses"]> =>

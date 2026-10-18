@@ -24,6 +24,7 @@ export function helpLines(platform: string = process.platform): string[] {
 		["Up / Down", "Browse previous inputs in this session"],
 		["Ctrl+C", "Stop while running; exit when idle"],
 		["Ctrl+S", "Open sessions"],
+		["Ctrl+O", "Open or close the assistant's question"],
 		[platform === "win32" ? "Alt+V" : "Ctrl+V", "Paste clipboard image or text"],
 		["/", "Complete commands"],
 		["@", "Complete workspace files"],
@@ -60,6 +61,26 @@ export function helpLines(platform: string = process.platform): string[] {
 		["↑ / ↓", "Move between queued messages"],
 		["Enter", "Steer the selected message (joins the run after the current tool round)"],
 		["Esc", "Withdraw the selected message into the editor; the run keeps going"],
+	]);
+	section("Todos", [
+		["/todos", "View the assistant's todo list (read-only)"],
+		["↑↓ / Wheel", "Scroll a long list"],
+		["PgUp / PgDn", "Page through the list"],
+		["Esc", "Close"],
+	]);
+	section("Questions", [
+		["Ctrl+O", "Open or close the question panel (also /question)"],
+		["↑ / ↓", "Move between options"],
+		["1-9", "Jump to an option"],
+		["Space", "Select (single choice) or toggle (multiple choice); nothing is preselected"],
+		["Tab", "Switch between the options and the note or answer field"],
+		["Enter", "Submit the answer; on 跳过此问题 it skips the question"],
+		["PgUp / PgDn", "Scroll a long question"],
+		["[ / ]", "Switch between several waiting questions"],
+		["Esc", "Close the panel only: the draft is kept, the question stays open and the run keeps going"],
+		["Ctrl+C", "Stop the run, which cancels the question"],
+		["Messages", "Typed messages stay queued until the question is settled; they are never the answer"],
+		["Approvals", "A waiting approval keeps the keys until you press Ctrl+O; Esc then returns to it"],
 	]);
 	section("Web search", [
 		["/search", "Choose the web search provider"],

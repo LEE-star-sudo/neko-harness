@@ -1,0 +1,23 @@
+{
+	"description": "questions.respond 结果：持久保存的最终记录。第一次有效结算为准；他端已结算或回执丢失后重试，得到的是已保存的终态与实际答案，不覆盖。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 43,
+		"result": {
+			"id": 612,
+			"callId": "call_612",
+			"version": "6f1d0c52-8c1e-4f0d-9d55-1a2f3b4c5d6e",
+			"question": "使用哪种数据库？",
+			"multiple": false,
+			"options": [
+				{ "id": "pg", "label": "PostgreSQL", "recommended": true },
+				{ "id": "my", "label": "MySQL" },
+				{ "id": "lite", "label": "SQLite", "description": "嵌入式，无需服务" }
+			],
+			"status": "answered",
+			"answer": { "optionIds": ["lite"], "text": "先用 SQLite，之后再迁移" },
+			"createdAt": 1730100000000,
+			"settledAt": 1730100060000
+		}
+	}
+}

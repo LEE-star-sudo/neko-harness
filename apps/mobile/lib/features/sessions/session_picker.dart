@@ -227,12 +227,33 @@ class _SessionPickerState extends ConsumerState<SessionPicker> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      subtitle: s.preview.isEmpty
+                      subtitle: s.preview.isEmpty && !s.waitingForAnswer
                           ? null
-                          : Text(
-                              s.preview,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                          : Row(
+                              children: <Widget>[
+                                // 等待回答取代“运行中”：电脑端未声明（字段缺省）时不显示任何标记。
+                                if (s.waitingForAnswer)
+                                  Padding(
+                                    key: Key('session-awaiting-${s.id}'),
+                                    padding: EdgeInsets.only(
+                                      right: s.preview.isEmpty
+                                          ? 0
+                                          : NekoSpace.sm,
+                                    ),
+                                    child: Text(
+                                      '等待回答',
+                                      style: context.small(tokens.warning),
+                                    ),
+                                  ),
+                                if (s.preview.isNotEmpty)
+                                  Expanded(
+                                    child: Text(
+                                      s.preview,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
                             ),
                       trailing: Text(
                         relativeTime(s.messageAt),

@@ -1,0 +1,15 @@
+{
+	"description": "todos.get 结果：有序列表与 revision（只增）；条目 ≤ 100、id ≤ 64、text ≤ 256 个 UTF-16 码元，整表 JSON ≤ 64 KiB。",
+	"message": {
+		"jsonrpc": "2.0",
+		"id": 40,
+		"result": {
+			"revision": 4,
+			"items": [
+				{ "id": "inspect", "text": "阅读现有会话存储", "status": "completed" },
+				{ "id": "design", "text": "设计迁移步骤", "status": "in_progress" },
+				{ "id": "verify", "text": "运行回归测试", "status": "pending" }
+			]
+		}
+	}
+}

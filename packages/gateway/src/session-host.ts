@@ -86,9 +86,14 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			changes.some(
 				(change) =>
 					change.type === "document" &&
-					((["app.neko.delegations", "app.neko.approvals", "app.neko.subagents", "app.neko.jobs"].includes(
-						change.record.kind,
-					) &&
+					(([
+						"app.neko.delegations",
+						"app.neko.approvals",
+						"app.neko.subagents",
+						"app.neko.jobs",
+						"app.neko.todos",
+						"app.neko.questions",
+					].includes(change.record.kind) &&
 						change.conversationId === session.id) ||
 						(change.record.kind === "pi.usage" &&
 							change.conversationId !== undefined &&
@@ -127,6 +132,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 				{ models: runtime.listModels(), contextEntries: view.value.entries, compaction },
 			);
 			const jobs = (await session.jobs()).map(clipJob);
+			const [todos, questions] = await Promise.all([session.todos(), session.questions()]);
 			const subagents = await listDelegations(runtime.harness, session.id, context);
 			const approvals = await runtime.approvals.list(session.id, context);
 			for (const entry of subagents)
@@ -150,6 +156,8 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			return {
 				...projected,
 				jobs,
+				todos,
+				questions,
 				agents: summarizeSubagents(
 					subagents,
 					(await runtime.harness.snapshot(SubagentsDoc, session.id, context))?.items,
@@ -375,6 +383,14 @@ export function serveSessions(host: Host<GatewayPrincipal>, runtime: NekoRuntime
 			},
 			withdraw: ({ id }) => projection.value.session.withdraw(id),
 			steer: ({ id }) => projection.value.session.steer(id),
+			questionGet: async ({ id }) => (await projection.value.session.question(id)) ?? null,
+			questionRespond: async ({ id, version, response }) => {
+				try {
+					return await projection.value.session.respondQuestion(id, version, response);
+				} catch (error) {
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot answer the question");
+				}
+			},
 			skills: () => runtime.listSkills(projection.value.session.id),
 			jobOutput: async ({ jobId, since }) => {
 				try {

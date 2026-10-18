@@ -188,6 +188,7 @@ export function mapChatItem(raw: RawItem, owner: ProjectionOwner): MobileChatIte
 			if (raw.diffTruncated !== undefined) tool.diffTruncated = raw.diffTruncated;
 			if (raw.durationMs !== null) tool.durationMs = raw.durationMs;
 			if (raw.note) tool.note = raw.note;
+			if (raw.interaction !== undefined) tool.interaction = raw.interaction;
 			item = { key: raw.key, type: "tool", tool, ...images(raw.images) };
 			break;
 		}
@@ -246,6 +247,18 @@ export function mapStatus(view: ChatView, options: { readonly readonly?: boolean
 			: {
 					queued: view.queued.map(({ id, mode, preview, images }) => ({ id, mode, preview, images })),
 				}),
+		...(view.todos === undefined
+			? {}
+			: {
+					todos: {
+						revision: view.todos.revision,
+						count: view.todos.items.length,
+						completed: view.todos.items.filter((item) => item.status === "completed").length,
+					},
+				}),
+		...(view.questions === undefined
+			? {}
+			: { questions: { revision: view.questions.revision, pendingCount: view.questions.pending.length } }),
 		status: view.status,
 		usage: mapUsage(view.usage),
 		...(view.taskUsage === undefined ? {} : { taskUsage: mapUsage(view.taskUsage) }),

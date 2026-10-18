@@ -71,3 +71,38 @@ it("escapes instruction paths embedded in XML attributes", async () => {
 	const output = await Promise.all((extension.sections ?? []).map((s) => s.render(shared, BACKGROUND_CONTEXT)));
 	expect(output.join("\n")).toContain('path="/project/&quot;quoted&quot;/AGENTS.md"');
 });
+
+it("adds todo and ask_user rules only for the tools that are enabled, keeping the five sections", async () => {
+	const home = directory();
+	const workspace = directory();
+	const both = await renderAll(home, workspace, ["read", "todo", "ask_user"]);
+	expect(both.keys).toEqual(["preamble", "rules", "project_context", "skills", "cwd"]);
+	expect(both.out.rules).toContain('{action:"list"}');
+	expect(both.out.rules).toContain('{action:"replace", items:[{id, text, status}]}');
+	expect(both.out.rules).toContain("Do not create a list for simple questions");
+	expect(both.out.rules).toContain("after the context was compacted");
+	expect(both.out.rules).toContain(
+		"ask_user {question, options?: [{id, label, description?, recommended?}], multiple?}",
+	);
+	expect(both.out.rules).toContain("A skip is not consent");
+	expect(both.out.rules).toContain("do not poll");
+	expect(both.out.rules).toContain("do not ask about things you can find out");
+	expect(both.out.rules).toContain("Never ask for passwords, API keys or other secrets");
+	expect(both.out.rules).toContain("never widens tool permissions");
+	// The tool contract has no batch or form fields, so the rules must not invent them.
+	expect(both.out.rules).not.toMatch(/\bquestions\s*:|JSON schema|\bbatch|\bform\b/i);
+	const todoOnly = await renderAll(home, workspace, ["read", "todo"]);
+	expect(todoOnly.out.rules).toContain("Use todo for multi-step work");
+	expect(todoOnly.out.rules).not.toContain("ask_user");
+	const none = await renderAll(home, workspace, ["read", "bash"]);
+	expect(none.out.rules).not.toContain("todo");
+	expect(none.out.rules).not.toContain("ask_user");
+	expect(none.keys).toEqual(both.keys);
+});
+
+it("keeps the todo list body out of the system prompt", async () => {
+	const home = directory();
+	const workspace = directory();
+	const { out } = await renderAll(home, workspace, ["read", "todo"]);
+	expect(Object.values(out).join("\n")).not.toContain("revision");
+});
