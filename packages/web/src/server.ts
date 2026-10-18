@@ -10,6 +10,8 @@ import { ApplicationProtocolError, RUNNING_VERSION } from "@neko-harness/core/ap
 import { connectNekoGateway, readGatewayPortFile } from "@neko-harness/gateway";
 import { ensureNekoGateway, type GatewayEnsureOptions, type GatewayHandle } from "./gateway-spawn.ts";
 import { createMobileAdminContext, handleMobileAdminRequest, type MobileAdminProxyContext } from "./mobile-admin.ts";
+import { handleOpenRequest } from "./open-api.ts";
+import { createOpenService, type OpenService } from "./open-target.ts";
 
 /**
  * neko web 服务器（静态托管形态）：确保 gateway 在运行（不在则 spawn 子进程），
@@ -28,6 +30,8 @@ export type NekoWebOptions = {
 	readonly gateway?: Omit<GatewayEnsureOptions, "storagePath" | "signal"> & { readonly storagePath?: string };
 	/** 启动阶段被中断（如 Ctrl+C）时终止已拉起的 gateway 并放弃启动。 */
 	readonly signal?: AbortSignal;
+	/** 打开工作区的本机启动能力；默认探测系统，测试可注入。 */
+	readonly openService?: OpenService;
 };
 
 export type NekoWebServer = {
@@ -66,6 +70,7 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 		...(options.signal !== undefined ? { signal: options.signal } : {}),
 	});
 
+	const openService = options.openService ?? createOpenService();
 	let mobileAdmin: MobileAdminProxyContext | undefined;
 	let closing: Promise<void> | undefined;
 	const server: Server = createServer((request, response) => {
@@ -82,6 +87,7 @@ export async function startWebServer(options: NekoWebOptions = {}): Promise<Neko
 			storagePath,
 			versionOptions: options.versionOptions,
 			mobileAdmin: context,
+			openService,
 		}).catch((error: unknown) => {
 			if (!response.headersSent) response.writeHead(500);
 			response.end(error instanceof Error ? error.message : String(error));
@@ -141,9 +147,11 @@ async function handleHttp(
 		storagePath: string;
 		versionOptions?: { runningVersion?: string; manifest?: string };
 		mobileAdmin: MobileAdminProxyContext;
+		openService: OpenService;
 	},
 ): Promise<void> {
 	if (await handleMobileAdminRequest(request, response, info.mobileAdmin)) return;
+	if (await handleOpenRequest(request, response, info.mobileAdmin, info.openService)) return;
 	const url = new URL(request.url ?? "/", "http://localhost");
 	if (url.pathname === "/api/info") {
 		const wsUrl =

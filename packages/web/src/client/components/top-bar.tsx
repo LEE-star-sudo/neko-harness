@@ -2,6 +2,7 @@ import { sessionName } from "@neko-harness/core/session-display";
 import type { ConnPhase } from "../lib/store";
 import { useNekoState } from "../lib/store";
 import { ExportMenu } from "./export-menu";
+import { OpenWorkspaceMenu } from "./open-workspace-menu";
 import { folderName, Icon } from "./primitives";
 import { TodoButton } from "./todo-panel";
 import { UpdateNotice } from "./update-notice";
@@ -67,17 +68,23 @@ export function TopBar(props: {
 						任务{running > 0 ? ` · ${running} 运行中` : ` ${jobs.length}`}
 					</button>
 				)}
+				<OpenWorkspaceMenu ready={props.conn === "ready" && !operating} />
 				{props.workspace && (
 					<button
 						type="button"
 						data-workspace-entry
-						className="focus-neko shrink-0 whitespace-nowrap rounded-full border border-sakura-300 px-2.5 py-0.5 text-xs text-sakura-800 hover:bg-sakura-50"
+						className="icon-btn workspace-entry"
 						aria-expanded={props.workspace.open}
 						aria-label={props.workspace.count > 0 ? `工作区，${props.workspace.count} 个改动文件` : "工作区"}
 						title="工作区：浏览文件与 agent 的改动（只读）"
 						onClick={props.workspace.onToggle}
 					>
-						<span aria-hidden>工作区{props.workspace.count > 0 ? ` ${props.workspace.count}` : ""}</span>
+						<Icon name="panel-right" />
+						{props.workspace.count > 0 && (
+							<span className="workspace-badge" aria-hidden="true">
+								{props.workspace.count > 99 ? "99+" : props.workspace.count}
+							</span>
+						)}
 					</button>
 				)}
 				<ExportMenu />

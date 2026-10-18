@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ChordError, type Link } from "@earendil-works/chord";
 import {
@@ -10,13 +10,12 @@ import {
 	readOrCreateMobileAdminToken,
 } from "@neko-harness/gateway";
 import type { GatewayHandle } from "./gateway-spawn.ts";
+import { checkLocalOrigin, readGuardedJson, writeJson } from "./local-guard.ts";
 
 /**
  * /api/mobile/* 同源代理（design D5）：浏览器只接触本页 CSRF token，admin-token 仅存在于本进程，
  * 经 Unix socket（POSIX）或本机 WS（Windows）以服务端专用客户端调用 neko.mobile-admin v1。
  */
-
-const BODY_LIMIT_BYTES = 4096;
 
 export class GatewayUnsupportedError extends Error {
 	constructor() {
@@ -150,33 +149,6 @@ const READ_ROUTES: Readonly<Record<string, string>> = {
 	"/api/mobile/state": "state",
 };
 
-function writeJson(response: ServerResponse, status: number, body: unknown): void {
-	response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-	response.end(JSON.stringify(body));
-}
-
-function isLoopback(address: string): boolean {
-	return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
-}
-
-function readBody(
-	request: IncomingMessage,
-	limit: number,
-): Promise<{ readonly body: string; readonly oversize: boolean }> {
-	return new Promise((resolve, reject) => {
-		const chunks: Buffer[] = [];
-		let size = 0;
-		let oversize = false;
-		request.on("data", (chunk: Buffer) => {
-			size += chunk.length;
-			if (!oversize && size <= limit) chunks.push(chunk);
-			if (size > limit) oversize = true;
-		});
-		request.on("end", () => resolve({ body: Buffer.concat(chunks).toString("utf8"), oversize }));
-		request.on("error", reject);
-	});
-}
-
 /**
  * 处理一条 /api/mobile/* 请求；非本前缀返回 false 交还原路由。
  * 检查顺序（全部在副作用前）：回环 peer → Host → Origin/Sec-Fetch-Site → 写方法 CSRF/JSON/体上限。
@@ -198,35 +170,8 @@ export async function handleMobileAdminRequest(
 		return false;
 	}
 
-	// 可信来源仅 socket 对端；不读 X-Forwarded-*。
-	if (!isLoopback(request.socket.remoteAddress ?? "")) {
-		writeJson(response, 403, { code: "forbidden", message: "mobile admin is only available from this computer" });
+	if (!checkLocalOrigin(request, response, context.allowedHosts, "mobile admin is only available from this computer"))
 		return true;
-	}
-	const host = (request.headers.host ?? "").toLowerCase();
-	if (!context.allowedHosts.includes(host)) {
-		writeJson(response, 403, { code: "forbidden", message: "host is not allowed" });
-		return true;
-	}
-	const origin = request.headers.origin;
-	if (origin !== undefined) {
-		let sameOrigin = false;
-		try {
-			const parsed = new URL(origin);
-			sameOrigin = parsed.protocol === "http:" && context.allowedHosts.includes(parsed.host.toLowerCase());
-		} catch {
-			sameOrigin = false;
-		}
-		if (!sameOrigin) {
-			writeJson(response, 403, { code: "forbidden", message: "origin is not allowed" });
-			return true;
-		}
-	}
-	const fetchSite = request.headers["sec-fetch-site"];
-	if (fetchSite !== undefined && fetchSite !== "same-origin") {
-		writeJson(response, 403, { code: "forbidden", message: "cross-site requests are not allowed" });
-		return true;
-	}
 
 	if (isSession) {
 		if (request.method !== "GET") {
@@ -256,32 +201,9 @@ export async function handleMobileAdminRequest(
 		writeJson(response, 404, { code: "not_found", message: "unknown mobile admin route" });
 		return true;
 	}
-	const csrf = request.headers["x-neko-csrf"];
-	const expected = Buffer.from(context.csrf, "utf8");
-	const provided = typeof csrf === "string" ? Buffer.from(csrf, "utf8") : Buffer.alloc(0);
-	if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-		writeJson(response, 403, { code: "forbidden", message: "missing or invalid csrf token" });
-		return true;
-	}
-	const contentType = request.headers["content-type"] ?? "";
-	if (!contentType.toLowerCase().startsWith("application/json")) {
-		writeJson(response, 415, { code: "unsupported_media_type", message: "request body must be application/json" });
-		return true;
-	}
-	const { body, oversize } = await readBody(request, BODY_LIMIT_BYTES);
-	if (oversize) {
-		writeJson(response, 413, { code: "payload_too_large", message: "request body exceeds the 4 KiB limit" });
-		return true;
-	}
-	let params: unknown = null;
-	if (body.trim() !== "") {
-		try {
-			params = JSON.parse(body);
-		} catch {
-			writeJson(response, 400, { code: "invalid", message: "request body is not valid JSON" });
-			return true;
-		}
-	}
+	const guarded = await readGuardedJson(request, response, context.csrf);
+	if (guarded === undefined) return true;
+	const params = guarded.params;
 
 	if (writeMethod === undefined) return false;
 	return respondWithCaller(response, context.caller(writeMethod, params));

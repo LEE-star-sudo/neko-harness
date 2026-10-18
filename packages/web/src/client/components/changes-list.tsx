@@ -44,7 +44,6 @@ export function ChangesList(props: {
 				{list && list.files.length === 0 && (
 					<div data-testid="changes-empty" className="p-3 text-sm text-ink-700">
 						<p className="font-medium">本会话还没有 agent 的 edit / write 改动。</p>
-						<p className="mt-1 text-xs text-ink-600">{CHANGES_SCOPE_NOTE}</p>
 					</div>
 				)}
 				{list?.files.map((file) => {

@@ -290,7 +290,7 @@ it("starts closed, never opens by itself when files change, and only the entry c
 	await flush();
 	expect(isOpen(panel(host))).toBe(false);
 	expect(entryButton(host)!.getAttribute("aria-label")).toBe("工作区，3 个改动文件");
-	expect(entryButton(host)!.textContent).toBe("工作区 3");
+	expect(entryButton(host)!.textContent).toBe("3");
 	// A closed panel does not touch the gateway.
 	expect(calls.dir).toHaveLength(0);
 	expect(calls.changes).toBe(0);
@@ -726,14 +726,15 @@ it("lists agent changes with counts, agents and the outside marker, and follows 
 	expect(calls.changes).toBe(2);
 });
 
-it("explains the scope in the empty state and flags an incomplete list", async () => {
+it("shows the scope once in the empty state and flags an incomplete list", async () => {
 	connect({ changes: summary(1, 0) });
 	const host = await mount();
 	await openWorkspace(host);
 	await click(tab(host, "改动"));
 	const empty = host.querySelector("[data-testid=changes-empty]")!;
 	expect(empty.textContent).toContain("edit / write");
-	expect(empty.textContent).toContain("命令行（如 bash）造成的改动");
+	expect(empty.textContent).not.toContain("命令行（如 bash）造成的改动");
+	expect(host.textContent).toContain("命令行（如 bash）造成的改动");
 	handlers.changes = async () => ({ ...changedFiles, truncated: true });
 	await setView({ changes: summary(2, 2) });
 	await flush();

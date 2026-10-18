@@ -12,6 +12,7 @@ export function Icon({
 		| "plus"
 		| "chevron"
 		| "panel"
+		| "panel-right"
 		| "search"
 		| "more"
 		| "chat"
@@ -41,6 +42,7 @@ export function Icon({
 		plus: "M12 5v14M5 12h14",
 		chevron: "m8 10 4 4 4-4",
 		panel: "M3 4h18v16H3zM9 4v16",
+		"panel-right": "M3 4h18v16H3zM15 4v16",
 		search: "M20 20l-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0",
 		more: "M5 12h.01M12 12h.01M19 12h.01",
 		chat: "M4 4h16v12H9l-5 4z",

@@ -63,6 +63,13 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 「本次改动」是 `ChangeTracker`（`file-changes.ts`）从会话条目（`edit`/`write` 的 toolCall 参数 + 成功的 toolResult）按 callId 配对派生的，含子 agent，增量扫描、不持久化；revision = 成功调用累计数。只反映 agent 的 edit/write，不含 bash 造成的改动；`write` 无旧内容，diff 是整文件新增。上限在 `CHANGE_LIMITS`，超限置 `truncated`。
 - 可选能力：`ChatView.changes` 缺省 = 旧网关；Web 用 `workspaceClient`（`client-session.ts`，`WORKSPACE_UNSUPPORTED`）探测，不提升应用协议。
 
+## Web 打开工作区
+
+- 只在 Web 服务端实现（`packages/web/src/open-api.ts`、`open-target.ts`），不经 gateway、不提升应用协议：`GET /api/local/session` 发放 CSRF 并下发 `targets`（VS Code / 文件管理器及可用性），`POST /api/open` 在本机 `spawn`（不经 shell，路径只作参数）拉起；路径必须是已存在的绝对目录。
+- 守卫与 `/api/mobile/*` 共用 `local-guard.ts`（回环 peer → Host → Origin/Sec-Fetch-Site → CSRF/JSON/体上限）；非本机访问得到 403，前端 `fetchOpenSession` 返回 `null` 即隐藏入口。改守卫需同时跑 `mobile-admin.test.ts`。
+- 平台命令集中在 `resolveLaunch`：WSL（linux + `WSL_DISTRO_NAME` 或 `/proc/version` 含 microsoft）按 Windows 处理，文件管理器为 `explorer.exe .`（cwd = 工作区），标签「资源管理器」；Windows 的 VS Code 由 `code.cmd` 位置推出 `Code.exe` 直接启动。每次打开前重新探测。
+- 前端 `OpenWorkspaceMenu`（顶栏分体按钮）用 localStorage `neko.openTarget` 记住上次目标；工作区栏入口是 `panel-right` 图标加改动数角标（保留 `data-workspace-entry`）。无快捷键。
+
 ## Pi 1.3 使用要点（以已安装发布包的类型与行为为准）
 
 - durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord 引用（`Ref`）方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root；ctx 只能给创建它的 host 的引用用（否则 `invalid/foreign_ctx`）。
