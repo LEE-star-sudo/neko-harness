@@ -192,6 +192,66 @@ export const QuestionSummarySchema = Type.Object({
 	optionCount: integer,
 	createdAt: num,
 });
+/** Wire bounds mirror core's browse and change limits; the host enforces the real ones before sending. */
+const WorkspaceEntrySchema = Type.Object(
+	{
+		name: str,
+		path: str,
+		kind: Type.Enum(["file", "directory", "symlink"]),
+		protected: Type.Optional(Type.Literal(true)),
+	},
+	{ additionalProperties: false },
+);
+export const WorkspaceDirSchema = Type.Object({
+	path: str,
+	entries: Type.Array(WorkspaceEntrySchema, { maxItems: 1000 }),
+	limited: bool,
+	incomplete: bool,
+});
+export const WorkspaceFileSchema = Type.Object({
+	path: str,
+	size: num,
+	mtimeMs: num,
+	kind: Type.Enum(["text", "binary", "protected"]),
+	content: Type.Optional(str),
+	truncated: bool,
+});
+export const ChangeSummarySchema = Type.Object({ revision: integer, files: integer, added: integer, removed: integer });
+export const ChangedFileSchema = Type.Object(
+	{
+		path: str,
+		outside: Type.Optional(Type.Literal(true)),
+		ops: integer,
+		added: integer,
+		removed: integer,
+		agents: Type.Array(str, { maxItems: 64 }),
+		lastSeq: integer,
+	},
+	{ additionalProperties: false },
+);
+export const ChangeListSchema = Type.Object({
+	revision: integer,
+	files: Type.Array(ChangedFileSchema, { maxItems: 500 }),
+	truncated: bool,
+});
+export const ChangeOpSchema = Type.Object(
+	{
+		seq: integer,
+		agent: str,
+		tool: Type.Enum(["edit", "write"]),
+		diff: str,
+		added: integer,
+		removed: integer,
+		truncated: bool,
+	},
+	{ additionalProperties: false },
+);
+export const ChangeDetailSchema = Type.Object({
+	path: str,
+	outside: Type.Optional(Type.Literal(true)),
+	ops: Type.Array(ChangeOpSchema, { maxItems: 50 }),
+	truncated: bool,
+});
 export const QuestionListSchema = Type.Object({
 	revision: integer,
 	pending: Type.Array(QuestionSummarySchema, { maxItems: QUESTION_LIMITS.maxPending }),
@@ -257,6 +317,8 @@ export const ChatViewSchema = Type.Object({
 	todos: Type.Optional(TodoListSchema),
 	/** Absent on a gateway without ask_user; empty `pending` means supported with none. */
 	questions: Type.Optional(QuestionListSchema),
+	/** Absent on a gateway without file change tracking; zero files means supported with none. */
+	changes: Type.Optional(ChangeSummarySchema),
 	rounds: Type.Optional(Type.Array(DelegationSchema)),
 	subagents: Type.Optional(Type.Array(DelegationSchema)),
 	taskUsage: Type.Optional(usage),
@@ -503,6 +565,13 @@ export const NekoChat = contract("neko.chat", {
 					QuestionRecordSchema,
 				),
 				usage: rpc(nil, usage),
+				workspaceDir: rpc(Type.Object({ path: str }, { additionalProperties: false }), WorkspaceDirSchema),
+				workspaceFile: rpc(Type.Object({ path: str }, { additionalProperties: false }), WorkspaceFileSchema),
+				changesList: rpc(nil, ChangeListSchema),
+				changeGet: rpc(
+					Type.Object({ path: str }, { additionalProperties: false }),
+					Type.Union([ChangeDetailSchema, nil]),
+				),
 				skills: rpc(nil, Type.Array(Type.Object({ name: str, description: str, location: str, level }))),
 				jobOutput: rpc(
 					Type.Object({ jobId: str, since: Type.Optional(integer) }, { additionalProperties: false }),
@@ -748,6 +817,11 @@ export type WireQuestionList = Static<typeof QuestionListSchema>;
 export type WireQuestionSummary = Static<typeof QuestionSummarySchema>;
 export type WireQuestionRecord = Static<typeof QuestionRecordSchema>;
 export type WireQuestionResponse = Static<typeof QuestionResponseSchema>;
+export type WireWorkspaceDir = Static<typeof WorkspaceDirSchema>;
+export type WireWorkspaceFile = Static<typeof WorkspaceFileSchema>;
+export type WireChangeSummary = Static<typeof ChangeSummarySchema>;
+export type WireChangeList = Static<typeof ChangeListSchema>;
+export type WireChangeDetail = Static<typeof ChangeDetailSchema>;
 export type NekoWorkspaces = Ref<typeof NekoWorkspaces>;
 export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Ref<typeof NekoCredentials>;

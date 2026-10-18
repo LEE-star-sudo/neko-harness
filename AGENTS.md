@@ -57,6 +57,12 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 提问：问题记录是 `app.neko.question` 文档 family（key = 工具 task id，`fork: "initial"`），`app.neko.questions` 只存未决 id 索引。回答走 `NekoSession.respondQuestion` → gateway `questionRespond`，不是聊天输入；首次有效结算为准，之后返回原记录；`live()` 检查 task owner 链，停止/归档/重启对账把失效未决问题置 `cancelled`。回答 = `{ kind: "answer", optionIds?, text? } | { kind: "skip" }`（选项可与文字并存；`optionIds` 按选项顺序规范化）。`recommended` 只是提示，不预选。排队的 steer / followUp 都等问题结算后才进入上下文。
 - 可选能力：`ChatView.todos` / `ChatView.questions` 缺省 = 旧网关，空 = 支持且无内容；`SessionSummary.awaitingAnswer`（缺省 = 不支持，会话 `status` 仍是 `running`）。前端用 `todosClient` / `questionsClient`（`client-session.ts`）探测，不提升应用协议。问题与选项一律按纯文本显示。
 
+## 工作区浏览与改动
+
+- 只读、会话级：`NekoChat.workspaceDir` / `workspaceFile` / `changesList` / `changeGet`（经 `NekoSession` 同名方法），工作区根取自会话 cwd，客户端只传相对路径。目录子项复用 `WorkspaceFiles` 的平铺枚举缓存（gitignore、不列 `.git`、符号链接不跟随、50k 条上限，截断即 `incomplete`），读取经 `relativeQuery` + `workspaceTarget`（realpath 越界检查），上限 `BROWSE_LIMITS`；`isProtectedPath` 命中的凭据文件（`.env*`、`*.pem`/`*.key`、私钥）只见不读，改动模式需同步 spec。
+- 「本次改动」是 `ChangeTracker`（`file-changes.ts`）从会话条目（`edit`/`write` 的 toolCall 参数 + 成功的 toolResult）按 callId 配对派生的，含子 agent，增量扫描、不持久化；revision = 成功调用累计数。只反映 agent 的 edit/write，不含 bash 造成的改动；`write` 无旧内容，diff 是整文件新增。上限在 `CHANGE_LIMITS`，超限置 `truncated`。
+- 可选能力：`ChatView.changes` 缺省 = 旧网关；Web 用 `workspaceClient`（`client-session.ts`，`WORKSPACE_UNSUPPORTED`）探测，不提升应用协议。
+
 ## Pi 1.3 使用要点（以已安装发布包的类型与行为为准）
 
 - durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord 引用（`Ref`）方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root；ctx 只能给创建它的 host 的引用用（否则 `invalid/foreign_ctx`）。

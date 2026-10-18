@@ -1,6 +1,7 @@
 import type { AssistantMessage, ModelThinkingLevel, Usage, UserMessage } from "@earendil-works/pi-ai";
 import type { ConversationView, LiveState, ToolDiagnostic, ToolSlot, UsageState } from "@earendil-works/pi-durable";
 import type { CompactionRecord } from "./compaction.ts";
+import type { ChangeSummary } from "./file-changes.ts";
 import type { ImageMetadata } from "./image-metadata.ts";
 import { type DefaultImagePrompt, savedDefaultImagePrompt } from "./image-prompt.ts";
 import type { ImageInfo } from "./images.ts";
@@ -43,6 +44,8 @@ export type ChatView = {
 	queued?: QueuedInput[];
 	/** The model-maintained todo list; absent on a gateway without todos, empty items when supported with none. */
 	todos?: TodoList;
+	/** Summary of the files agents changed through edit/write; absent on a gateway without it, empty when supported with none. */
+	changes?: ChangeSummary;
 	/** Questions waiting for the user (bounded summaries); absent on a gateway without ask_user. */
 	questions?: QuestionList;
 	rounds?: Delegation[];
@@ -325,7 +328,7 @@ const WRITE_DIFF_MAX_LINES = 2000;
 const WRITE_DIFF_MAX_BYTES = 64 * 1024;
 
 /** 从展示型 diff 统计增删行（以 +/- 前缀计，排除 +++ / --- 头）。 */
-function countDiffLines(diff: string): { added: number; removed: number } {
+export function countDiffLines(diff: string): { added: number; removed: number } {
 	let added = 0;
 	let removed = 0;
 	for (const line of diff.split("\n")) {
@@ -336,14 +339,14 @@ function countDiffLines(diff: string): { added: number; removed: number } {
 }
 
 /** edit 工具结果 details 的展示型 diff；结构不符/缺失回退 null，不抛错。 */
-function editResultDiff(details: unknown): string | null {
+export function editResultDiff(details: unknown): string | null {
 	if (typeof details !== "object" || details === null) return null;
 	const diff = (details as { diff?: unknown }).diff;
 	return typeof diff === "string" ? diff : null;
 }
 
 /** write 工具调用参数合成的全新增 diff（逐行 "+ " 前缀）；content 非字符串时回退 null。 */
-function synthesizedWriteDiff(
+export function synthesizedWriteDiff(
 	args: unknown,
 ): { diff: string; added: number; removed: number; truncated: boolean } | null {
 	const record = (args ?? {}) as Record<string, unknown>;

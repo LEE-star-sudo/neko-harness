@@ -9,6 +9,11 @@ export const MOBILE_BREAKPOINT = 768;
 export const MOBILE_QUERY = `(max-width: ${MOBILE_BREAKPOINT}px)`;
 export const MESSAGE_COLUMN_REM = 48;
 
+/** 右侧工作区栏桌面宽度（px）；窄屏（≤1023px）为抽屉，不使用该宽度。 */
+export const WORKSPACE_WIDTH = { min: 320, max: 720, initial: 480, step: 24 } as const;
+export const clampWorkspaceWidth = (width: number): number =>
+	Math.min(WORKSPACE_WIDTH.max, Math.max(WORKSPACE_WIDTH.min, Math.round(width)));
+
 /**
  * 宽屏分层宽度分档（与 styles.css 的 .chat-column 媒体查询对拍，
  * 由 test/layout-tokens.test.ts 守护）：视口达到 minViewportRem 时

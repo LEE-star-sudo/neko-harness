@@ -85,19 +85,22 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 		if (
 			changes.some(
 				(change) =>
-					change.type === "document" &&
-					(([
-						"app.neko.delegations",
-						"app.neko.approvals",
-						"app.neko.subagents",
-						"app.neko.jobs",
-						"app.neko.todos",
-						"app.neko.questions",
-					].includes(change.record.kind) &&
-						change.conversationId === session.id) ||
-						(change.record.kind === "pi.usage" &&
-							change.conversationId !== undefined &&
-							childIds.has(change.conversationId))),
+					(change.type === "entry" &&
+						change.value.kind === "pi.tool-result" &&
+						childIds.has(change.value.conversationId)) ||
+					(change.type === "document" &&
+						(([
+							"app.neko.delegations",
+							"app.neko.approvals",
+							"app.neko.subagents",
+							"app.neko.jobs",
+							"app.neko.todos",
+							"app.neko.questions",
+						].includes(change.record.kind) &&
+							change.conversationId === session.id) ||
+							(change.record.kind === "pi.usage" &&
+								change.conversationId !== undefined &&
+								childIds.has(change.conversationId)))),
 			)
 		)
 			changed?.(null);
@@ -133,6 +136,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 			);
 			const jobs = (await session.jobs()).map(clipJob);
 			const [todos, questions] = await Promise.all([session.todos(), session.questions()]);
+			const changes = await session.changeSummary().catch(() => undefined);
 			const subagents = await listDelegations(runtime.harness, session.id, context);
 			const approvals = await runtime.approvals.list(session.id, context);
 			for (const entry of subagents)
@@ -158,6 +162,7 @@ async function openProjection(runtime: NekoRuntime, session: NekoSession, contex
 				jobs,
 				todos,
 				questions,
+				...(changes ? { changes } : {}),
 				agents: summarizeSubagents(
 					subagents,
 					(await runtime.harness.snapshot(SubagentsDoc, session.id, context))?.items,
@@ -392,6 +397,22 @@ export function serveSessions(host: Host<GatewayPrincipal>, runtime: NekoRuntime
 				}
 			},
 			skills: () => runtime.listSkills(projection.value.session.id),
+			workspaceDir: async ({ path }, ctx) => {
+				try {
+					return await projection.value.session.workspaceDir(path, ctx.signal);
+				} catch (error) {
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot list the directory");
+				}
+			},
+			workspaceFile: async ({ path }, ctx) => {
+				try {
+					return await projection.value.session.workspaceFile(path, ctx.signal);
+				} catch (error) {
+					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot read the file");
+				}
+			},
+			changesList: async () => projection.value.session.changes(),
+			changeGet: async ({ path }) => (await projection.value.session.change(path)) ?? null,
 			jobOutput: async ({ jobId, since }) => {
 				try {
 					const { job, output } = await projection.value.session.jobOutput(jobId, since);

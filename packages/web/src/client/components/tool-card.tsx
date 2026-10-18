@@ -1,6 +1,6 @@
-import DOMPurify from "dompurify";
-import { useMemo, useState } from "react";
-import { diffPathFromSummary, languageFromPath, renderDiffRows } from "../lib/diff-highlight.ts";
+import { useState } from "react";
+import { diffPathFromSummary } from "../lib/diff-highlight.ts";
+import { DiffView } from "./diff-view";
 import { Icon } from "./primitives";
 
 export type ToolCardProps = {
@@ -48,16 +48,7 @@ export function ToolCard(props: ToolCardProps) {
 		props.phase === "done" && props.durationMs !== undefined && props.durationMs !== null
 			? ` · ${(props.durationMs / 1000).toFixed(1)}s`
 			: "";
-	// diff 按行渲染：语法高亮 + 增删底色两层着色；语言从摘要中的目标路径推断。
-	const diffRows = useMemo(() => {
-		if (!expanded || props.diff == null) return null;
-		const language = languageFromPath(diffPathFromSummary(props.name, props.summary));
-		return renderDiffRows(props.diff, language, props.name === "write" ? "write" : "edit").rows.map((row) => ({
-			...row,
-			// 与 Markdown 组件同等 DOMPurify 消毒后再注入（hljs 输出本身已转义，防御性保留）。
-			html: DOMPurify.sanitize(row.html, { USE_PROFILES: { html: true } }),
-		}));
-	}, [expanded, props.diff, props.name, props.summary]);
+	const showDiff = expanded && props.diff != null;
 	const added = props.diffAdded ?? null;
 	const removed = props.diffRemoved ?? null;
 	const diffCount =
@@ -108,27 +99,19 @@ export function ToolCard(props: ToolCardProps) {
 			</button>
 			{expanded && (
 				<div className="space-y-2 border-t border-tianyi-100 px-3 py-2">
-					{diffRows !== null && (
+					{showDiff && props.diff != null && (
 						<div>
 							<div className="mb-1 text-xs font-medium text-tianyi-700">代码变更</div>
 							{props.diffTruncated && (
 								<div className="mb-1 text-xs text-ink-600">代码变更预览已截断，可在下方查看完整写入内容。</div>
 							)}
-							<div className="max-h-48 overflow-auto rounded-lg bg-ink-50 p-2 font-mono text-xs text-ink-700">
-								{diffRows.map((row, index) => (
-									<div
-										// biome-ignore lint/suspicious/noArrayIndexKey: diffRows 由 props.diff 派生并 memo，顺序恒定，行无业务 id。
-										key={index}
-										className={`whitespace-pre ${
-											row.kind === "added" ? "diff-line-add" : row.kind === "removed" ? "diff-line-del" : ""
-										}`}
-									>
-										<span className="diff-gutter">{row.gutter}</span>
-										{/* biome-ignore lint/security/noDangerouslySetInnerHtml: 行 HTML 已经过 DOMPurify.sanitize 消毒（同 Markdown 组件路径）。 */}
-										<span dangerouslySetInnerHTML={{ __html: row.html }} />
-									</div>
-								))}
-							</div>
+							{/* diff 按行渲染：语法高亮 + 增删底色两层着色；语言从摘要中的目标路径推断。 */}
+							<DiffView
+								diff={props.diff}
+								path={diffPathFromSummary(props.name, props.summary)}
+								format={props.name === "write" ? "write" : "edit"}
+								className="max-h-48 overflow-auto rounded-lg bg-ink-50 p-2 font-mono text-xs text-ink-700"
+							/>
 						</div>
 					)}
 					{showDetail && (

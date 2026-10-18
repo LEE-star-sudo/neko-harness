@@ -1,9 +1,32 @@
-import { realpath, stat } from "node:fs/promises";
+import { open, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
 import { type FileListing, type FileWatcher, getOrThrow } from "@earendil-works/pi-durable/env";
 import { Connection, LocalExecutionEnv, localDaemon } from "@earendil-works/pi-env";
 import type { FileCandidates } from "./file-mentions.ts";
+
+/** Bounds of the read-only workspace browser. */
+export const BROWSE_LIMITS = { children: 1000, readBytes: 512 * 1024 };
+export type DirEntry = { name: string; path: string; kind: "file" | "directory" | "symlink"; protected?: true };
+export type DirChildren = { path: string; entries: DirEntry[]; limited: boolean; incomplete: boolean };
+export type FileContent = {
+	path: string;
+	size: number;
+	mtimeMs: number;
+	/** `protected` files (credentials) and `binary` ones carry no content. */
+	kind: "text" | "binary" | "protected";
+	content?: string;
+	truncated: boolean;
+};
+
+const ENV_TEMPLATE = /\.(example|sample|template)$/;
+/** Credential-looking files stay visible in the tree but their content is never served. */
+export function isProtectedPath(path: string): boolean {
+	const name = basename(path).toLowerCase();
+	if (name === ".env" || (name.startsWith(".env.") && !ENV_TEMPLATE.test(name))) return true;
+	if (/\.(pem|key|p12|pfx)$/.test(name)) return true;
+	return /^id_(rsa|dsa|ecdsa|ed25519)(\..*)?$/.test(name) && !name.endsWith(".pub");
+}
 
 export function relativeQuery(query: string): string {
 	if (
@@ -308,6 +331,116 @@ export class WorkspaceFiles {
 		root = await realpath(root);
 		const base = await workspaceTarget(root, prefix);
 		if (!(await stat(base)).isDirectory()) throw new Error("Workspace directory is unavailable.");
+		return this.#withListing(root, base, signal, async (listing) => {
+			const pattern = new RegExp(
+				[...needle].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*"),
+				/[A-Z]/.test(needle) ? "" : "i",
+			);
+			const entries: FileCandidates["entries"] = [];
+			const candidates = listing.entries
+				.filter(
+					(candidate) =>
+						candidate.kind !== "symlink" &&
+						(needle || !candidate.path.includes("/")) &&
+						pattern.test(basename(candidate.path)),
+				)
+				.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "directory" ? -1 : 1) || a.path.localeCompare(b.path));
+			for (const candidate of candidates) {
+				if (candidate.kind === "symlink") continue;
+				const local = prefix + candidate.path;
+				if ([...local].some((c) => c.charCodeAt(0) < 32 || c === '"' || c === "\\")) continue;
+				try {
+					await workspaceTarget(root, local);
+					entries.push({ name: basename(local), path: local, kind: candidate.kind });
+				} catch {
+					/* disappeared or outside */
+				}
+				signal.throwIfAborted();
+				if (entries.length > 100) break;
+			}
+			return { entries: entries.slice(0, 100), limited: entries.length > 100, incomplete: listing.truncated };
+		});
+	}
+	/** Direct children of one workspace directory, from the same bounded listing that serves `search`. */
+	async children(root: string, dir: string, signal: AbortSignal): Promise<DirChildren> {
+		signal.throwIfAborted();
+		if (this.#closed) throw new Error("File environment closed");
+		const clean = dir === "" ? "" : relativeQuery(dir).replace(/\/+$/, "");
+		root = await realpath(root);
+		const target = await workspaceTarget(root, clean);
+		if (!(await stat(target)).isDirectory()) throw new Error("Not a directory.");
+		const prefix = clean === "" ? "" : `${clean}/`;
+		return this.#withListing(root, root, signal, async (listing) => {
+			const entries: DirEntry[] = [];
+			for (const candidate of listing.entries) {
+				if (!candidate.path.startsWith(prefix)) continue;
+				const name = candidate.path.slice(prefix.length);
+				if (name === "" || name.includes("/") || [...name].some((c) => c.charCodeAt(0) < 32 || c === '"' || c === "\\"))
+					continue;
+				entries.push({
+					name,
+					path: candidate.path,
+					kind: candidate.kind === "directory" ? "directory" : candidate.kind === "symlink" ? "symlink" : "file",
+					...(candidate.kind !== "directory" && isProtectedPath(name) ? { protected: true as const } : {}),
+				});
+			}
+			entries.sort(
+				(a, b) =>
+					(a.kind === "directory" ? 0 : 1) - (b.kind === "directory" ? 0 : 1) ||
+					(a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+			);
+			signal.throwIfAborted();
+			return {
+				path: clean,
+				entries: entries.slice(0, BROWSE_LIMITS.children),
+				limited: entries.length > BROWSE_LIMITS.children,
+				incomplete: listing.truncated,
+			};
+		});
+	}
+	/** Read one text file of the workspace, at most `BROWSE_LIMITS.readBytes` from its start. */
+	async read(root: string, path: string, signal: AbortSignal): Promise<FileContent> {
+		signal.throwIfAborted();
+		if (path === "") throw new Error("Use a relative path inside the workspace.");
+		const clean = relativeQuery(path);
+		root = await realpath(root);
+		let target: string;
+		try {
+			target = await workspaceTarget(root, clean);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("File not found.");
+			throw error;
+		}
+		const info = await stat(target);
+		if (!info.isFile()) throw new Error("Not a file.");
+		const base = { path: clean, size: info.size, mtimeMs: info.mtimeMs };
+		if (isProtectedPath(clean) || isProtectedPath(target)) return { ...base, kind: "protected", truncated: false };
+		const handle = await open(target, "r");
+		try {
+			const length = Math.min(info.size, BROWSE_LIMITS.readBytes);
+			const buffer = Buffer.alloc(length);
+			const { bytesRead } = length === 0 ? { bytesRead: 0 } : await handle.read(buffer, 0, length, 0);
+			signal.throwIfAborted();
+			const bytes = buffer.subarray(0, bytesRead);
+			const truncated = info.size > bytesRead;
+			if (bytes.subarray(0, 8192).includes(0)) return { ...base, kind: "binary", truncated };
+			try {
+				// With a cut file the decoder holds back an incomplete trailing sequence instead of failing on it.
+				const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes, { stream: truncated });
+				return { ...base, kind: "text", content, truncated };
+			} catch {
+				return { ...base, kind: "binary", truncated };
+			}
+		} finally {
+			await handle.close();
+		}
+	}
+	async #withListing<T>(
+		root: string,
+		base: string,
+		signal: AbortSignal,
+		use: (listing: FileListing) => Promise<T>,
+	): Promise<T> {
 		const key = `${this.env(base).id}\0git-hidden\0${root}\0${base}`;
 		let item = this.#cache.get(key);
 		if (!item) {
@@ -336,33 +469,7 @@ export class WorkspaceFiles {
 				}
 				await cancellable(item.work!, signal);
 			}
-			const pattern = new RegExp(
-				[...needle].map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*"),
-				/[A-Z]/.test(needle) ? "" : "i",
-			);
-			const entries: FileCandidates["entries"] = [];
-			const candidates = item
-				.listing!.entries.filter(
-					(candidate) =>
-						candidate.kind !== "symlink" &&
-						(needle || !candidate.path.includes("/")) &&
-						pattern.test(basename(candidate.path)),
-				)
-				.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "directory" ? -1 : 1) || a.path.localeCompare(b.path));
-			for (const candidate of candidates) {
-				if (candidate.kind === "symlink") continue;
-				const local = prefix + candidate.path;
-				if ([...local].some((c) => c.charCodeAt(0) < 32 || c === '"' || c === "\\")) continue;
-				try {
-					await workspaceTarget(root, local);
-					entries.push({ name: basename(local), path: local, kind: candidate.kind });
-				} catch {
-					/* disappeared or outside */
-				}
-				signal.throwIfAborted();
-				if (entries.length > 100) break;
-			}
-			return { entries: entries.slice(0, 100), limited: entries.length > 100, incomplete: item.listing!.truncated };
+			return await use(item.listing!);
 		} finally {
 			item.waiters--;
 			if (!item.waiters && item.work) {

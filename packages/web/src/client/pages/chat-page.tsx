@@ -10,10 +10,11 @@ import { SessionList } from "../components/session-list";
 import { SubagentPanel } from "../components/subagent-panel";
 import { TodoPanel } from "../components/todo-panel";
 import { TopBar } from "../components/top-bar";
+import { WorkspacePanel } from "../components/workspace-panel";
 import { useAwaitingTitle } from "../lib/awaiting-title";
 import { appActions, reportError } from "../lib/bootstrap";
 import { questionState, todoState } from "../lib/interactions";
-import { MOBILE_QUERY } from "../lib/layout";
+import { MOBILE_QUERY, WORKSPACE_WIDTH } from "../lib/layout";
 import { storeActions, useNekoState } from "../lib/store";
 
 const INFO_NOTICE_MS = 8000;
@@ -41,21 +42,48 @@ export function ChatPage() {
 		>
 	>({});
 	const agentEntries = view?.agents;
+	// The right-hand slot has one owner at a time. The subagent flag lives per session in `panels` (its panels stay
+	// mounted and keep their `open` across session switches); jobs/workspace are tied to the session they were opened
+	// in, so switching sessions closes them. `toggleRight`/`selectIdentity` are the only writers and keep them exclusive.
+	const [rightFor, setRightFor] = useState<{ sessionId: string; kind: "jobs" | "workspace" } | null>(null);
+	const rightForRef = useRef(rightFor);
+	rightForRef.current = rightFor;
+	useEffect(() => {
+		setRightFor((previous) => (previous && previous.sessionId !== currentSessionId ? null : previous));
+	}, [currentSessionId]);
 	useEffect(() => {
 		if (!currentSessionId || !agentEntries?.length) return;
 		setPanels((previous) => ({
 			...previous,
 			[currentSessionId]: {
-				open: previous[currentSessionId]?.open ?? true,
+				// The first delegation opens the panel only if nothing else already holds the slot.
+				open: previous[currentSessionId]
+					? previous[currentSessionId]!.open
+					: rightForRef.current?.sessionId !== currentSessionId,
 				...(previous[currentSessionId]?.target ? { target: previous[currentSessionId]!.target } : {}),
 				selected: previous[currentSessionId]?.selected ?? agentEntries[0]!.agentId,
 				entries: agentEntries,
 			},
 		}));
 	}, [agentEntries, currentSessionId]);
-	// Tied to the session it was opened in, so switching sessions closes it.
-	const [jobsOpenFor, setJobsOpenFor] = useState<string | null>(null);
-	const jobsOpen = jobsOpenFor !== null && jobsOpenFor === currentSessionId;
+	const jobsOpen = rightFor?.kind === "jobs" && rightFor.sessionId === currentSessionId;
+	const workspaceOpen = rightFor?.kind === "workspace" && rightFor.sessionId === currentSessionId;
+	const toggleRight = (kind: "jobs" | "workspace") => {
+		if (!currentSessionId) return;
+		if (rightFor?.kind === kind && rightFor.sessionId === currentSessionId) return setRightFor(null);
+		setPanels((previous) =>
+			previous[currentSessionId]
+				? { ...previous, [currentSessionId]: { ...previous[currentSessionId]!, open: false } }
+				: previous,
+		);
+		setRightFor({ sessionId: currentSessionId, kind });
+	};
+	// Once a session's gateway reported `changes`, its panel stays mounted across a reconnect (view is null meanwhile).
+	const [workspaceSession, setWorkspaceSession] = useState<string | null>(null);
+	useEffect(() => {
+		if (currentSessionId && view?.changes !== undefined) setWorkspaceSession(currentSessionId);
+	}, [currentSessionId, view?.changes]);
+	const [workspaceWidth, setWorkspaceWidth] = useState<number>(WORKSPACE_WIDTH.initial);
 	// The todo list opens in the page flow for the session it was opened in; an empty list has no panel at all.
 	const todoPanelId = useId();
 	const [todosOpenFor, setTodosOpenFor] = useState<string | null>(null);
@@ -64,7 +92,7 @@ export function ChatPage() {
 	useAwaitingTitle(questionState({ view, phase, operating, currentSessionId, retained })?.pending.length ?? 0);
 	const selectIdentity = (id: string, taskId?: number) => {
 		if (!currentSessionId) return;
-		setJobsOpenFor(null);
+		setRightFor(null);
 		const nonce = ++targetSequence.current;
 		setPanels((previous) => ({
 			...previous,
@@ -105,15 +133,12 @@ export function ChatPage() {
 						panelId: todoPanelId,
 						onToggle: () => setTodosOpenFor(todosOpen ? null : (currentSessionId ?? null)),
 					}}
-					onToggleJobs={() => {
-						if (!jobsOpen && currentSessionId)
-							setPanels((previous) =>
-								previous[currentSessionId]
-									? { ...previous, [currentSessionId]: { ...previous[currentSessionId]!, open: false } }
-									: previous,
-							);
-						setJobsOpenFor(jobsOpen ? null : (currentSessionId ?? null));
-					}}
+					onToggleJobs={() => toggleRight("jobs")}
+					workspace={
+						view?.changes !== undefined
+							? { open: workspaceOpen, count: view.changes.files, onToggle: () => toggleRight("workspace") }
+							: undefined
+					}
 				/>
 				{notice !== null && (
 					<div
@@ -199,7 +224,18 @@ export function ChatPage() {
 					sessionId={currentSessionId}
 					jobs={view.jobs}
 					open={jobsOpen}
-					onClose={() => setJobsOpenFor(null)}
+					onClose={() => setRightFor(null)}
+				/>
+			)}
+			{currentSessionId && workspaceSession === currentSessionId && (
+				<WorkspacePanel
+					key={`workspace:${currentSessionId}`}
+					sessionId={currentSessionId}
+					open={workspaceOpen}
+					onClose={() => setRightFor(null)}
+					changes={view?.changes}
+					width={workspaceWidth}
+					onWidth={setWorkspaceWidth}
 				/>
 			)}
 		</div>

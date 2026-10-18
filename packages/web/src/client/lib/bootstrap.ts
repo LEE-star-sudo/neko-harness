@@ -127,6 +127,9 @@ export const appActions = {
 	jobStop(sessionId: string, jobId: string) {
 		return requireConnection().jobStop(sessionId, jobId);
 	},
+	workspace(sessionId: string) {
+		return requireConnection().workspace(sessionId);
+	},
 	checkUpdates() {
 		return requireConnection().checkUpdates();
 	},

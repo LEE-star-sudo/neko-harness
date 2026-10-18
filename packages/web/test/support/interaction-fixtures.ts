@@ -37,6 +37,10 @@ export type ViewOptions = {
 	items?: ChatView["items"];
 	subagents?: ChatView["subagents"];
 	queued?: ChatView["queued"];
+	/** Leaving it out behaves like a gateway built before the workspace browser (no `changes`). */
+	changes?: ChatView["changes"];
+	agents?: ChatView["agents"];
+	jobs?: ChatView["jobs"];
 };
 
 function questionList(questions: ViewOptions["questions"]): QuestionList | undefined {
@@ -60,6 +64,9 @@ export function chatView(options: ViewOptions = {}): ChatView {
 		streaming: null,
 		...(options.queued ? { queued: options.queued } : {}),
 		...(options.subagents ? { subagents: options.subagents } : {}),
+		...(options.changes ? { changes: options.changes } : {}),
+		...(options.agents ? { agents: options.agents } : {}),
+		...(options.jobs ? { jobs: options.jobs } : {}),
 		...(questions ? { questions } : {}),
 		...(todos ? { todos } : {}),
 	} as unknown as ChatView;

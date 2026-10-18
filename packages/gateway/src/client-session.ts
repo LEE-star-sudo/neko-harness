@@ -15,6 +15,9 @@ import {
 	NekoSubagent,
 	NekoWorkspaceFiles,
 	NekoWorkspaces,
+	type WireChangeDetail,
+	type WireChangeList,
+	type WireChangeSummary,
 	type WireJobOutput,
 	type WireJobSummary,
 	type WireQuestionList,
@@ -25,6 +28,8 @@ import {
 	type WireSteerResult,
 	type WireTodoList,
 	type WireWithdrawResult,
+	type WireWorkspaceDir,
+	type WireWorkspaceFile,
 } from "./contract.ts";
 import { createClientHost } from "./link.ts";
 import { type SubagentClient, subagentClient } from "./subagent-client.ts";
@@ -152,6 +157,50 @@ export function questionsClient(chat: NekoChat): QuestionsClient {
 		async respond(input) {
 			if (!supported()) throw new Error(QUESTIONS_UNSUPPORTED);
 			return chat.questionRespond(input);
+		},
+	};
+}
+export const WORKSPACE_UNSUPPORTED =
+	"This gateway does not support the workspace browser. Restart the gateway to enable it.";
+export type WorkspaceClient = {
+	/** False for a gateway built before file browsing: the view carries no `changes` summary at all. */
+	readonly supported: boolean;
+	/** Summary of agent edit/write changes; `undefined` when unsupported. */
+	summary(): WireChangeSummary | undefined;
+	dir(path: string, signal?: AbortSignal): Promise<WireWorkspaceDir>;
+	file(path: string, signal?: AbortSignal): Promise<WireWorkspaceFile>;
+	changes(): Promise<WireChangeList>;
+	change(path: string): Promise<WireChangeDetail | null>;
+};
+/** Capability-probed read-only access to a chat's workspace files and agent changes. */
+export function workspaceClient(chat: NekoChat, host?: Host): WorkspaceClient {
+	const supported = () => chat.view.value?.changes !== undefined;
+	const guard = () => {
+		if (!supported()) throw new Error(WORKSPACE_UNSUPPORTED);
+	};
+	// A caller signal cancels the request through a root context; without one the plain call is used.
+	const call = <T>(signal: AbortSignal | undefined, run: (ctx?: Ctx) => Promise<T>) =>
+		signal && host ? host.root((ctx) => run(ctx), { signal }) : run();
+	return {
+		get supported() {
+			return supported();
+		},
+		summary: () => chat.view.value?.changes,
+		async dir(path, signal) {
+			guard();
+			return call(signal, (ctx) => chat.workspaceDir({ path }, ctx));
+		},
+		async file(path, signal) {
+			guard();
+			return call(signal, (ctx) => chat.workspaceFile({ path }, ctx));
+		},
+		async changes() {
+			guard();
+			return chat.changesList(null);
+		},
+		async change(path) {
+			guard();
+			return chat.changeGet({ path });
 		},
 	};
 }

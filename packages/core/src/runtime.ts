@@ -60,6 +60,7 @@ import {
 	FileCredentialStore,
 	InMemoryCredentialStore,
 } from "./credentials.ts";
+import { type ChangeDetail, type ChangeList, type ChangeSummary, ChangeTracker } from "./file-changes.ts";
 import { ImageDetails } from "./image-metadata.ts";
 import { addDefaultImagePrompt } from "./image-prompt.ts";
 import { imagePrompt, prepareInput } from "./images.ts";
@@ -102,7 +103,7 @@ import {
 	normalizeWorkspace,
 	savedWorkspace,
 } from "./workspace.ts";
-import { WorkspaceFiles } from "./workspace-files.ts";
+import { type DirChildren, type FileContent, WorkspaceFiles } from "./workspace-files.ts";
 
 /** The built-in DeepSeek chat model used when the caller does not choose one. */
 export const DEFAULT_MODEL = { provider: "deepseek", modelId: "deepseek-flash" } as const;
@@ -204,6 +205,16 @@ export type NekoSession = {
 	question(id: number): Promise<QuestionRecord | undefined>;
 	/** Answer or skip a question; the first valid decision wins and later calls return it unchanged. */
 	respondQuestion(id: number, version: string, response: QuestionResponse): Promise<QuestionRecord>;
+	/** Direct children of one workspace directory ("" is the root), read-only and bounded. */
+	workspaceDir(path: string, signal?: AbortSignal): Promise<DirChildren>;
+	/** Text content of one workspace file; credential and binary files return a kind without content. */
+	workspaceFile(path: string, signal?: AbortSignal): Promise<FileContent>;
+	/** Small summary of the files agents changed through edit/write (main agent and subagents). */
+	changeSummary(): Promise<ChangeSummary>;
+	/** Changed files, most recent first. */
+	changes(): Promise<ChangeList>;
+	/** Every recorded edit/write of one changed file (workspace-relative, or absolute when outside); `undefined` if none. */
+	change(path: string): Promise<ChangeDetail | undefined>;
 };
 
 /** Directory entry of `listConversations()`. */
@@ -267,6 +278,9 @@ export type NekoCreateConversationOptions = {
 	readonly thinkingLevel?: ModelThinkingLevel;
 	readonly cwd?: string;
 };
+
+/** Browse calls without a caller signal still need one to pass along. */
+const neverAborted = () => new AbortController().signal;
 
 /**
  * Soft-delete marker stored per conversation. pi-durable 1.1.0 has no conversation
@@ -523,6 +537,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		}, context);
 	approvals = new ToolApprovals(harness, context);
 	questions = new UserQuestions(harness, context);
+	const changes = new ChangeTracker(harness, context);
 	const existing = await scanConversations();
 	questions.track(...existing.map((r) => r.id));
 
@@ -806,6 +821,21 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		respondQuestion(id, version, response) {
 			return questions.respond(target.id, id, version, response, context);
 		},
+		async workspaceDir(path, signal) {
+			return workspaceFiles.children(savedWorkspace((await target.agent(context)).cwd), path, signal ?? neverAborted());
+		},
+		async workspaceFile(path, signal) {
+			return workspaceFiles.read(savedWorkspace((await target.agent(context)).cwd), path, signal ?? neverAborted());
+		},
+		changeSummary() {
+			return changes.summary(target.id);
+		},
+		changes() {
+			return changes.list(target.id);
+		},
+		change(path) {
+			return changes.detail(target.id, path);
+		},
 		async compact(instructions) {
 			const agent = await target.agent(context);
 			if (agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek")))
@@ -1073,6 +1103,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			await questions.reconcile(id, context);
 			await jobs.stopAll(jobIo(id), id);
 			await metadata.archive(id);
+			await changes.forget(id);
 			await harness.commit(async (tx) => {
 				(await tx.doc(ArchivedDoc, id)).archived = true;
 			}, context);

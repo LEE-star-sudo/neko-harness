@@ -19,6 +19,8 @@ export function TopBar(props: {
 	onToggleJobs?: () => void;
 	jobsOpen?: boolean;
 	todos?: { open: boolean; onToggle: () => void; panelId: string };
+	/** Present only on a gateway with the workspace browser; `count` is the number of files the agent changed. */
+	workspace?: { open: boolean; count: number; onToggle: () => void };
 }) {
 	const { workspaceRoot, currentSessionId, operating, sessions, view } = useNekoState();
 	// `jobs` is absent on a gateway without background jobs, so the entry stays hidden there.
@@ -63,6 +65,19 @@ export function TopBar(props: {
 						onClick={props.onToggleJobs}
 					>
 						任务{running > 0 ? ` · ${running} 运行中` : ` ${jobs.length}`}
+					</button>
+				)}
+				{props.workspace && (
+					<button
+						type="button"
+						data-workspace-entry
+						className="focus-neko shrink-0 whitespace-nowrap rounded-full border border-sakura-300 px-2.5 py-0.5 text-xs text-sakura-800 hover:bg-sakura-50"
+						aria-expanded={props.workspace.open}
+						aria-label={props.workspace.count > 0 ? `工作区，${props.workspace.count} 个改动文件` : "工作区"}
+						title="工作区：浏览文件与 agent 的改动（只读）"
+						onClick={props.workspace.onToggle}
+					>
+						<span aria-hidden>工作区{props.workspace.count > 0 ? ` ${props.workspace.count}` : ""}</span>
 					</button>
 				)}
 				<ExportMenu />

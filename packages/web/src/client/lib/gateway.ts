@@ -10,6 +10,7 @@ import {
 	type NekoGatewayConnection,
 	questionsClient,
 	queueClient,
+	workspaceClient,
 } from "@neko-harness/gateway/client-session";
 import { boundedWebSocketLink } from "@neko-harness/gateway/link";
 import type {
@@ -347,6 +348,11 @@ export class GatewayConnection {
 	): Promise<WireQuestionRecord> {
 		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换或未就绪，答案草稿已保留");
 		return questionsClient(this.#chat!).respond(input);
+	}
+	/** Workspace browsing is bound to the session the sidebar was opened for; the host makes signals cancel requests. */
+	workspace(sessionId: string) {
+		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话已切换或未就绪");
+		return workspaceClient(this.#chat!, this.#client!.host);
 	}
 	async jobOutput(sessionId: string, jobId: string, since?: number) {
 		return this.#jobs(sessionId).output(jobId, since);

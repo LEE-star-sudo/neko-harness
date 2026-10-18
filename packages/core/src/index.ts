@@ -34,6 +34,17 @@ export {
 	FileCredentialStore,
 	InMemoryCredentialStore,
 } from "./credentials.ts";
+export {
+	CHANGE_LIMITS,
+	type ChangeDetail,
+	type ChangedFile,
+	type ChangeList,
+	type ChangeOp,
+	type ChangeSummary,
+	ChangeTracker,
+	MAIN_AGENT,
+	normalizeChangePath,
+} from "./file-changes.ts";
 export type { DefaultImagePrompt } from "./image-prompt.ts";
 export { decodeImage, IMAGE_LIMITS, type ImageInfo, prepareImage, terminalImage } from "./images.ts";
 export {
@@ -135,3 +146,10 @@ export { ApprovalsDoc, type ToolApproval, ToolApprovals } from "./tool-approvals
 export { mergeTranscriptItems } from "./transcript-items.ts";
 export { QuestionDoc, QuestionsDoc, UserQuestions } from "./user-questions.ts";
 export { accessibleWorkspace, type NekoWorkspace, normalizeWorkspace } from "./workspace.ts";
+export {
+	BROWSE_LIMITS,
+	type DirChildren,
+	type DirEntry,
+	type FileContent,
+	isProtectedPath,
+} from "./workspace-files.ts";
