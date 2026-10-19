@@ -7,6 +7,7 @@ import {
 	NekoChat,
 	NekoContextSettings,
 	NekoCredentials,
+	NekoDefaultModel,
 	NekoModels,
 	NekoSearchSettings,
 	NekoSessionDirectory,
@@ -216,6 +217,7 @@ export type NekoGatewayConnection = {
 	readonly credentials: NekoCredentials;
 	readonly searchSettings: NekoSearchSettings;
 	readonly contextSettings: NekoContextSettings;
+	readonly defaultModel: NekoDefaultModel;
 	readonly skillMarket: NekoSkillMarket;
 	readonly attachment: NekoAttachment | undefined;
 	ready(signal?: AbortSignal): Promise<void>;
@@ -251,6 +253,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			credentials = get(NekoCredentials),
 			searchSettings = get(NekoSearchSettings),
 			contextSettings = get(NekoContextSettings),
+			defaultModel = get(NekoDefaultModel),
 			skillMarket = get(NekoSkillMarket);
 		keep.push(
 			directory.state.subscribe(() => {}),
@@ -258,6 +261,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			credentials.state.subscribe(() => {}),
 			searchSettings.state.subscribe(() => {}),
 			contextSettings.state.subscribe(() => {}),
+			defaultModel.state.subscribe(() => {}),
 		);
 		return {
 			directory,
@@ -268,6 +272,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			credentials,
 			searchSettings,
 			contextSettings,
+			defaultModel,
 			skillMarket,
 		};
 	}
@@ -291,6 +296,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 			credentials,
 			searchSettings,
 			contextSettings,
+			defaultModel,
 			workspaceFiles,
 			skillMarket,
 		} = services();
@@ -303,6 +309,7 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 				credentials.ready,
 				searchSettings.ready,
 				contextSettings.ready,
+				defaultModel.ready,
 				workspaceFiles.ready,
 				skillMarket.ready,
 			]),
@@ -346,6 +353,9 @@ export function createGatewayConnection(link: Link, serverId: string): NekoGatew
 		},
 		get contextSettings() {
 			return services().contextSettings;
+		},
+		get defaultModel() {
+			return services().defaultModel;
 		},
 		get skillMarket() {
 			return services().skillMarket;

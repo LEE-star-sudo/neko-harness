@@ -8,7 +8,6 @@ import type { ModelThinkingLevel, Provider } from "@earendil-works/pi-ai";
 import type { ConversationId, Extension } from "@earendil-works/pi-durable";
 import {
 	createNekoRuntime,
-	DEFAULT_MODEL,
 	DEFAULT_SKILL_MARKET_URL,
 	DEFAULT_STORAGE_PATH,
 	loadNekoConfig,
@@ -89,7 +88,6 @@ const SERVER_ID_FILENAME = "gateway-server-id";
 export async function startGateway(options: NekoGatewayOptions = {}): Promise<NekoGateway> {
 	const context = options.context ?? BACKGROUND_CONTEXT;
 	const fileConfig = loadNekoConfig(options.configDir);
-	const model = options.model ?? fileConfig.defaultModel ?? DEFAULT_MODEL;
 	const storagePath = options.storagePath ?? fileConfig.storagePath ?? DEFAULT_STORAGE_PATH;
 	const host = options.host ?? fileConfig.gateway?.host ?? DEFAULT_HOST;
 	const port =
@@ -119,7 +117,10 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 		...(options.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 		...(searchProvider !== undefined ? { searchProvider } : {}),
 		...(fileConfig.context !== undefined ? { contextSettings: fileConfig.context } : {}),
-		model,
+		// CLI --model 是本次启动的显式覆盖（source "cli"）；配置文件 defaultModel 只在配置存在时传，
+		// core 以 options.model 是否给出区分来源 "config" 与内置 "default"。
+		...(fileConfig.defaultModel !== undefined ? { model: fileConfig.defaultModel } : {}),
+		...(options.model !== undefined ? { modelOverride: options.model } : {}),
 		thinkingLevel: options.thinkingLevel ?? fileConfig.thinkingLevel ?? "high",
 		...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
 		...(options.providers !== undefined ? { providers: options.providers } : {}),
@@ -134,7 +135,6 @@ export async function startGateway(options: NekoGatewayOptions = {}): Promise<Ne
 			socketPath,
 			serverId,
 			nekoDir,
-			model,
 			marketUrl,
 			promptHome: options.promptHome,
 			updates: options.updates,
@@ -157,7 +157,6 @@ type BindOptions = {
 	readonly updates?: UpdateCheckerOptions;
 	readonly updateIntervalMs?: number;
 	readonly nekoDir: string;
-	readonly model: NekoModelRef;
 	readonly marketUrl: string;
 	readonly promptHome: string | undefined;
 	readonly mobileServerName: string | undefined;

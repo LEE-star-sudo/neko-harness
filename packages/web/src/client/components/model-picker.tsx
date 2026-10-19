@@ -3,16 +3,17 @@ import type { NekoModelRef, NekoSelectableModel } from "@neko-harness/core";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
-import { describeModel, groupModels, providerIssue, providerName } from "../lib/providers";
+import { describeModel, groupModels, isDefaultModel, providerIssue, providerName } from "../lib/providers";
 import { useNekoState } from "../lib/store";
 import { Modal } from "./primitives";
 
 export function ModelPicker(props: { current: NekoModelRef | null; fallbackLabel: string }) {
-	const { models, currentSessionId, view, phase, operating } = useNekoState();
+	const { models, currentSessionId, view, phase, operating, defaultModel } = useNekoState();
 	const [session, setSession] = useState<{ id: string } | null>(null);
 	const current = models.find((m) => m.provider === props.current?.provider && m.modelId === props.current?.modelId);
 	if (session && session.id !== currentSessionId) setSession(null);
 	const label = current?.name ?? props.fallbackLabel;
+	const isDefault = isDefaultModel(defaultModel, props.current);
 	return (
 		<>
 			<button
@@ -22,6 +23,7 @@ export function ModelPicker(props: { current: NekoModelRef | null; fallbackLabel
 				className="focus-neko min-w-0 truncate rounded-full px-2 py-1 text-left text-xs text-ink-500 hover:bg-sakura-50"
 				aria-label={`模型与思考强度：${label} ${view?.agent.thinkingLevel ?? ""}`}
 			>
+				{isDefault ? "★ " : ""}
 				{label} · {view?.agent.thinkingLevel ?? "off"} ▾
 			</button>
 			{session && session.id === currentSessionId && props.current && (
@@ -45,7 +47,7 @@ function ModelForm(props: {
 	level: string;
 	onClose: () => void;
 }) {
-	const { models, credentials } = useNekoState();
+	const { models, credentials, defaultModel } = useNekoState();
 	const [selected, setSelected] = useState<NekoSelectableModel | null>(props.current);
 	const [level, setLevel] = useState<ModelThinkingLevel>(props.level as ModelThinkingLevel);
 	const [query, setQuery] = useState("");
@@ -70,6 +72,22 @@ function ModelForm(props: {
 			props.onClose();
 		} catch {
 			setError("配置失败，请重试。");
+		} finally {
+			pending.current = false;
+			setBusy(false);
+		}
+	}
+	/** 只影响新建会话：不调用 configure，当前会话模型不变。 */
+	async function toggleDefault(model: NekoSelectableModel) {
+		if (pending.current) return;
+		pending.current = true;
+		setBusy(true);
+		setError("");
+		try {
+			if (isDefaultModel(defaultModel, model)) await appActions.clearDefaultModel();
+			else await appActions.setDefaultModel({ provider: model.provider, modelId: model.modelId });
+		} catch {
+			setError("默认模型保存失败，请重试。");
 		} finally {
 			pending.current = false;
 			setBusy(false);
@@ -144,8 +162,9 @@ function ModelForm(props: {
 										<ul id={panel} className="space-y-1.5 px-2 pb-2">
 											{group.models.map((model) => {
 												const chosen = selected?.provider === model.provider && selected.modelId === model.modelId;
+												const fallback = isDefaultModel(defaultModel, model);
 												return (
-													<li key={`${model.provider}/${model.modelId}`}>
+													<li key={`${model.provider}/${model.modelId}`} className="flex items-stretch gap-1">
 														<button
 															type="button"
 															disabled={busy || !group.available}
@@ -154,13 +173,27 @@ function ModelForm(props: {
 																setSelected(model);
 																setLevel(model.thinkingLevelAdjustments[level]);
 															}}
-															className={`focus-neko block w-full rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${chosen ? "border-sakura-300 bg-sakura-50 text-sakura-800" : "border-sakura-100 bg-surface text-ink-700"}`}
+															className={`focus-neko block min-w-0 flex-1 rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${chosen ? "border-sakura-300 bg-sakura-50 text-sakura-800" : "border-sakura-100 bg-surface text-ink-700"}`}
 														>
+															{fallback ? "★ " : ""}
 															{model.name}
 															{chosen ? " ✓" : ""}
 															<span className="block truncate text-xs text-ink-400">{model.modelId}</span>
 															<span className="mt-0.5 block text-xs text-ink-500">{describeModel(model)}</span>
 														</button>
+														{group.available && (
+															<button
+																type="button"
+																disabled={busy}
+																aria-pressed={fallback}
+																aria-label={`${fallback ? "取消默认" : "设为默认"} ${model.name}`}
+																title={fallback ? "取消默认模型（只影响新建会话）" : "设为默认模型（只影响新建会话）"}
+																onClick={() => void toggleDefault(model)}
+																className="focus-neko shrink-0 rounded-lg border border-sakura-100 px-2 text-sm text-ink-400 hover:bg-sakura-50 disabled:opacity-50"
+															>
+																<span aria-hidden="true">{fallback ? "★" : "☆"}</span>
+															</button>
+														)}
 													</li>
 												);
 											})}
@@ -195,7 +228,14 @@ function ModelForm(props: {
 						</fieldset>
 					</div>
 				)}
-				<p className="text-xs text-ink-500">仅当前会话，从下一次请求生效。</p>
+				{defaultModel?.source === "cli" && (
+					<p className="text-xs text-tianyi-800">
+						默认模型当前由 --model 启动参数指定并覆盖保存值；移除该参数后，此处保存的默认才会生效。
+					</p>
+				)}
+				<p className="text-xs text-ink-500">
+					仅当前会话，从下一次请求生效；☆ 设为新建会话的默认模型（不影响当前会话）。
+				</p>
 				{error && (
 					<p role="alert" className="text-sm text-sakura-800">
 						{error}

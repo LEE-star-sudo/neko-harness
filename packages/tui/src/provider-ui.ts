@@ -1,6 +1,7 @@
-import { CREDENTIAL_PROVIDERS, MODEL_PROVIDERS, type NekoSelectableModel } from "@neko-harness/core";
-import type { NekoCredentialState } from "@neko-harness/gateway";
-import type { PickerItem } from "./components/picker.ts";
+import { CREDENTIAL_PROVIDERS, MODEL_PROVIDERS, type NekoModelRef, type NekoSelectableModel } from "@neko-harness/core";
+import type { NekoCredentialState, NekoDefaultModelState } from "@neko-harness/gateway";
+import type { PickerItem, PickerPanel } from "./components/picker.ts";
+import { shortcutHints } from "./components/shortcut-hints.ts";
 import { formatTokens } from "./format.ts";
 
 export const modelKey = (model: { provider: string; modelId: string }): string => `${model.provider}/${model.modelId}`;
@@ -24,12 +25,20 @@ export function providerSendBlock(
 	return undefined;
 }
 
-/** Grouped /model rows: current provider first, then catalog order; models without credentials are not confirmable. */
+/** Why a model row cannot be picked or set as default; shown when Enter/`d` lands on it. */
+const needsKeyHint = (provider: string): string => `${providerName(provider)} needs a key. Use /login to configure it.`;
+
+/**
+ * Grouped /model rows: current provider first, then catalog order; models without credentials are not confirmable.
+ * `defaultModel` is the resolved model new sessions start with, so the row the `d` key would clear is visible.
+ */
 export function modelItems(
 	models: readonly NekoSelectableModel[],
 	current: { provider: string; modelId: string } | null | undefined,
+	defaultModel?: { provider: string; modelId: string } | null,
 ) {
 	const currentKey = current ? modelKey(current) : undefined;
+	const defaultKey = defaultModel ? modelKey(defaultModel) : undefined;
 	const order = new Map<string, number>(MODEL_PROVIDERS.map((spec, index) => [spec.id, index + 1]));
 	const rank = (provider: string) => (provider === current?.provider ? 0 : (order.get(provider) ?? order.size + 1));
 	const providers = [...new Set(models.map((model) => model.provider))].sort(
@@ -54,6 +63,7 @@ export function modelItems(
 			const key = modelKey(model);
 			const image = model.input.includes("image");
 			const tags = [
+				...(key === defaultKey ? ["default"] : []),
 				...(model.available ? [] : ["needs key"]),
 				formatTokens(model.contextWindow),
 				...(model.reasoning ? ["Thinking"] : []),
@@ -61,13 +71,77 @@ export function modelItems(
 			];
 			items.push({
 				value: key,
-				label: `${key}${key === currentKey ? " (Current)" : ""}`,
+				label: `${key}${key === currentKey ? " (Current)" : ""}${key === defaultKey ? " ★" : ""}`,
 				rightLabel: tags.join(" · "),
 				searchText: `${model.name} ${name}`,
 				description: `${model.name} | ${formatTokens(model.contextWindow)} context${model.reasoning ? " | Thinking" : ""} | ${image ? "Images" : "Text only"}`,
-				...(model.available ? {} : { blockedHint: `${name} needs a key. Use /login to configure it.` }),
+				...(model.available ? {} : { blockedHint: needsKeyHint(provider) }),
 			});
 		}
 	}
 	return items;
+}
+
+export type ModelPanelClient = {
+	readonly models: {
+		list(input: null): Promise<readonly NekoSelectableModel[]>;
+	};
+	readonly defaultModel: {
+		readonly state: {
+			readonly value: NekoDefaultModelState | undefined;
+			subscribe(listener: (value: NekoDefaultModelState | undefined) => void): () => void;
+		};
+		set(input: NekoModelRef): Promise<unknown>;
+		clear(input: null): Promise<unknown>;
+	};
+};
+
+/**
+ * Opens the /model panel. Enter switches the current session's model; `d` toggles the highlighted
+ * row as the default for new sessions (set when not the default, clear when it is). Rows without a
+ * key are not confirmable: `d` explains and leaves the default untouched. The default marker follows
+ * the `neko.default-model` subscription, so changes from the Web UI or another client sync live.
+ */
+export function openModelPanel(
+	panel: PickerPanel,
+	client: ModelPanelClient,
+	current: NekoModelRef | null | undefined,
+	applyModel: (model: NekoSelectableModel) => Promise<void>,
+	notify: (message: string) => void,
+): () => void {
+	let models: readonly NekoSelectableModel[] = [];
+	const currentKey = current ? modelKey(current) : null;
+	const effectiveDefault = () => client.defaultModel.state.value?.effective ?? null;
+	const items = () => modelItems(models, current, effectiveDefault());
+	const stop = client.defaultModel.state.subscribe(() => panel.update(items()));
+	panel.groupedFilter = true;
+	panel.help = shortcutHints(["↑↓", "Select"], ["Enter", "Open"], ["D", "Toggle default"], ["Esc", "Close"]);
+	panel.listKey = (data, value) => {
+		if (data.toLowerCase() !== "d" || panel.search.getValue() !== "" || value === undefined) return false;
+		const model = models.find((m) => modelKey(m) === value);
+		if (!model) return false;
+		if (!model.available) {
+			panel.hint = needsKeyHint(model.provider);
+			return true;
+		}
+		const effective = effectiveDefault();
+		const toggle =
+			effective !== null && modelKey(effective) === value
+				? client.defaultModel.clear(null)
+				: client.defaultModel.set({ provider: model.provider, modelId: model.modelId });
+		void toggle.catch((error) => notify(error instanceof Error ? error.message : String(error)));
+		return true;
+	};
+	void panel.show(
+		"Models",
+		async () => {
+			models = await client.models.list(null);
+			return items();
+		},
+		async (value) => {
+			const selected = models.find((m) => modelKey(m) === value);
+			if (selected?.available && value !== currentKey) await applyModel(selected);
+		},
+	);
+	return stop;
 }

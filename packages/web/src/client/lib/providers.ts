@@ -1,6 +1,6 @@
 import type { NekoSelectableModel } from "@neko-harness/core";
 import { isModelProvider, MODEL_PROVIDERS } from "@neko-harness/core/credential-providers";
-import type { NekoCredentialState } from "./contract.ts";
+import type { NekoCredentialState, NekoDefaultModelState } from "./contract.ts";
 
 export type ProviderIssue = "disabled" | "missing-key";
 
@@ -30,6 +30,20 @@ export type ModelGroup = {
 };
 
 const ORDER = new Map<string, number>(MODEL_PROVIDERS.map((item, index) => [item.id, index]));
+
+/** Whether `model` is the saved default that new sessions start with (the state is the whole chain's result). */
+export function isDefaultModel(
+	state: NekoDefaultModelState | null,
+	model: { provider: string; modelId: string } | null | undefined,
+): boolean {
+	return (
+		state !== null &&
+		model !== null &&
+		model !== undefined &&
+		state.effective.provider === model.provider &&
+		state.effective.modelId === model.modelId
+	);
+}
 
 /** Group models by provider in catalog order, keeping only those matching every query word. */
 export function groupModels(models: readonly NekoSelectableModel[], query: string): ModelGroup[] {

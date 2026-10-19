@@ -1,4 +1,10 @@
-import type { ChatView, NekoConversationChange, NekoSelectableModel, NekoSkillInfo } from "@neko-harness/core";
+import type {
+	ChatView,
+	NekoConversationChange,
+	NekoModelRef,
+	NekoSelectableModel,
+	NekoSkillInfo,
+} from "@neko-harness/core";
 import { ApplicationProtocolError, type UpdateState } from "@neko-harness/core/application-version";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import type { SearchProviderId } from "@neko-harness/core/search-providers";
@@ -20,6 +26,8 @@ import type {
 	NekoContextSettingsState,
 	NekoCredentialState,
 	NekoCredentials,
+	NekoDefaultModel,
+	NekoDefaultModelState,
 	NekoDirectoryPage,
 	NekoDirectoryState,
 	NekoMarketInstallResult,
@@ -47,6 +55,7 @@ export type GatewayEvents = {
 	onCredentials?(state: NekoCredentialState | null): void;
 	onSearchSettings?(state: NekoSearchSettingsState | null): void;
 	onContextSettings?(state: NekoContextSettingsState | null): void;
+	onDefaultModel?(state: NekoDefaultModelState | null): void;
 	onError(text: string): void;
 	onDirectory(state: NekoDirectoryState): void;
 	onWorkspaces(state: NekoWorkspaceState): void;
@@ -85,6 +94,7 @@ export class GatewayConnection {
 	#credentials: NekoCredentials | undefined;
 	#searchSettings: NekoSearchSettings | undefined;
 	#contextSettings: NekoContextSettings | undefined;
+	#defaultModel: NekoDefaultModel | undefined;
 	#skillMarket: NekoSkillMarket | undefined;
 	#chat: NekoChat | undefined;
 	#sessions: readonly NekoSessionSummary[] = [];
@@ -141,6 +151,14 @@ export class GatewayConnection {
 	async resetContextSettings(): Promise<void> {
 		if (!this.#connected || !this.#contextSettings) throw new Error("网关未连接");
 		await this.#contextSettings.reset({});
+	}
+	async setDefaultModel(model: NekoModelRef): Promise<void> {
+		if (!this.#connected || !this.#defaultModel) throw new Error("网关未连接");
+		await this.#defaultModel.set(model);
+	}
+	async clearDefaultModel(): Promise<void> {
+		if (!this.#connected || !this.#defaultModel) throw new Error("网关未连接");
+		await this.#defaultModel.clear(null);
 	}
 	async start(): Promise<void> {
 		this.#options.events.onPhase("connecting");
@@ -443,6 +461,7 @@ export class GatewayConnection {
 		this.#credentials = client.credentials;
 		this.#searchSettings = client.searchSettings;
 		this.#contextSettings = client.contextSettings;
+		this.#defaultModel = client.defaultModel;
 		this.#skillMarket = client.skillMarket;
 
 		let credentialRevision = this.#credentials.state.value?.revision;
@@ -469,6 +488,13 @@ export class GatewayConnection {
 			}),
 		);
 		this.#options.events.onContextSettings?.(contextSettings.state.value);
+		const defaultModel = this.#defaultModel;
+		this.#unsub.push(
+			defaultModel.state.subscribe((value) => {
+				if (epoch === this.#epoch) this.#options.events.onDefaultModel?.(value);
+			}),
+		);
+		this.#options.events.onDefaultModel?.(defaultModel.state.value);
 		const directory = client.directory;
 		const publish = (value: NekoDirectoryState) => {
 			if (epoch !== this.#epoch) return;
@@ -553,6 +579,8 @@ export class GatewayConnection {
 		this.#options.events.onSearchSettings?.(null);
 		this.#contextSettings = undefined;
 		this.#options.events.onContextSettings?.(null);
+		this.#defaultModel = undefined;
+		this.#options.events.onDefaultModel?.(null);
 		this.#models = undefined;
 
 		const client = this.#client;

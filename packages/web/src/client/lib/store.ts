@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
 import type {
 	NekoContextSettingsState,
 	NekoCredentialState,
+	NekoDefaultModelState,
 	NekoSearchSettingsState,
 	NekoWorkspaceSummary,
 } from "./contract.ts";
@@ -33,6 +34,8 @@ export type NekoState = {
 	credentials: NekoCredentialState | null;
 	searchSettings: NekoSearchSettingsState | null;
 	contextSettings: NekoContextSettingsState | null;
+	/** 新建会话的默认模型（neko.default-model 订阅，实时）；null = 未连接。 */
+	defaultModel: NekoDefaultModelState | null;
 	workspaceRoot: string;
 	workspaces: readonly NekoWorkspaceSummary[];
 	operating: boolean;
@@ -54,6 +57,7 @@ let state: NekoState = {
 	credentials: null,
 	searchSettings: null,
 	contextSettings: null,
+	defaultModel: null,
 	workspaceRoot: "",
 	workspaces: [],
 	operating: false,
@@ -106,6 +110,9 @@ export const storeActions = {
 	setContextSettings(contextSettings: NekoContextSettingsState | null): void {
 		if (contextSettings && state.contextSettings && contextSettings.revision < state.contextSettings.revision) return;
 		emit({ ...state, contextSettings });
+	},
+	setDefaultModel(defaultModel: NekoDefaultModelState | null): void {
+		emit({ ...state, defaultModel });
 	},
 	setWorkspace(workspaceRoot: string): void {
 		emit({ ...state, workspaceRoot });

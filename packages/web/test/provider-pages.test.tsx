@@ -24,10 +24,13 @@ dialog.close ??= function (this: HTMLDialogElement) {
 
 const configured: unknown[][] = [];
 const enabledCalls: unknown[][] = [];
+const defaultCalls: { set: unknown[]; clear: number } = { set: [], clear: 0 };
 mock.module("../src/client/lib/bootstrap", () => ({
 	appActions: {
 		configure: async (...args: unknown[]) => void configured.push(args),
 		setProviderEnabled: async (...args: unknown[]) => void enabledCalls.push(args),
+		setDefaultModel: async (model: unknown) => void defaultCalls.set.push(model),
+		clearDefaultModel: async () => void defaultCalls.clear++,
 		saveCredential: async () => {},
 		removeCredential: async () => {},
 		setSearchProvider: async () => {},
@@ -108,9 +111,12 @@ const click = (element: Element | null) => act(async () => (element as HTMLEleme
 beforeEach(() => {
 	configured.length = 0;
 	enabledCalls.length = 0;
+	defaultCalls.set.length = 0;
+	defaultCalls.clear = 0;
 	document.body.innerHTML = "";
 	storeActions.setPhase("ready");
 	storeActions.setSession("s1");
+	storeActions.setDefaultModel(null);
 	storeActions.setCredentials(null);
 	storeActions.setCredentials({ ...credentials(), revision: 100 });
 	storeActions.setModels([
@@ -228,4 +234,110 @@ it("keeps web search and the Tavily key on their own page", async () => {
 	expect(page.host.querySelector('a[href="/settings/search"][aria-current="page"]')).not.toBeNull();
 	expect(page.host.querySelector('a[href="/settings"]')).not.toBeNull();
 	await page.unmount();
+});
+
+const star = (name: string, action: "设为默认" | "取消默认") =>
+	document.body.querySelector<HTMLButtonElement>(`button[aria-label="${action} ${name}"]`);
+
+it("marks the default model, toggles it from an available row and follows state updates", async () => {
+	storeActions.setView(view("deepseek", "deepseek-flash"));
+	storeActions.setDefaultModel({
+		effective: { provider: "deepseek", modelId: "deepseek-flash" },
+		source: "saved",
+	});
+	const picker = await mount(
+		React.createElement(ModelPicker, {
+			current: { provider: "deepseek", modelId: "deepseek-flash" },
+			fallbackLabel: "x",
+		}),
+	);
+	const trigger = picker.host.querySelector("button")!;
+	expect(trigger.textContent).toContain("★");
+	await click(trigger);
+	// 当前默认模型行带星标，非默认行只提供「设为默认」。
+	expect(star("DeepSeek Flash", "取消默认")).not.toBeNull();
+	expect(star("DeepSeek Flash", "设为默认")).toBeNull();
+	expect(star("DeepSeek Pro", "设为默认")).not.toBeNull();
+
+	await click(star("DeepSeek Pro", "设为默认"));
+	expect(defaultCalls.set).toEqual([{ provider: "deepseek", modelId: "deepseek-v4-pro" }]);
+	expect(defaultCalls.clear).toBe(0);
+	// 设为默认不改变当前会话模型：选中的仍是 Flash。
+	expect(document.body.textContent).toContain("DeepSeek Flash ✓");
+
+	// 另一端的修改经订阅同步后无需重开面板即可反映。
+	await act(async () =>
+		storeActions.setDefaultModel({
+			effective: { provider: "deepseek", modelId: "deepseek-v4-pro" },
+			source: "saved",
+		}),
+	);
+	expect(star("DeepSeek Pro", "取消默认")).not.toBeNull();
+	expect(star("DeepSeek Flash", "设为默认")).not.toBeNull();
+	expect(trigger.textContent).not.toContain("★");
+
+	await click(star("DeepSeek Pro", "取消默认"));
+	expect(defaultCalls.clear).toBe(1);
+	expect(defaultCalls.set).toEqual([{ provider: "deepseek", modelId: "deepseek-v4-pro" }]);
+	await picker.unmount();
+});
+
+it("offers no default toggle on models that cannot be picked for lack of a key", async () => {
+	storeActions.setView(view("deepseek", "deepseek-flash"));
+	storeActions.setDefaultModel({
+		effective: { provider: "deepseek", modelId: "deepseek-flash" },
+		source: "saved",
+	});
+	const picker = await mount(
+		React.createElement(ModelPicker, {
+			current: { provider: "deepseek", modelId: "deepseek-flash" },
+			fallbackLabel: "x",
+		}),
+	);
+	await click(picker.host.querySelector("button"));
+	const headers = [...document.body.querySelectorAll("button[aria-expanded]")];
+	await click(headers[1]!);
+	expect(document.body.textContent).toContain("Claude Haiku");
+	expect(star("Claude Haiku", "设为默认")).toBeNull();
+	expect(star("Claude Haiku", "取消默认")).toBeNull();
+	// 未配置 Key 的整组都不带默认键（否则行内会出现 ☆/★ 切换按钮）。
+	const panel = document.body.querySelector("#models-openrouter")!;
+	expect(panel.textContent).toContain("Claude Haiku");
+	expect(panel.querySelectorAll("button[aria-label]")).toHaveLength(0);
+	await picker.unmount();
+});
+
+it("marks a cli-sourced default and keeps the toggle driven by the subscribed state", async () => {
+	// 会话模型是 Pro，而 --model 指定的默认是 Flash：触发器不带星标。
+	storeActions.setView(view("deepseek", "deepseek-v4-pro"));
+	storeActions.setDefaultModel({
+		effective: { provider: "deepseek", modelId: "deepseek-flash" },
+		source: "cli",
+	});
+	const picker = await mount(
+		React.createElement(ModelPicker, {
+			current: { provider: "deepseek", modelId: "deepseek-v4-pro" },
+			fallbackLabel: "x",
+		}),
+	);
+	const trigger = picker.host.querySelector("button")!;
+	expect(trigger.textContent).not.toContain("★");
+	await click(trigger);
+	// cli 来源同样按 effective 匹配打标识，且给出覆盖说明。
+	expect(document.body.textContent).toContain("--model 启动参数指定");
+	expect(star("DeepSeek Flash", "取消默认")).not.toBeNull();
+	expect(star("DeepSeek Pro", "设为默认")).not.toBeNull();
+
+	// 保存另一模型：调用 set，但订阅回的状态仍是 cli 的 effective（保存值被 --model 压过），标识不动。
+	await click(star("DeepSeek Pro", "设为默认"));
+	expect(defaultCalls.set).toEqual([{ provider: "deepseek", modelId: "deepseek-v4-pro" }]);
+	await act(async () =>
+		storeActions.setDefaultModel({
+			effective: { provider: "deepseek", modelId: "deepseek-flash" },
+			source: "cli",
+		}),
+	);
+	expect(star("DeepSeek Flash", "取消默认")).not.toBeNull();
+	expect(star("DeepSeek Pro", "设为默认")).not.toBeNull();
+	await picker.unmount();
 });

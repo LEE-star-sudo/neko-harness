@@ -17,7 +17,8 @@ export const GATEWAY_USAGE = `用法: neko serve [选项]
 
 可通过前端设置或环境变量（DEEPSEEK_API_KEY / OPENROUTER_API_KEY / OPENCODE_API_KEY / TAVILY_API_KEY 等）配置凭据；
 除 DeepSeek 外的模型 provider 需先在前端启用，--model 指向未启用的 provider 时提交会被拒绝；
-联网搜索服务可在前端设置，或用配置文件 webSearch.provider（tavily / deepseek，默认 tavily）。`;
+联网搜索服务可在前端设置，或用配置文件 webSearch.provider（tavily / deepseek，默认 tavily）；
+默认模型还可在 TUI /model 或 Web 模型选择器中「设为默认」，优先级低于 --model、高于配置文件 defaultModel。`;
 
 export type GatewayCliOptions = {
 	host?: string;

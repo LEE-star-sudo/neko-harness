@@ -1,12 +1,12 @@
 import { expect, it } from "bun:test";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
-import type { NekoSelectableModel } from "@neko-harness/core";
-import type { NekoCredentialState } from "@neko-harness/gateway";
+import type { NekoModelRef, NekoSelectableModel } from "@neko-harness/core";
+import type { NekoCredentialState, NekoDefaultModelState } from "@neko-harness/gateway";
 import { StatusFooter } from "../src/components/footer.ts";
 import { PickerPanel } from "../src/components/picker.ts";
 import { modelDisplayName } from "../src/format.ts";
 import { commands } from "../src/labels.ts";
-import { isProviderRejection, modelItems, providerSendBlock } from "../src/provider-ui.ts";
+import { isProviderRejection, modelItems, openModelPanel, providerSendBlock } from "../src/provider-ui.ts";
 
 const model = (provider: string, modelId: string, extra: Partial<NekoSelectableModel> = {}): NekoSelectableModel =>
 	({
@@ -194,4 +194,138 @@ it("recognises gateway provider rejections", () => {
 
 it("describes /login as provider and key management", () => {
 	expect(commands.find((command) => command.name === "login")?.description).toBe("Manage model providers and API keys");
+});
+
+const defaultState = (effective: NekoModelRef, source: NekoDefaultModelState["source"]): NekoDefaultModelState => ({
+	effective,
+	source,
+});
+
+function fakeModelClient(initial: NekoDefaultModelState) {
+	const listeners = new Set<(value: NekoDefaultModelState | undefined) => void>();
+	const calls: { set: NekoModelRef[]; clear: number } = { set: [], clear: 0 };
+	const state: {
+		value: NekoDefaultModelState | undefined;
+		subscribe(listener: (value: NekoDefaultModelState | undefined) => void): () => void;
+	} = {
+		value: initial,
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+	};
+	const client = {
+		models: { list: async (_input: null) => models },
+		defaultModel: {
+			state,
+			set: async (input: NekoModelRef) => {
+				calls.set.push(input);
+			},
+			clear: async (_input: null) => {
+				calls.clear++;
+			},
+		},
+	};
+	return {
+		client,
+		calls,
+		publish(value: NekoDefaultModelState) {
+			state.value = value;
+			for (const listener of listeners) listener(value);
+		},
+	};
+}
+
+async function openDefaultModels(
+	initial: NekoDefaultModelState,
+	current = { provider: "deepseek", modelId: "deepseek-flash" },
+) {
+	const fake = fakeModelClient(initial);
+	const picked: NekoSelectableModel[] = [];
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	panel.height = 20;
+	const stop = openModelPanel(
+		panel,
+		fake.client,
+		current,
+		async (model) => {
+			picked.push(model);
+		},
+		() => {},
+	);
+	await tick();
+	return { panel, fake, calls: fake.calls, picked, stop };
+}
+
+it("marks the resolved default model and advertises the d key in the footer", async () => {
+	const { panel, fake } = await openDefaultModels(
+		defaultState({ provider: "openrouter", modelId: "anthropic/claude-haiku-4.5" }, "saved"),
+	);
+	const out = text(panel);
+	expect(out).toContain("openrouter/anthropic/claude-haiku-4.5 ★");
+	expect(out).toContain("default · 200.0k · Thinking · Images");
+	expect(out).not.toContain("deepseek/deepseek-flash ★");
+	expect(out).toContain("D Toggle default");
+	expect(out).toContain("Esc Close");
+	// 标识完全以订阅状态为准（含 cli/config 来源的 effective）。
+	fake.publish(defaultState({ provider: "deepseek", modelId: "deepseek-flash" }, "cli"));
+	const moved = text(panel);
+	expect(moved).toMatch(/deepseek\/deepseek-flash( \(Current\))? ★/);
+	expect(moved).not.toContain("openrouter/anthropic/claude-haiku-4.5 ★");
+});
+
+it("d sets the highlighted available model as default and the marker follows the subscription", async () => {
+	const { panel, fake, calls } = await openDefaultModels(
+		defaultState({ provider: "deepseek", modelId: "deepseek-flash" }, "config"),
+	);
+	expect(text(panel)).toMatch(/deepseek\/deepseek-flash( \(Current\))? ★/);
+	panel.handleInput("\x1b[B");
+	panel.handleInput("d");
+	await tick();
+	expect(calls.set).toEqual([{ provider: "openrouter", modelId: "anthropic/claude-haiku-4.5" }]);
+	expect(calls.clear).toBe(0);
+	// 订阅回推后标识移动，无需重开面板（Web 修改同理）。
+	fake.publish(defaultState({ provider: "openrouter", modelId: "anthropic/claude-haiku-4.5" }, "saved"));
+	const out = text(panel);
+	expect(out).toContain("openrouter/anthropic/claude-haiku-4.5 ★");
+	expect(out).toContain("default · 200.0k · Thinking · Images");
+	expect(out).not.toContain("deepseek/deepseek-flash ★");
+	expect(panel.open).toBe(true);
+});
+
+it("d clears the highlighted row when it is the current default", async () => {
+	const { panel, fake, calls } = await openDefaultModels(
+		defaultState({ provider: "openrouter", modelId: "anthropic/claude-haiku-4.5" }, "saved"),
+	);
+	expect(text(panel)).toContain("openrouter/anthropic/claude-haiku-4.5 ★");
+	panel.handleInput("\x1b[B");
+	panel.handleInput("d");
+	await tick();
+	expect(calls.clear).toBe(1);
+	expect(calls.set).toEqual([]);
+	// 清除保存值后回落到配置/内置默认，标识随之移动。
+	fake.publish(defaultState({ provider: "deepseek", modelId: "deepseek-flash" }, "default"));
+	const out = text(panel);
+	expect(out).toMatch(/deepseek\/deepseek-flash( \(Current\))? ★/);
+	expect(out).not.toContain("openrouter/anthropic/claude-haiku-4.5 ★");
+	expect(panel.open).toBe(true);
+});
+
+it("d on a model without a key changes nothing and points to /login", async () => {
+	const saved = defaultState({ provider: "openai", modelId: "gpt-5" }, "saved");
+	const { panel, fake, calls } = await openDefaultModels(saved);
+	expect(text(panel)).toContain("openai/gpt-5 ★");
+	// 高亮移到 OpenAI 的 gpt-5（needs key 行）。
+	for (let i = 0; i < 3; i++) panel.handleInput("\x1b[B");
+	panel.handleInput("d");
+	await tick();
+	expect(calls.set).toEqual([]);
+	expect(calls.clear).toBe(0);
+	expect(fake.client.defaultModel.state.value).toEqual(saved);
+	const out = text(panel);
+	expect(out).toContain("OpenAI needs a key. Use /login to configure it.");
+	expect(panel.open).toBe(true);
 });

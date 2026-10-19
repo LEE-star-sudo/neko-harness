@@ -3,8 +3,10 @@ import { createHost } from "@earendil-works/chord";
 import { Value } from "typebox/value";
 import {
 	ChatViewSchema,
+	DefaultModelStateSchema,
 	DirectoryStateSchema,
 	GATEWAY_HOST,
+	NekoDefaultModel,
 	NekoModels,
 	NekoSessionDirectory,
 } from "../src/contract.ts";
@@ -28,6 +30,17 @@ it("validates shared contract results and state before publishing them", async (
 	} finally {
 		await host.close();
 	}
+});
+
+it("accepts only known default-model sources in states", () => {
+	const state = { effective: { provider: "deepseek", modelId: "deepseek-flash" }, source: "default" };
+	expect(Value.Check(DefaultModelStateSchema, state)).toBe(true);
+	expect(Value.Check(DefaultModelStateSchema, { ...state, source: "saved" })).toBe(true);
+	expect(Value.Check(DefaultModelStateSchema, { ...state, source: "bogus" })).toBe(false);
+	expect(Value.Check(DefaultModelStateSchema, { effective: { provider: "deepseek" }, source: "default" })).toBe(false);
+	expect(Value.Check(DefaultModelStateSchema, { source: "default" })).toBe(false);
+	expect(NekoDefaultModel.version).toBe(1);
+	expect(NekoDefaultModel.name).toBe("neko.default-model");
 });
 
 it("accepts nullable diff fields on tool items and streaming calls", () => {

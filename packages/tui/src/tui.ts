@@ -9,14 +9,7 @@ import {
 	type Text,
 	TuiAltScreen,
 } from "@earendil-works/pi-tui";
-import type {
-	ChatItem,
-	ChatView,
-	NekoModelRef,
-	NekoSelectableModel,
-	StreamingToolCall,
-	StreamingView,
-} from "@neko-harness/core";
+import type { ChatItem, ChatView, NekoModelRef, StreamingToolCall, StreamingView } from "@neko-harness/core";
 import { normalizeWorkspace } from "@neko-harness/core";
 import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
@@ -56,7 +49,7 @@ import { createInputRouter } from "./input-router.ts";
 import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
-import { isProviderRejection, modelItems, modelKey, providerSendBlock } from "./provider-ui.ts";
+import { isProviderRejection, modelKey, openModelPanel, providerSendBlock } from "./provider-ui.ts";
 import { canAutoOpen, QuestionDock } from "./question-dock.ts";
 import { QueueRow, queueKeyAction, restoreText, steerNotice, withdrawNotice } from "./queue-ui.ts";
 import { openSearchPanel } from "./search-ui.ts";
@@ -148,6 +141,7 @@ class NekoTuiApp {
 	readonly #queueRow = new QueueRow();
 	#searchStop: (() => void) | undefined;
 	#contextStop: (() => void) | undefined;
+	#modelStop: (() => void) | undefined;
 	#agentDetails = new Map<string, SubagentDetail>();
 	#sessionId = "";
 	#viewUnsubscribe: (() => void) | undefined;
@@ -214,6 +208,8 @@ class NekoTuiApp {
 				this.#searchStop = undefined;
 				this.#contextStop?.();
 				this.#contextStop = undefined;
+				this.#modelStop?.();
+				this.#modelStop = undefined;
 				clearInterval(this.#sessionPanelTimer);
 				this.#sessionPanelTimer = undefined;
 				this.#ui.setFocus(this.#question.open ? this.#question : this.#editor);
@@ -869,23 +865,16 @@ class NekoTuiApp {
 		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
 		const chat = this.#chat;
 		const current = this.#lastView?.agent.model;
-		const currentKey = current ? `${current.provider}/${current.modelId}` : null;
-		let models: readonly NekoSelectableModel[] = [];
-		this.#panel.groupedFilter = true;
-		const ready = this.#panel.show(
-			"Models",
-			async () => {
-				models = await this.#gateway.client.models.list(null);
-				return modelItems(models, current);
+		this.#modelStop = openModelPanel(
+			this.#panel,
+			this.#gateway.client,
+			current,
+			async (selected) => {
+				await chat?.configure({ model: { provider: selected.provider, modelId: selected.modelId } });
 			},
-			async (value) => {
-				const selected = models.find((m) => keyOf(m) === value);
-				if (selected?.available && value !== currentKey)
-					await chat?.configure({ model: { provider: selected.provider, modelId: selected.modelId } });
-			},
+			(message) => this.addNotice(message, "error"),
 		);
 		this.#ui.setFocus(this.#panel);
-		await ready;
 	}
 
 	/** /theme 浮层:进程内主题偏好(auto 跟随终端 / 明确明暗),即选即生效。 */

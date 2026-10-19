@@ -29,3 +29,15 @@ it("documents the web search provider selection and credential variables in help
 	const web = await help("../../web/src/main.ts", ["--help"]);
 	for (const text of ["OPENROUTER_API_KEY", "模型服务", "联网搜索", "provider/modelId"]) expect(web).toContain(text);
 });
+
+it("documents the default-model entry points and their precedence in help", async () => {
+	for (const entry of [
+		"../src/main.ts",
+		"../../tui/src/main.ts",
+		"../../web/src/main.ts",
+		"../../gateway/src/main.ts",
+	]) {
+		const output = await help(entry, ["--help"]);
+		for (const text of ["/model", "设为默认", "--model", "defaultModel"]) expect(output).toContain(text);
+	}
+});

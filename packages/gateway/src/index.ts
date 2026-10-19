@@ -9,6 +9,8 @@ export {
 	type NekoCreateSessionOptions,
 	type NekoCredentialState,
 	NekoCredentials,
+	NekoDefaultModel,
+	type NekoDefaultModelState,
 	type NekoDirectoryState,
 	type NekoMarketInstallResult,
 	type NekoMarketPreview,

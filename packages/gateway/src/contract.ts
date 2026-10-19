@@ -740,6 +740,24 @@ export const NekoContextSettings = contract("neko.context-settings", {
 		},
 	},
 });
+const defaultModelSource = Type.Enum(["cli", "saved", "config", "default"]);
+export const DefaultModelStateSchema = Type.Object({
+	effective: model,
+	source: defaultModelSource,
+});
+export const NekoDefaultModel = contract("neko.default-model", {
+	version: 1,
+	input: Type.Object({}, { additionalProperties: false }),
+	variants: {
+		ready: {
+			state: { state: DefaultModelStateSchema },
+			methods: {
+				set: rpc(model, nil),
+				clear: rpc(nil, nil),
+			},
+		},
+	},
+});
 export const FileCandidatesSchema = Type.Object({
 	entries: Type.Array(Type.Object({ name: str, path: str, kind: Type.Enum(["file", "directory"]) }), { maxItems: 100 }),
 	limited: bool,
@@ -833,6 +851,8 @@ export type NekoWorkspaceFiles = Ref<typeof NekoWorkspaceFiles>;
 export type NekoCredentials = Ref<typeof NekoCredentials>;
 export type NekoSearchSettings = Ref<typeof NekoSearchSettings>;
 export type NekoContextSettings = Ref<typeof NekoContextSettings>;
+export type NekoDefaultModel = Ref<typeof NekoDefaultModel>;
+export type NekoDefaultModelState = Static<typeof DefaultModelStateSchema>;
 export type NekoSkillMarket = Ref<typeof NekoSkillMarket>;
 export type NekoSessionSummary = Static<typeof SessionSummarySchema>;
 export type NekoDirectoryState = Static<typeof DirectoryStateSchema>;

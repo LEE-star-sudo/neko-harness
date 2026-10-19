@@ -117,6 +117,8 @@ export {
 	type NekoConversationChange,
 	type NekoConversationInfo,
 	type NekoCreateConversationOptions,
+	type NekoDefaultModelSource,
+	type NekoDefaultModelState,
 	type NekoModelInfo,
 	type NekoModelRef,
 	type NekoRuntime,

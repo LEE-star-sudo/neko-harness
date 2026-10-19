@@ -17,7 +17,8 @@ const USAGE = `用法: neko <命令> [选项]
 各命令的选项详见 neko <命令> --help。
 可通过 TUI /login、Web 设置页或环境变量（DEEPSEEK_API_KEY / OPENROUTER_API_KEY / OPENCODE_API_KEY / TAVILY_API_KEY 等）配置凭据；
 除 DeepSeek 外的模型 provider（如 OpenRouter、OpenCode Go）需先在 /login 或 Web 设置页「模型服务」启用，--model 格式为 provider/modelId。
-联网搜索服务（默认 Tavily，可改选 DeepSeek）可用 TUI /search、Web 设置页「联网搜索」或配置文件 webSearch.provider 选择。`;
+联网搜索服务（默认 Tavily，可改选 DeepSeek）可用 TUI /search、Web 设置页「联网搜索」或配置文件 webSearch.provider 选择。
+默认模型可在 TUI /model 或 Web 模型选择器「设为默认」，优先级低于 --model、高于配置文件 defaultModel。`;
 
 const [command, ...rest] = process.argv.slice(2);
 

@@ -83,6 +83,7 @@ export function startNekoApp(): void {
 				onCredentials: storeActions.setCredentials,
 				onSearchSettings: storeActions.setSearchSettings,
 				onContextSettings: storeActions.setContextSettings,
+				onDefaultModel: storeActions.setDefaultModel,
 				onWorkspaces: (state) => storeActions.setWorkspaces(state.workspaces),
 				onWorkspace: storeActions.setWorkspace,
 				onOperation: storeActions.setOperation,
@@ -146,6 +147,12 @@ export const appActions = {
 	},
 	resetContextSettings() {
 		return requireConnection().resetContextSettings();
+	},
+	setDefaultModel(model: NekoModelRef) {
+		return requireConnection().setDefaultModel(model);
+	},
+	clearDefaultModel() {
+		return requireConnection().clearDefaultModel();
 	},
 	setSearchProvider(provider: SearchProviderId) {
 		return requireConnection().setSearchProvider(provider);

@@ -21,6 +21,7 @@ const USAGE = `用法: neko web [选项]
   -h, --help           显示此帮助
 
 可在 Web 设置页「模型服务」启用 provider（如 OpenRouter、OpenCode Go）并配置 Key，联网搜索在「联网搜索」页设置；
+模型选择器中可把可选模型「设为默认」，优先级低于 --model、高于配置文件 defaultModel；
 网关子进程也会继承 DEEPSEEK_API_KEY / OPENROUTER_API_KEY / OPENCODE_API_KEY 等环境变量。`;
 
 type CliOptions = {

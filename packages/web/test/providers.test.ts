@@ -5,6 +5,7 @@ import {
 	describeModel,
 	formatContextWindow,
 	groupModels,
+	isDefaultModel,
 	providerIssue,
 	providerName,
 } from "../src/client/lib/providers.ts";
@@ -73,4 +74,18 @@ it("formats names and model descriptions", () => {
 	expect(formatContextWindow(1_000_000)).toBe("1M");
 	expect(formatContextWindow(128_000)).toBe("128K");
 	expect(describeModel(model("deepseek", "a", "A"))).toBe("200K 上下文 · 支持图片 · 支持思考");
+});
+
+it("matches the default model by provider and modelId regardless of source", () => {
+	const ref = { provider: "deepseek", modelId: "deepseek-flash" };
+	expect(isDefaultModel(null, ref)).toBe(false);
+	expect(isDefaultModel({ effective: ref, source: "saved" }, null)).toBe(false);
+	expect(isDefaultModel({ effective: ref, source: "saved" }, undefined)).toBe(false);
+	expect(isDefaultModel({ effective: ref, source: "saved" }, { provider: "deepseek", modelId: "other" })).toBe(false);
+	expect(
+		isDefaultModel({ effective: ref, source: "saved" }, { provider: "openrouter", modelId: "deepseek-flash" }),
+	).toBe(false);
+	// 来源（cli / saved / config / default）不影响标识：一律按 effective 命中。
+	for (const source of ["cli", "saved", "config", "default"] as const)
+		expect(isDefaultModel({ effective: ref, source }, ref)).toBe(true);
 });

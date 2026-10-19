@@ -48,6 +48,8 @@ export class PickerPanel implements Component {
 	groupedFilter = false;
 	/** Pre-filter for list keys (e.g. `S`, `←`); return true to consume. Reset when the panel closes. */
 	listKey: ((data: string, value: string | undefined) => boolean) | undefined;
+	/** Ready-state footer replacing the default select hints (e.g. extra `D` key). Reset when the panel closes. */
+	help: string | undefined;
 	readonly search = new Input({ prompt: "❯ ", placeholder: "Type to filter" });
 	#items: readonly PickerItem[] = [];
 	#index = 0;
@@ -75,6 +77,10 @@ export class PickerPanel implements Component {
 	}
 	set focused(value: boolean) {
 		this.search.focused = value;
+	}
+	/** One-shot message shown below the list until the next keypress (listKey handlers explain a no-op). */
+	set hint(value: string) {
+		this.#hint = value;
 	}
 	invalidate(): void {}
 	async show(
@@ -121,6 +127,7 @@ export class PickerPanel implements Component {
 		this.agentNavigation = false;
 		this.emptyText = undefined;
 		this.groupedFilter = false;
+		this.help = undefined;
 		this.#hint = "";
 		this.listKey = undefined;
 		++this.#generation;
@@ -302,7 +309,7 @@ export class PickerPanel implements Component {
 				: this.#state === "ready"
 					? this.agentNavigation
 						? shortcutHints(["↑↓", "Select"], ["→/Enter", "Open"], ["←", "Main"])
-						: labels.select
+						: (this.help ?? labels.select)
 					: labels.close;
 		const hint = this.#state === "ready" && height >= 5 ? this.#hint : "";
 		const available = Math.max(1, height - rows.length - 1 - (hint ? 1 : 0));

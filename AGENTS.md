@@ -36,7 +36,8 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 凭据 / provider 目录是 core 的纯模块 `credential-providers.ts`（子路径 `@neko-harness/core/credential-providers`，前端共用）：`MODEL_PROVIDERS`（Pi 1.3.0 里纯 API Key 的 32 个 provider，封闭集合）与 `SEARCH_CREDENTIAL_PROVIDERS`（Tavily）。目录的 `envVar` 由 `provider-settings.test.ts` 与 Pi 的 `checkAuth` 对账，升级 Pi 时该测试失败即需显式更新目录；Azure / Anthropic / Cloudflare / Bedrock / Vertex / OAuth 类 provider 不在范围内。
 - 运行时注册目录内全部 Pi provider，但只有「已启用」的才可选：启用集合存于 `app.neko.provider-settings` 文档（缺省仅 deepseek，DeepSeek 锁定不可取消），`listSelectableModels()` 只含已启用 provider 的模型并带 `available`（有无凭据），`listModels()` 仍是全部模型供按会话模型查找（投影、图片能力）。经 `options.providers` 注入的非目录 provider（测试 faux）不受启用 / Key 门禁。
 - 受理输入、`compact`、子 agent 启动与会话命名统一走 `guardProvider`：先 `PROVIDER_DISABLED`，再 `PROVIDER_KEY_REQUIRED`（`CODE: 文案` 前缀，网关原样透传）。`--model` / `defaultModel` 指向未启用 provider 不阻止启动，只在提交时拦截。自动压缩 `triggerPercent` 的基准窗口只统计已启用 provider 的模型。
-- 网关 `neko.credentials` v2：`statuses` 是按 provider id 的映射（模型 provider 带 `enabled`），`setEnabled` 修改启用；`neko.models.list` 返回可选模型。应用协议 7。Web 在凭据状态变化后重拉模型列表；设置页：`/settings` = 模型服务，`/settings/search` = 联网搜索（Tavily Key 与搜索服务选择）。
+- 网关 `neko.credentials` v2：`statuses` 是按 provider id 的映射（模型 provider 带 `enabled`），`setEnabled` 修改启用；`neko.models.list` 返回可选模型。应用协议 8。Web 在凭据状态变化后重拉模型列表；设置页：`/settings` = 模型服务，`/settings/search` = 联网搜索（Tavily Key 与搜索服务选择）。
+- 新会话模型的解析链：会话级显式指定 > CLI `--model`（core 的 `options.modelOverride`）> UI 保存的默认模型（`app.neko.default-model` 文档，`{ model: NekoModelRef | null }`）> 配置文件 `defaultModel`（`options.model`）> 内置 `deepseek/deepseek-flash`。网关 `neko.default-model` 契约发布 `{ effective, source: cli|saved|config|default }` 并提供 `set`/`clear`（校验目录内已知模型且 provider 已启用，不查 Key）；Web 模型选择器与 TUI `/model`（`d` 键）对可选模型「设为默认」，无 Key 条目不可设。保存值的 provider 后被取消启用时不回退，新会话照取、提交时 `PROVIDER_DISABLED`。
 
 ## 提示词与技能
 

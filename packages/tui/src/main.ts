@@ -14,7 +14,7 @@ const USAGE = `用法: neko tui [选项]
 
 恢复当前工作目录最近使用的会话，不存在则创建。
 按需拉起网关，属主 TUI 退出时随之停止。
-可用 /login 或 DEEPSEEK_API_KEY 等环境变量配置凭据（除 DeepSeek 外的 provider 需先在 /login 启用）；/search 选择联网搜索服务（tavily / deepseek，默认 tavily）；/context 调整上下文压缩与工具结果裁剪。`;
+可用 /login 或 DEEPSEEK_API_KEY 等环境变量配置凭据（除 DeepSeek 外的 provider 需先在 /login 启用）；/search 选择联网搜索服务（tavily / deepseek，默认 tavily）；/context 调整上下文压缩与工具结果裁剪；/model 中可把可选模型「设为默认」，优先级低于 --model、高于配置文件 defaultModel。`;
 
 type CliOptions = {
 	cwd?: string;

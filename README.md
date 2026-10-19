@@ -32,6 +32,8 @@ export DEEPSEEK_API_KEY='你的 API Key'
 
 默认只启用 DeepSeek。如需使用其他模型服务（OpenRouter、OpenCode Go / Zen、OpenAI、Google、Groq、Mistral、xAI、Together 等 32 个纯 API Key 服务），在 TUI `/login`（空格勾选）或 Web「设置 → 模型服务」中启用并配置 Key，也可用对应环境变量（如 `OPENROUTER_API_KEY`、`OPENCODE_API_KEY`，各服务的变量名显示在配置页中）。启用后模型会出现在 `/model` 与输入框的模型选择器里；取消启用不会删除已保存的 Key，但使用该服务的会话将无法发送新消息，直到重新启用或切换模型。`--model` 的格式为 `provider/modelId`，例如 `openrouter/anthropic/claude-haiku-4.5`。
 
+新会话的默认模型可在模型选择器中「设为默认」（Web 选择器行内操作、TUI `/model` 列表按 `d`，再操作一次取消），设置按用户保存、重启保留。优先级：`--model` > 保存的默认模型 > 配置文件 `defaultModel` > 内置 DeepSeek Flash。只影响之后新建的会话。
+
 ## 日常操作
 
 - **工作区**：默认使用启动目录。Web 侧栏可添加、切换项目，浏览文件、查看本次由助手产生的改动，并可在本机用 VS Code 或文件管理器打开。

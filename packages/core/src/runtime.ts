@@ -121,6 +121,14 @@ export type NekoModelRef = {
 	readonly modelId: string;
 };
 
+/** Which link of the default-model chain produced the effective model. */
+export type NekoDefaultModelSource = "cli" | "saved" | "config" | "default";
+/** The effective default model for new sessions, with the chain link that produced it. */
+export type NekoDefaultModelState = {
+	readonly effective: NekoModelRef;
+	readonly source: NekoDefaultModelSource;
+};
+
 export type NekoRuntimeOptions = {
 	/** Chord context for every runtime call; default `BACKGROUND_CONTEXT` (never cancels). */
 	readonly context?: Context;
@@ -141,6 +149,8 @@ export type NekoRuntimeOptions = {
 	readonly contextSettings?: ContextSettings;
 	/** Model the root conversation runs with; default the built-in DeepSeek chat model. */
 	readonly model?: NekoModelRef;
+	/** Explicit per-launch override (CLI `--model`); wins over the saved default and the config value for new sessions. */
+	readonly modelOverride?: NekoModelRef;
 	readonly thinkingLevel?: ModelThinkingLevel;
 	/** Working directory of the conversation's tools; default `process.cwd()`. */
 	readonly cwd?: string;
@@ -332,6 +342,16 @@ const ProviderSettingsDoc = defineDoc<{ enabled: string[] | null }>({
 	initial: () => ({ enabled: null }),
 });
 
+/** User-level default model; `null` means "never saved", so the config value or the built-in default applies. */
+const DefaultModelDoc = defineDoc<{ model: NekoModelRef | null }>({
+	kind: "app.neko.default-model",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ model: null }),
+});
+
 /** User-level context settings saved from a UI; `null` fields were never saved. */
 const ContextSettingsDoc = defineDoc<SavedContextSettings>({
 	kind: "app.neko.context-settings",
@@ -407,6 +427,10 @@ export type NekoRuntime = {
 	/** Enabled model providers in catalog order; always includes the locked ones. */
 	enabledProviders(): readonly ModelProviderId[];
 	setProviderEnabled(provider: ModelProviderId, enabled: boolean): Promise<void>;
+	/** The effective default model for new sessions and which chain link produced it. */
+	defaultModel(): Promise<NekoDefaultModelState>;
+	/** Validate and persist the user's default model (`null` clears it); applies from the next conversation creation. */
+	setDefaultModel(ref: NekoModelRef | null): Promise<void>;
 	credentialStatus(provider: CredentialProviderId): Promise<CredentialStatus>;
 	/** Effective context settings (saved > config > default) with the source of every value. */
 	contextSettings(): Promise<ContextSettingsState>;
@@ -447,6 +471,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	const context = options.context ?? BACKGROUND_CONTEXT;
 	const defaultCwd = normalizeWorkspace(options.cwd);
 	const model: NekoModelRef = options.model ?? DEFAULT_MODEL;
+	const modelOverride = options.modelOverride;
 	const providers = options.providers ?? [];
 
 	const credentials =
@@ -639,10 +664,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		throw error;
 	}
 	await questions.reconcileAll();
+	// Root conversation: the launch-time effective default (CLI --model wins over the config/built-in
+	// base), matching the pre-split `options.model ?? fileConfig.defaultModel ?? DEFAULT_MODEL` behavior.
+	const rootModel = modelOverride ?? model;
 	const conversation = await harness.root(context, {
 		agent: {
-			model,
-			thinkingLevel: resolveLevel(model, options.thinkingLevel ?? "high"),
+			model: rootModel,
+			thinkingLevel: resolveLevel(rootModel, options.thinkingLevel ?? "high"),
 			cwd: defaultCwd,
 		},
 	});
@@ -1155,15 +1183,15 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		async createConversation(createOptions) {
 			const workspace = await addWorkspace(createOptions?.cwd ?? defaultCwd);
+			// Read at every creation, so a saved change applies without a restart (same as ProviderSettingsDoc).
+			const savedDefault = (await harness.snapshot(DefaultModelDoc, conversation.id, context))?.model ?? null;
+			const effective = createOptions?.model ?? modelOverride ?? savedDefault ?? model;
 			const created = await harness.createConversation(
 				{
 					ownership: { kind: "ownerless" },
 					agent: {
-						model: createOptions?.model ?? model,
-						thinkingLevel: resolveLevel(
-							createOptions?.model ?? model,
-							createOptions?.thinkingLevel ?? options.thinkingLevel ?? "high",
-						),
+						model: effective,
+						thinkingLevel: resolveLevel(effective, createOptions?.thinkingLevel ?? options.thinkingLevel ?? "high"),
 						cwd: workspace.path,
 					},
 				},
@@ -1293,6 +1321,23 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				(await tx.doc(ProviderSettingsDoc, conversation.id)).enabled = list;
 			}, context);
 			enabled = new Set(list);
+		},
+		async defaultModel() {
+			const saved = (await harness.snapshot(DefaultModelDoc, conversation.id, context))?.model ?? null;
+			if (modelOverride) return { effective: modelOverride, source: "cli" };
+			if (saved) return { effective: saved, source: "saved" };
+			if (options.model) return { effective: model, source: "config" };
+			return { effective: model, source: "default" };
+		},
+		async setDefaultModel(ref) {
+			if (ref !== null) {
+				if (!models.getModel(ref.provider, ref.modelId)) throw new Error("Unknown model");
+				if (isModelProvider(ref.provider) && !enabled.has(ref.provider))
+					throw new Error(`PROVIDER_DISABLED: ${credentialProvider(ref.provider).name} is not enabled.`);
+			}
+			await harness.commit(async (tx) => {
+				(await tx.doc(DefaultModelDoc, conversation.id)).model = ref;
+			}, context);
 		},
 		async getAgent(id?: ConversationId) {
 			const session = await sessionFor(id);

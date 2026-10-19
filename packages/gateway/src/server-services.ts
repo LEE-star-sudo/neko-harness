@@ -9,11 +9,13 @@ import {
 	ApplicationInfoSchema,
 	ContextSettingsStateSchema,
 	CredentialStateSchema,
+	DefaultModelStateSchema,
 	DirectoryStateSchema,
 	NekoApplicationInfo,
 	NekoContextSettings,
 	type NekoCredentialState,
 	NekoCredentials,
+	NekoDefaultModel,
 	type NekoMarketSkill,
 	NekoModels,
 	NekoSearchSettings,
@@ -40,9 +42,11 @@ const ServerState = local("neko.server-state", {
 		credentials: CredentialStateSchema,
 		searchSettings: SearchSettingsStateSchema,
 		contextSettings: ContextSettingsStateSchema,
+		defaultModel: DefaultModelStateSchema,
 		refreshCredentials: method(Type.Null(), Type.Null()),
 		refreshSearchSettings: method(Type.Null(), Type.Null()),
 		refreshContextSettings: method(Type.Null(), Type.Null()),
+		refreshDefaultModel: method(Type.Null(), Type.Null()),
 	},
 });
 export async function createNekoServerServices(options: {
@@ -162,12 +166,13 @@ export async function createNekoServerServices(options: {
 			),
 		);
 	};
-	const [sessions, workspaces, statuses, search, contextSettings0] = await Promise.all([
+	const [sessions, workspaces, statuses, search, contextSettings0, defaultModel0] = await Promise.all([
 		list(),
 		runtime.listWorkspaces(),
 		readStatuses(),
 		runtime.searchSettings(),
 		runtime.contextSettings(),
+		runtime.defaultModel(),
 	]);
 	let mutationTail = Promise.resolve();
 	const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
@@ -189,11 +194,17 @@ export async function createNekoServerServices(options: {
 				revision: 1,
 				...contextSettings0,
 			});
+			const defaultModel = self.state("defaultModel", DefaultModelStateSchema, defaultModel0);
 			const refreshContextSettings = async (_input: null, ctx: Ctx<GatewayPrincipal>) => {
 				const next = await runtime.contextSettings();
 				const { revision, ...current } = contextSettings.value;
 				if (JSON.stringify(next) !== JSON.stringify(current))
 					contextSettings.replace(ctx, { revision: revision + 1, ...next });
+				return null;
+			};
+			const refreshDefaultModel = async (_input: null, ctx: Ctx<GatewayPrincipal>) => {
+				const next = await runtime.defaultModel();
+				if (JSON.stringify(next) !== JSON.stringify(defaultModel.value)) defaultModel.replace(ctx, next);
 				return null;
 			};
 			const refreshSearchSettings = async (_input: null, ctx: Ctx<GatewayPrincipal>) => {
@@ -235,6 +246,7 @@ export async function createNekoServerServices(options: {
 				credentials,
 				searchSettings,
 				contextSettings,
+				defaultModel,
 				async refreshCredentials(_input: null, ctx: Ctx<GatewayPrincipal>) {
 					credentials.replace(ctx, {
 						revision: credentials.value.revision + 1,
@@ -244,6 +256,7 @@ export async function createNekoServerServices(options: {
 				},
 				refreshSearchSettings,
 				refreshContextSettings,
+				refreshDefaultModel,
 			};
 		},
 		{ lifetime: "host" },
@@ -307,6 +320,23 @@ export async function createNekoServerServices(options: {
 				serialize(async () => {
 					await runtime.resetContextSettings();
 					return hub.refreshContextSettings(null, ctx);
+				}),
+		};
+	});
+	host.serve(NekoDefaultModel, (_input, _principal, self) => {
+		const hub = shared(self);
+		return {
+			variant: "ready",
+			state: hub.defaultModel,
+			set: (input, ctx) =>
+				serialize(async () => {
+					await runtime.setDefaultModel(input);
+					return hub.refreshDefaultModel(null, ctx);
+				}),
+			clear: (_input, ctx) =>
+				serialize(async () => {
+					await runtime.setDefaultModel(null);
+					return hub.refreshDefaultModel(null, ctx);
 				}),
 		};
 	});
