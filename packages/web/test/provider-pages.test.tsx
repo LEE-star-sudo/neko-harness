@@ -23,6 +23,7 @@ dialog.close ??= function (this: HTMLDialogElement) {
 };
 
 const configured: unknown[][] = [];
+const savedCredentials: unknown[][] = [];
 const enabledCalls: unknown[][] = [];
 const defaultCalls: { set: unknown[]; clear: number } = { set: [], clear: 0 };
 mock.module("../src/client/lib/bootstrap", () => ({
@@ -31,7 +32,7 @@ mock.module("../src/client/lib/bootstrap", () => ({
 		setProviderEnabled: async (...args: unknown[]) => void enabledCalls.push(args),
 		setDefaultModel: async (model: unknown) => void defaultCalls.set.push(model),
 		clearDefaultModel: async () => void defaultCalls.clear++,
-		saveCredential: async () => {},
+		saveCredential: async (...args: unknown[]) => void savedCredentials.push(args),
 		removeCredential: async () => {},
 		setSearchProvider: async () => {},
 	},
@@ -118,6 +119,7 @@ async function chooseProvider(name: string) {
 
 beforeEach(() => {
 	configured.length = 0;
+	savedCredentials.length = 0;
 	enabledCalls.length = 0;
 	defaultCalls.set.length = 0;
 	defaultCalls.clear = 0;
@@ -315,10 +317,28 @@ it("keeps web search and the Tavily key on their own page", async () => {
 	expect(page.host.querySelector("h1")?.textContent).toBe("联网搜索");
 	expect(text).toContain("搜索服务");
 	expect(page.host.querySelector("#credential-tavily")).not.toBeNull();
-	expect(page.host.querySelector("#credential-deepseek")).toBeNull();
+	expect(page.host.querySelector("#credential-deepseek")).not.toBeNull();
+	expect(page.host.querySelector("#credential-deepseek")?.textContent).toContain(
+		"环境变量：未配置（DEEPSEEK_API_KEY） · 与「模型服务」共用同一个 DeepSeek Key，在任一页面保存或移除都会同步。",
+	);
 	expect(page.host.querySelector('input[aria-label^="启用"]')).toBeNull();
 	expect(page.host.querySelector('a[href="/settings/search"][aria-current="page"]')).not.toBeNull();
 	expect(page.host.querySelector('a[href="/settings"]')).not.toBeNull();
+	await page.unmount();
+});
+
+it("saves the DeepSeek key from the search page without changing the selected search service", async () => {
+	storeActions.setSearchSettings({ revision: 1, selected: "tavily" });
+	const page = await mount(React.createElement(SettingsSearchPage));
+	const key = page.host.querySelector<HTMLInputElement>("#deepseek-key")!;
+	const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!;
+	await act(async () => {
+		setValue.call(key, "sk-deepseek");
+		key.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+	});
+	await click(page.host.querySelector("#credential-deepseek button[type='submit']"));
+	expect(savedCredentials).toEqual([["deepseek", "sk-deepseek"]]);
+	expect(page.host.textContent).toContain("当前使用：Tavily");
 	await page.unmount();
 });
 

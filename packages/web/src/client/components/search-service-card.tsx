@@ -68,14 +68,7 @@ export function SearchServiceCard(props: {
 					</label>
 				))}
 			</fieldset>
-			{warning && (
-				<p className="mt-3 text-xs text-sakura-800">
-					{warning}{" "}
-					<a href="/settings#credential-deepseek" className="focus-neko rounded underline">
-						前往配置
-					</a>
-				</p>
-			)}
+			{warning && <p className="mt-3 text-xs text-sakura-800">{warning}</p>}
 			<output className="mt-2 block min-h-4 text-xs text-tianyi-800">{message}</output>
 		</section>
 	);

@@ -409,7 +409,7 @@ it("keeps the list, protected input, actions, draft and footer visible in small 
 			const panel = new LoginPanel(options());
 			panel.show(savedState(), () => () => {});
 			if (level === "list") {
-				// Move to the last row (Tavily): the selection must stay visible.
+				// Move to the last row (DeepSeek in Web search): the selection must stay visible.
 				for (let i = 0; i < 40; i++) panel.handleInput("\x1b[B");
 			} else {
 				openKey(panel);
@@ -435,7 +435,7 @@ it("keeps the list, protected input, actions, draft and footer visible in small 
 			const out = lines.join("\n");
 			expect(out).toContain(level === "list" ? "Enter Key" : "Enter Save");
 			if (level === "list") {
-				expect(out).toMatch(/❯ {3} +Tavily/);
+				expect(out).toMatch(/❯ {3} +DeepSeek/);
 				expect(out).toContain("Space Toggle");
 			} else {
 				expect(out).not.toContain("xxxx");
@@ -446,4 +446,74 @@ it("keeps the list, protected input, actions, draft and footer visible in small 
 			expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
 		}
 	}
+});
+
+it("lists DeepSeek in both the model and the web search group", () => {
+	const panel = new LoginPanel(options());
+	panel.show(stateWith({ deepseek: { savedConfigured: true, source: "saved" } }), () => () => {});
+	panel.height = 100;
+	const out = text(panel, 100);
+	const rows = out.split("\n").filter((line) => line.includes("DeepSeek"));
+	expect(rows).toHaveLength(2);
+	expect(out.indexOf("DeepSeek (always on)")).toBeLessThan(out.indexOf("Web search"));
+	const search = out.slice(out.indexOf("Web search"));
+	expect(search).toMatch(/DeepSeek\s+saved/);
+	expect(search).not.toContain("[x] DeepSeek");
+	expect(search).not.toContain("always on");
+});
+
+it("filters DeepSeek into two rows and acts on the highlighted one", async () => {
+	const saves: Array<[string, string]> = [];
+	const calls: Array<[string, boolean]> = [];
+	const panel = new LoginPanel(
+		options({ save: async (p, k) => void saves.push([p, k]), toggle: async (p, e) => void calls.push([p, e]) }),
+	);
+	panel.show(emptyState(), () => () => {});
+	panel.handleInput("deepseek");
+	expect(
+		text(panel)
+			.split("\n")
+			.filter((line) => line.includes("DeepSeek")),
+	).toHaveLength(2);
+	panel.handleInput(" ");
+	expect(text(panel)).toContain("DeepSeek is always enabled.");
+	panel.handleInput("\x1b[B");
+	panel.handleInput(" ");
+	expect(text(panel)).toContain("no enable switch here");
+	expect(calls).toEqual([]);
+	panel.handleInput("\r");
+	expect(text(panel)).toContain("Provider: DeepSeek (web search");
+	panel.handleInput("sk-search");
+	panel.handleInput("\r");
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	expect(saves).toEqual([["deepseek", "sk-search"]]);
+});
+
+it("returns from the key level to the group it was opened from", () => {
+	const panel = new LoginPanel(options());
+	panel.show(emptyState(), () => () => {}, { provider: "deepseek", group: "search" });
+	panel.height = 100;
+	expect(text(panel)).toContain("Provider: DeepSeek (web search");
+	panel.handleInput(ESC);
+	expect(panel.open).toBe(true);
+	expect(text(panel, 100)).toMatch(/❯\s+DeepSeek/);
+	expect(text(panel, 100)).not.toMatch(/❯ \[x\] DeepSeek/);
+	panel.handleInput(ESC);
+	expect(panel.open).toBe(false);
+});
+
+it("shows the web search DeepSeek row as the same credential after a shared state update", () => {
+	let publish!: (state: NekoCredentialState) => void;
+	const panel = new LoginPanel(options());
+	panel.show(emptyState(), (fn) => {
+		publish = fn;
+		return () => {};
+	});
+	panel.height = 100;
+	publish(stateWith({ deepseek: { savedConfigured: true, source: "saved" } }, 2));
+	const rows = text(panel, 100)
+		.split("\n")
+		.filter((line) => line.includes("DeepSeek"));
+	expect(rows).toHaveLength(2);
+	for (const row of rows) expect(row).toMatch(/saved/);
 });

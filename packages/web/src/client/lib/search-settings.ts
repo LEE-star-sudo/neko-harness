@@ -41,12 +41,12 @@ export function searchOptions(
 	}));
 }
 
-/** DeepSeek without a key cannot search; the page points the user to the credential entry. */
+/** DeepSeek without a key cannot search; the page points the user to its credential card on the same page. */
 export function searchWarning(
 	settings: NekoSearchSettingsState | null,
 	credentials: NekoCredentialState | null,
 ): string | null {
 	if (settings?.selected === "deepseek" && credentials?.statuses.deepseek?.source === "none")
-		return "尚未配置 DeepSeek 密钥，搜索将不可用。请在「模型服务」配置密钥，或改选 Tavily。";
+		return "尚未配置 DeepSeek 密钥，搜索将不可用。请在下方 DeepSeek 卡片配置密钥，或改选 Tavily。";
 	return null;
 }

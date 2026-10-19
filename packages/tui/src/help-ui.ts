@@ -85,6 +85,7 @@ export function helpLines(platform: string = process.platform): string[] {
 	section("Web search", [
 		["/search", "Choose the web search provider"],
 		["Enter", "Apply the highlighted provider"],
+		["K", "Set the highlighted provider's API key (opens /login)"],
 	]);
 	section("Context", [
 		["/context", "Tune compaction and tool result pruning"],

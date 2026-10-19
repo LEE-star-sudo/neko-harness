@@ -22,9 +22,21 @@ import { shortcutHints } from "./shortcut-hints.ts";
 const AUTO_CLOSE_MS = 800;
 
 type CredentialStatus = NekoCredentialState["statuses"][string];
-type Entry = { header: string } | { spec: CredentialProviderSpec };
+type Group = "model" | "search";
+/** One list row; DeepSeek has two (model and web search) that share a single credential. */
+type Row = { spec: CredentialProviderSpec; group: Group };
+type Entry = { header: string } | { row: Row };
 
 const isLocked = (id: string) => (LOCKED_PROVIDERS as readonly string[]).includes(id);
+const SEARCH_ALIASES = ["deepseek"];
+const listRows = (): Row[] => {
+	const all: Row[] = CREDENTIAL_PROVIDERS.map((spec) => ({ spec, group: spec.kind === "search" ? "search" : "model" }));
+	for (const id of SEARCH_ALIASES) {
+		const spec = CREDENTIAL_PROVIDERS.find((item) => item.id === id);
+		if (spec) all.push({ spec, group: "search" });
+	}
+	return all;
+};
 const compact = (value: string) => value.toLowerCase().replace(/\s+/g, "");
 
 /**
@@ -41,6 +53,7 @@ export class LoginPanel implements Component {
 	#inputs = new Map<string, Input>();
 	#state: NekoCredentialState | undefined;
 	#provider: CredentialProviderId = "deepseek";
+	#group: Group = "model";
 	#message = "";
 	#busy = false;
 	#confirmingRemove = false;
@@ -70,7 +83,12 @@ export class LoginPanel implements Component {
 		this.#toggle = options.toggle;
 		this.#autoCloseMs = options.autoCloseMs ?? AUTO_CLOSE_MS;
 	}
-	show(state: NekoCredentialState | undefined, subscribe: (fn: (state: NekoCredentialState) => void) => () => void) {
+	/** `initial` opens that provider's key input directly (used by /search); Esc then returns to its list group. */
+	show(
+		state: NekoCredentialState | undefined,
+		subscribe: (fn: (state: NekoCredentialState) => void) => () => void,
+		initial?: { provider: CredentialProviderId; group: Group },
+	) {
 		this.#generation++;
 		this.#clearCloseTimer();
 		this.open = true;
@@ -82,7 +100,13 @@ export class LoginPanel implements Component {
 		this.#filter = new Input({ prompt: "❯ ", placeholder: "Type to filter" });
 		this.#index = 0;
 		this.#provider = "deepseek";
+		this.#group = "model";
 		this.#state = state;
+		if (initial) {
+			this.#provider = initial.provider;
+			this.#group = initial.group;
+			this.#level = "key";
+		}
 		this.#unsubscribe?.();
 		this.#unsubscribe = subscribe((value) => {
 			if (this.open) {
@@ -116,10 +140,11 @@ export class LoginPanel implements Component {
 	get #status(): CredentialStatus | undefined {
 		return this.#state?.statuses[this.#provider];
 	}
-	#visible(): CredentialProviderSpec[] {
+	#visible(): Row[] {
 		const query = compact(this.#filter.getValue());
-		if (query === "") return [...CREDENTIAL_PROVIDERS];
-		return CREDENTIAL_PROVIDERS.filter((spec) => compact(`${spec.name} ${spec.id} ${spec.envVar}`).includes(query));
+		const all = listRows();
+		if (query === "") return all;
+		return all.filter(({ spec }) => compact(`${spec.name} ${spec.id} ${spec.envVar}`).includes(query));
 	}
 	#isEnabled(spec: CredentialProviderSpec): boolean {
 		return isLocked(spec.id) || this.#state?.statuses[spec.id]?.enabled === true;
@@ -146,12 +171,13 @@ export class LoginPanel implements Component {
 			this.#index = Math.max(0, Math.min(items.length - 1, this.#index + delta));
 			this.#message = "";
 		} else if (matchesKey(data, "space")) {
-			const spec = items[this.#index];
-			if (spec) void this.#toggleEnabled(spec);
+			const row = items[this.#index];
+			if (row) void this.#toggleEnabled(row);
 		} else if (matchesKey(data, "enter")) {
-			const spec = items[this.#index];
-			if (!spec) return;
-			this.#provider = spec.id as CredentialProviderId;
+			const row = items[this.#index];
+			if (!row) return;
+			this.#provider = row.spec.id as CredentialProviderId;
+			this.#group = row.group;
 			this.#level = "key";
 			this.#message = "";
 		} else {
@@ -189,21 +215,24 @@ export class LoginPanel implements Component {
 		}
 	}
 	#backToList() {
-		const index = this.#visible().findIndex((spec) => spec.id === this.#provider);
+		const index = this.#visible().findIndex((row) => row.spec.id === this.#provider && row.group === this.#group);
 		if (index >= 0) this.#index = index;
 		this.#level = "list";
 		this.#confirmingRemove = false;
 		this.#message = "";
 	}
-	async #toggleEnabled(spec: CredentialProviderSpec) {
-		if (!isModelProvider(spec.id)) {
-			this.#message = `${spec.name} is a web search credential and has no enable switch.`;
+	async #toggleEnabled({ spec, group }: Row) {
+		if (group === "search") {
+			this.#message = isModelProvider(spec.id)
+				? `${spec.name} shares its key with the model provider and has no enable switch here.`
+				: `${spec.name} is a web search credential and has no enable switch.`;
 			return;
 		}
 		if (isLocked(spec.id)) {
 			this.#message = `${spec.name} is always enabled.`;
 			return;
 		}
+		if (!isModelProvider(spec.id)) return;
 		const enable = !this.#isEnabled(spec);
 		const generation = this.#generation;
 		this.#busy = true;
@@ -294,35 +323,45 @@ export class LoginPanel implements Component {
 		const showStatus = this.height >= 6;
 		const entries: Entry[] = [];
 		let group: string | undefined;
-		for (const spec of items) {
-			const next = spec.kind === "search" ? "Web search" : "Model providers";
+		for (const row of items) {
+			const next = row.group === "search" ? "Web search" : "Model providers";
 			if (next !== group) entries.push({ header: next });
 			group = next;
-			entries.push({ spec });
+			entries.push({ row });
 		}
 		const count = Math.max(1, this.height - rows.length - 1 - (showStatus ? 1 : 0));
-		const at = entries.findIndex((entry) => "spec" in entry && entry.spec.id === selected?.id);
+		const at = entries.findIndex((entry) => "row" in entry && entry.row === selected);
 		const start = Math.max(0, Math.min(at - Math.floor(count / 2), entries.length - count));
 		for (const entry of entries.slice(start, start + count)) {
 			if ("header" in entry) {
 				rows.push(theme.dim(` ${entry.header}`));
 				continue;
 			}
-			const spec = entry.spec;
+			const { spec, group: rowGroup } = entry.row;
 			const status = this.#state?.statuses[spec.id];
 			const enabled = this.#isEnabled(spec);
-			const mark = spec.kind === "model" ? (enabled ? "[x]" : "[ ]") : "   ";
+			const modelRow = rowGroup === "model";
+			const mark = modelRow ? (enabled ? "[x]" : "[ ]") : "   ";
 			const right = status ? `${status.source} · env ${status.environmentConfigured ? "set" : "unset"}` : "loading";
 			const leftWidth = Math.max(1, w - 3 - visibleWidth(right));
-			const left = truncateToWidth(`${mark} ${spec.name}${isLocked(spec.id) ? " (always on)" : ""}`, leftWidth, "...");
+			const left = truncateToWidth(
+				`${mark} ${spec.name}${modelRow && isLocked(spec.id) ? " (always on)" : ""}`,
+				leftWidth,
+				"...",
+			);
 			const label = `${left}${" ".repeat(Math.max(1, leftWidth - visibleWidth(left) + 1))}${right}`;
-			if (spec === selected) rows.push(theme.selection(`❯ ${label}`));
-			else rows.push(spec.kind === "model" && !enabled ? theme.dim(`  ${label}`) : `  ${label}`);
+			if (entry.row === selected) rows.push(theme.selection(`❯ ${label}`));
+			else rows.push(modelRow && !enabled ? theme.dim(`  ${label}`) : `  ${label}`);
 		}
 		if (items.length === 0) rows.push("No matching providers");
 		if (showStatus) {
 			while (rows.length < this.height - 2) rows.push("");
-			rows.push(this.#message || (selected ? theme.dim(`Environment variable: ${selected.envVar}`) : ""));
+			const hint = selected
+				? selected.group === "search" && isModelProvider(selected.spec.id)
+					? `Same key as the ${selected.spec.name} model provider. Environment variable: ${selected.spec.envVar}`
+					: `Environment variable: ${selected.spec.envVar}`
+				: "";
+			rows.push(this.#message || (hint ? theme.dim(hint) : ""));
 		}
 		const help = this.#busy
 			? shortcutHints(["Esc", "Close"])
@@ -341,10 +380,17 @@ export class LoginPanel implements Component {
 			keyLength > 0
 				? `API Key: ********${marker}${this.focused ? renderFakeCursor(" ") : ""} (${keyLength} characters)`
 				: `API Key: ${marker}${this.focused ? `${renderFakeCursor("(")}paste key)` : "(paste key)"}`;
-		const tag = spec.kind === "search" ? "web search" : this.#isEnabled(spec) ? "enabled" : "disabled";
+		const tag =
+			this.#group === "search"
+				? isModelProvider(spec.id)
+					? "web search, same key as model provider"
+					: "web search"
+				: this.#isEnabled(spec)
+					? "enabled"
+					: "disabled";
 		const defaultMessage = spec.keyless
 			? `Without a key, ${spec.name} runs in rate-limited keyless mode.`
-			: spec.kind === "model" && !this.#isEnabled(spec)
+			: this.#group === "model" && !this.#isEnabled(spec)
 				? "Provider is disabled. Esc, then Space enables it."
 				: "Saved key overrides environment.";
 		const provider = `Provider: ${spec.name} (${tag})`;

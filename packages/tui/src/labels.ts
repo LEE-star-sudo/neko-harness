@@ -18,7 +18,7 @@ export const commands: SlashCommand[] = [
 	{ name: "jobs", description: "View background jobs" },
 	{ name: "todos", description: "View the assistant's todo list" },
 	{ name: "question", description: "Answer the assistant's question (Ctrl+O)" },
-	{ name: "search", description: "Choose the web search provider (Tavily/DeepSeek)" },
+	{ name: "search", description: "Choose the web search provider (Tavily/DeepSeek); K sets its key" },
 	{ name: "context", description: "Tune context compaction and tool result pruning" },
 	{ name: "theme", description: "Choose color theme (auto/light/dark)" },
 	{ name: "think", description: "Set thinking level (/think high)" },

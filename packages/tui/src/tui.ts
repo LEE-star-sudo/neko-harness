@@ -9,7 +9,14 @@ import {
 	type Text,
 	TuiAltScreen,
 } from "@earendil-works/pi-tui";
-import type { ChatItem, ChatView, NekoModelRef, StreamingToolCall, StreamingView } from "@neko-harness/core";
+import type {
+	ChatItem,
+	ChatView,
+	CredentialProviderId,
+	NekoModelRef,
+	StreamingToolCall,
+	StreamingView,
+} from "@neko-harness/core";
 import { normalizeWorkspace } from "@neko-harness/core";
 import { installedVersion } from "@neko-harness/core/application-updates";
 import { compactInstructions, downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
@@ -495,15 +502,7 @@ class NekoTuiApp {
 			return;
 		}
 		if (trimmed === "/login") {
-			if (!this.#panel.open && !this.#login.open) {
-				const service = this.#gateway.client.credentials;
-				this.#login.show(service.state.value, (fn) =>
-					service.state.subscribe((value) => {
-						if (value) fn(value);
-					}),
-				);
-				this.#ui.setFocus(this.#login);
-			}
+			this.#showLogin();
 			return;
 		}
 		if (trimmed.startsWith("/login ")) {
@@ -1094,9 +1093,27 @@ class NekoTuiApp {
 			});
 		return { consume: true };
 	}
+	#showLogin(initial?: { provider: CredentialProviderId; group: "model" | "search" }): void {
+		if (this.#panel.open || this.#login.open) return;
+		const service = this.#gateway.client.credentials;
+		this.#login.show(
+			service.state.value,
+			(fn) =>
+				service.state.subscribe((value) => {
+					if (value) fn(value);
+				}),
+			initial,
+		);
+		this.#ui.setFocus(this.#login);
+	}
 	#showSearch(): void {
 		if (this.#exitStarted || this.#panel.open || this.#login.open) return;
-		this.#searchStop = openSearchPanel(this.#panel, this.#gateway.client, (message) => this.addNotice(message));
+		this.#searchStop = openSearchPanel(
+			this.#panel,
+			this.#gateway.client,
+			(message) => this.addNotice(message),
+			(provider) => this.#showLogin({ provider, group: "search" }),
+		);
 		this.#ui.setFocus(this.#panel);
 	}
 	#showContext(): void {

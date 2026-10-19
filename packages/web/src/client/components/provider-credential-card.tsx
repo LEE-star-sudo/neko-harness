@@ -23,8 +23,10 @@ export function ProviderCredentialCard(props: {
 	status: (CredentialStatus & { enabled?: boolean }) | undefined;
 	ready: boolean;
 	enable?: EnableControl;
+	/** Extra explanation appended to the env-var line, e.g. that the key is shared with another page. */
+	note?: string;
 }) {
-	const { spec, status, ready, enable } = props;
+	const { spec, status, ready, enable, note } = props;
 	const name = spec.name;
 	const [key, setKey] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -87,6 +89,7 @@ export function ProviderCredentialCard(props: {
 			<p className="mb-3 text-xs text-ink-500">
 				环境变量：{status ? (status.environmentConfigured ? "已配置" : "未配置") : "读取中…"}（{spec.envVar}）
 				{spec.keyless ? " · 未配置时以 keyless 限流模式运行" : ""}
+				{note ? ` · ${note}` : ""}
 			</p>
 			<form
 				onSubmit={(event) => {

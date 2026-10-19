@@ -143,3 +143,52 @@ it("refreshes while open when another client changes the provider or the DeepSee
 	fake.publishSettings(settings("deepseek", 2));
 	expect(text(panel)).toContain("DeepSeek (Current)");
 });
+
+it("always shows the DeepSeek key status and the k hint when the key is missing", () => {
+	const missing = searchItems(settings("tavily"), credentials("none"));
+	expect(missing[1]!.description).toContain("Press k");
+	const env = searchItems(settings("tavily"), credentials("environment"));
+	expect(env[1]!.description).toContain("environment variable");
+	expect(env[1]!.description).not.toContain("Press k");
+});
+
+it("opens the key input of the highlighted provider with k and closes the panel", async () => {
+	const fake = fakeClient(settings("tavily"), credentials("none"));
+	const opened: string[] = [];
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	openSearchPanel(
+		panel,
+		fake.client,
+		() => {},
+		(provider) => opened.push(provider),
+	);
+	await tick();
+	expect(text(panel)).toContain("K Set key");
+	panel.handleInput("\x1b[B");
+	panel.handleInput("k");
+	expect(opened).toEqual(["deepseek"]);
+	expect(panel.open).toBe(false);
+});
+
+it("does not treat k as a shortcut while filtering", async () => {
+	const fake = fakeClient(settings("tavily"), credentials("none"));
+	const opened: string[] = [];
+	const panel = new PickerPanel(
+		() => {},
+		() => {},
+	);
+	openSearchPanel(
+		panel,
+		fake.client,
+		() => {},
+		(provider) => opened.push(provider),
+	);
+	await tick();
+	panel.handleInput("d");
+	panel.handleInput("k");
+	expect(opened).toEqual([]);
+	expect(panel.open).toBe(true);
+});
