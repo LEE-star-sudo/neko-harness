@@ -635,9 +635,9 @@ button {
 	font-size: inherit;
 }
 
-/* ---- 语法高亮（highlight.js，浅色 sakura/tianyi 配色，底色 tianyi-50） ----
- * 全部色值对 #eff8fe 对比度 ≥4.5（WCAG AA，实测：keyword 7.41 / string 6.91 /
- * number 5.15 / title 5.29 / green 5.28 / comment(ink-600) ~5.6 / base 12.76）。 */
+/* ---- 语法高亮（highlight.js，浅色 sakura/tianyi 配色，底色 base 白底） ----
+ * 全部色值对更浅的 #eff8fe 对比度 ≥4.5（WCAG AA，实测：keyword 7.41 / string 6.91 /
+ * number 5.15 / title 5.29 / green 5.28 / comment(ink-600) ~5.6 / base 12.76），在 #fefcfe 上只会更高。 */
 .hljs {
 	color: var(--color-ink-900);
 	background: transparent;

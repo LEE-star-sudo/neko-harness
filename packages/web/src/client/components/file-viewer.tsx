@@ -10,25 +10,62 @@ import type { WorkspaceApi } from "./file-tree";
 /** Beyond this many characters the file is shown as plain text: highlighting 512 KiB blocks the page. */
 const HIGHLIGHT_LIMIT = 200_000;
 
-function CodeView({ file }: { file: WireWorkspaceFile }) {
-	const content = (file.content ?? "").replace(/\n$/, "");
+/** Code view zoom, persisted as a percentage so a chosen size survives reloads. */
+const ZOOM_KEY = "neko.fileZoom";
+const ZOOM_MIN = 50;
+const ZOOM_MAX = 300;
+const ZOOM_STEP = 10;
+
+const clampZoom = (value: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value)));
+
+function readZoom(): number {
+	try {
+		const stored = Number(localStorage.getItem(ZOOM_KEY));
+		return Number.isFinite(stored) && stored > 0 ? clampZoom(stored) : 100;
+	} catch {
+		return 100;
+	}
+}
+
+function CodeView(props: { file: WireWorkspaceFile; zoom: number; onZoom(delta: number): void }) {
+	const content = (props.file.content ?? "").replace(/\n$/, "");
 	const html = useMemo(() => {
-		const language = content.length > HIGHLIGHT_LIMIT ? undefined : languageFromPath(file.path);
+		const language = content.length > HIGHLIGHT_LIMIT ? undefined : languageFromPath(props.file.path);
 		return DOMPurify.sanitize(renderCodeHtml(content, language), { USE_PROFILES: { html: true } });
-	}, [content, file.path]);
+	}, [content, props.file.path]);
 	const numbers = useMemo(
 		() => Array.from({ length: lineCount(content) }, (_, index) => index + 1).join("\n"),
 		[content],
 	);
+	// Ctrl/Cmd + wheel zooms the code like an editor; React wheel listeners are passive, so bind natively.
+	const area = useRef<HTMLElement>(null);
+	const onZoom = useRef(props.onZoom);
+	onZoom.current = props.onZoom;
+	useEffect(() => {
+		const el = area.current;
+		if (!el) return;
+		const wheel = (event: WheelEvent) => {
+			if (!event.ctrlKey && !event.metaKey) return;
+			event.preventDefault();
+			onZoom.current(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+		};
+		el.addEventListener("wheel", wheel, { passive: false });
+		return () => el.removeEventListener("wheel", wheel);
+	}, []);
 	return (
 		<section
+			ref={area}
 			aria-label="文件内容"
 			data-testid="file-code"
 			// biome-ignore lint/a11y/noNoninteractiveTabindex: The scroll container must be keyboard focusable to scroll long lines.
 			tabIndex={0}
-			className="focus-neko min-h-0 flex-1 overflow-auto bg-tianyi-50/40"
+			className="focus-neko min-h-0 flex-1 overflow-auto bg-base"
 		>
-			<div className="flex min-w-max font-mono text-xs leading-5">
+			<div
+				data-testid="file-code-scale"
+				className="flex min-w-max font-mono"
+				style={{ fontSize: `${(12 * props.zoom) / 100}px`, lineHeight: `${(20 * props.zoom) / 100}px` }}
+			>
 				<pre
 					aria-hidden
 					data-testid="file-gutter"
@@ -99,6 +136,18 @@ export function FileViewer(props: {
 		else if (seq > baseline.current) setStale(true);
 	}, [known, seq]);
 
+	const [zoom, setZoom] = useState(readZoom);
+	useEffect(() => {
+		try {
+			localStorage.setItem(ZOOM_KEY, String(zoom));
+		} catch {
+			// Private browsing may deny storage; zoom still works for the session.
+		}
+	}, [zoom]);
+	const adjustZoom = (delta: number) => setZoom((current) => clampZoom(current + delta));
+	const zoomButton =
+		"focus-neko rounded-lg border border-sakura-300 px-2 py-0.5 text-sakura-800 hover:bg-sakura-50 disabled:opacity-50";
+
 	const data = file.data;
 	const notFound = file.status === "error" && !data && isNotFound(file.error);
 	return (
@@ -116,6 +165,36 @@ export function FileViewer(props: {
 					<strong className="min-w-0 flex-1 truncate text-sm text-ink-800" title={props.path}>
 						{name}
 					</strong>
+					<fieldset aria-label="代码缩放" className="flex min-w-0 shrink-0 items-center gap-1">
+						<button
+							type="button"
+							className={zoomButton}
+							aria-label="缩小代码"
+							disabled={zoom <= ZOOM_MIN}
+							onClick={() => adjustZoom(-ZOOM_STEP)}
+						>
+							−
+						</button>
+						<button
+							type="button"
+							className={`${zoomButton} min-w-12`}
+							aria-label="重置缩放"
+							title="重置为 100%"
+							disabled={zoom === 100}
+							onClick={() => setZoom(100)}
+						>
+							{zoom}%
+						</button>
+						<button
+							type="button"
+							className={zoomButton}
+							aria-label="放大代码"
+							disabled={zoom >= ZOOM_MAX}
+							onClick={() => adjustZoom(ZOOM_STEP)}
+						>
+							+
+						</button>
+					</fieldset>
 					<button
 						type="button"
 						className="focus-neko shrink-0 rounded-lg border border-sakura-300 px-2 py-0.5 text-sakura-800 hover:bg-sakura-50 disabled:opacity-50"
@@ -184,7 +263,7 @@ export function FileViewer(props: {
 							已截断，仅显示开头部分，文件共 {formatBytes(data.size)}
 						</div>
 					)}
-					<CodeView file={data} />
+					<CodeView file={data} zoom={zoom} onZoom={adjustZoom} />
 				</>
 			)}
 		</div>

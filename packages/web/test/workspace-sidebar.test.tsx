@@ -579,6 +579,53 @@ it("shows a text file with line numbers, syntax highlighting, size, and no editi
 	expect(viewer.querySelector('[title="src/main.ts"]')).not.toBeNull();
 });
 
+it("zooms the code view proportionally via buttons and Ctrl+wheel, and persists the level", async () => {
+	localStorage.clear();
+	try {
+		connect({ changes: summary(1, 0) });
+		const host = await mount();
+		await openWorkspace(host);
+		await click(row(host, "src"));
+		await click(row(host, "src/main.ts"));
+		const scale = () => host.querySelector<HTMLElement>("[data-testid=file-code-scale]")!;
+		const zoomIn = byText(host, "button", "放大代码")!;
+		const zoomOut = byText(host, "button", "缩小代码")!;
+		const reset = byText(host, "button", "重置缩放")!;
+		expect(scale().style.fontSize).toBe("12px");
+		expect(scale().style.lineHeight).toBe("20px");
+		expect(reset.textContent).toBe("100%");
+		// Buttons step by 10% and scale font size and line height together.
+		await click(zoomIn);
+		expect(scale().style.fontSize).toBe("13.2px");
+		expect(scale().style.lineHeight).toBe("22px");
+		expect(reset.textContent).toBe("110%");
+		expect(localStorage.getItem("neko.fileZoom")).toBe("110");
+		// Ctrl + wheel zooms too; a plain wheel just scrolls.
+		await act(async () => {
+			code(host)!.dispatchEvent(new dom.window.WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true }));
+		});
+		expect(scale().style.fontSize).toBe("13.2px");
+		await act(async () => {
+			code(host)!.dispatchEvent(
+				new dom.window.WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }),
+			);
+		});
+		await flush();
+		expect(scale().style.fontSize).toBe("14.4px");
+		expect(reset.textContent).toBe("120%");
+		await click(zoomOut);
+		expect(reset.textContent).toBe("110%");
+		// Reset returns to 100% and disables itself.
+		await click(reset);
+		expect(reset.textContent).toBe("100%");
+		expect(scale().style.fontSize).toBe("12px");
+		expect((reset as HTMLButtonElement).disabled).toBe(true);
+		expect(localStorage.getItem("neko.fileZoom")).toBe("100");
+	} finally {
+		localStorage.clear();
+	}
+});
+
 it("escapes content instead of injecting it and falls back to plain text for unknown languages", async () => {
 	files["evil.weird"] = text("evil.weird", '<img src=x onerror="alert(1)"><script>alert(2)</script>\n');
 	tree[""]!.push(entry("evil.weird"));
