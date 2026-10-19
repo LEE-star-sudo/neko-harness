@@ -13,7 +13,7 @@ export type SearchOptionView = {
 	selected: boolean;
 };
 
-const SOURCES: Record<NekoCredentialState["statuses"]["deepseek"]["source"], string> = {
+const SOURCES: Record<NekoCredentialState["statuses"][string]["source"], string> = {
 	saved: "已保存密钥",
 	environment: "环境变量",
 	runtime: "运行时配置",
@@ -46,7 +46,7 @@ export function searchWarning(
 	settings: NekoSearchSettingsState | null,
 	credentials: NekoCredentialState | null,
 ): string | null {
-	if (settings?.selected === "deepseek" && credentials?.statuses.deepseek.source === "none")
-		return "尚未配置 DeepSeek 密钥，搜索将不可用。请在下方配置密钥，或改选 Tavily。";
+	if (settings?.selected === "deepseek" && credentials?.statuses.deepseek?.source === "none")
+		return "尚未配置 DeepSeek 密钥，搜索将不可用。请在「模型服务」配置密钥，或改选 Tavily。";
 	return null;
 }

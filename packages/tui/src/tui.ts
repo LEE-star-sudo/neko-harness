@@ -12,8 +12,8 @@ import {
 import type {
 	ChatItem,
 	ChatView,
-	NekoModelInfo,
 	NekoModelRef,
+	NekoSelectableModel,
 	StreamingToolCall,
 	StreamingView,
 } from "@neko-harness/core";
@@ -48,7 +48,7 @@ import { openContextPanel } from "./context-ui.ts";
 import { detectColorFgBgMode, followTerminalTheme } from "./detect-theme.ts";
 import { type ExportArgs, exportToFile, parseExportArgs } from "./export-command.ts";
 import { fileCompletion } from "./file-completion.ts";
-import { formatTokens } from "./format.ts";
+import { modelDisplayName } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import { HelpDetail } from "./help-ui.ts";
 import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
@@ -56,6 +56,7 @@ import { createInputRouter } from "./input-router.ts";
 import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
 import { createAppLayout, usableSize } from "./layout.ts";
+import { isProviderRejection, modelItems, modelKey, providerSendBlock } from "./provider-ui.ts";
 import { canAutoOpen, QuestionDock } from "./question-dock.ts";
 import { QueueRow, queueKeyAction, restoreText, steerNotice, withdrawNotice } from "./queue-ui.ts";
 import { openSearchPanel } from "./search-ui.ts";
@@ -245,6 +246,9 @@ class NekoTuiApp {
 			},
 			remove: async (provider) => {
 				await this.#gateway.client.credentials.remove({ provider });
+			},
+			toggle: async (provider, enabled) => {
+				await this.#gateway.client.credentials.setEnabled({ provider, enabled });
 			},
 		});
 		const complete = fileCompletion(
@@ -481,7 +485,7 @@ class NekoTuiApp {
 				void chat.compact({ instructions }).catch((e) => {
 					if (session === this.#sessionId) {
 						this.#editor.setText(text);
-						this.addNotice(messageOf(e), "error");
+						this.addNotice(messageOf(e), isProviderRejection(messageOf(e)) ? "warning" : "error");
 					}
 				});
 			return;
@@ -562,12 +566,10 @@ class NekoTuiApp {
 		}
 		const chat = this.#chat;
 		if (chat === undefined) return;
-		if (
-			this.#lastView?.agent.model?.provider === "deepseek" &&
-			this.#gateway.client.credentials.state.value.statuses.deepseek.source === "none"
-		) {
+		const blocked = providerSendBlock(this.#lastView?.agent.model, this.#gateway.client.credentials.state.value);
+		if (blocked) {
 			this.#editor.setText(text);
-			this.addNotice("Configure DeepSeek with /login before sending.", "warning");
+			this.addNotice(blocked, "warning");
 			return;
 		}
 		void this.sendImages(text);
@@ -659,7 +661,10 @@ class NekoTuiApp {
 			for (const [ref] of refs) if (!remaining.includes(ref)) this.#imageDrafts.get(session)?.delete(ref);
 			this.#retryRequests.delete(session);
 		} catch (e) {
-			if (session === this.#sessionId) this.addNotice(messageOf(e), "error");
+			if (session === this.#sessionId) {
+				const message = messageOf(e);
+				this.addNotice(message, isProviderRejection(message) ? "warning" : "error");
+			}
 		} finally {
 			for (const id of ids) await chat.releaseImage(id).catch(() => {});
 			this.#sending.delete(session);
@@ -865,22 +870,17 @@ class NekoTuiApp {
 		const chat = this.#chat;
 		const current = this.#lastView?.agent.model;
 		const currentKey = current ? `${current.provider}/${current.modelId}` : null;
-		let models: readonly NekoModelInfo[] = [];
+		let models: readonly NekoSelectableModel[] = [];
+		this.#panel.groupedFilter = true;
 		const ready = this.#panel.show(
 			"Models",
 			async () => {
 				models = await this.#gateway.client.models.list(null);
-				return [...models]
-					.sort((a, b) => Number(keyOf(b) === currentKey) - Number(keyOf(a) === currentKey))
-					.map((model) => ({
-						value: keyOf(model),
-						label: `${model.name}${keyOf(model) === currentKey ? " (Current)" : ""}`,
-						description: `${keyOf(model)} | ${formatContextWindow(model.contextWindow)} context${model.reasoning ? " | Thinking" : ""} | ${model.input.includes("image") ? "Images" : "Text only"}`,
-					}));
+				return modelItems(models, current);
 			},
 			async (value) => {
 				const selected = models.find((m) => keyOf(m) === value);
-				if (selected && value !== currentKey)
+				if (selected?.available && value !== currentKey)
 					await chat?.configure({ model: { provider: selected.provider, modelId: selected.modelId } });
 			},
 		);
@@ -935,7 +935,11 @@ class NekoTuiApp {
 			const model = (await this.#gateway.client.models.list(null)).find(
 				(m) => m.provider === ref.provider && m.modelId === ref.modelId,
 			);
-			if (chat !== this.#chat || this.#exitStarted || this.#panel.open || this.#login.open || !model) return;
+			if (chat !== this.#chat || this.#exitStarted || this.#panel.open || this.#login.open) return;
+			if (!model) {
+				this.addNotice("The current model is unavailable. Choose another with /model.", "warning");
+				return;
+			}
 			if (raw) {
 				const level = model.supportedThinkingLevels.find((value) => value === raw);
 				if (!level) {
@@ -1199,12 +1203,10 @@ class NekoTuiApp {
 			void this.#gateway.client.models
 				.list(null)
 				.then((models) => {
-					if (
-						this.#imageWarningModel === imageModel &&
-						!models
-							.find((m) => m.provider === view.agent.model?.provider && m.modelId === view.agent.model?.modelId)
-							?.input.includes("image")
-					)
+					const model = models.find(
+						(m) => m.provider === view.agent.model?.provider && m.modelId === view.agent.model?.modelId,
+					);
+					if (this.#imageWarningModel === imageModel && model && !model.input.includes("image"))
 						this.addNotice(
 							"Text-only model: previous images are unavailable to the model; written analysis is retained.",
 							"warning",
@@ -1435,7 +1437,7 @@ class NekoTuiApp {
 	#syncWelcome(view: ChatView): void {
 		const empty = view.items.length === 0 && view.streaming === null && !view.busy;
 		if (empty) {
-			const modelShort = view.model.split("/").at(-1) ?? view.model;
+			const modelShort = modelDisplayName(view.model);
 			this.#welcome.setModelLine(
 				view.agent.thinkingLevel !== null ? `${modelShort} · Think ${view.agent.thinkingLevel}` : modelShort,
 			);
@@ -1583,13 +1585,7 @@ function hiddenCommands(view: ChatView): Set<string> {
 	return hidden;
 }
 
-function keyOf(model: NekoModelInfo): string {
-	return `${model.provider}/${model.modelId}`;
-}
-
-function formatContextWindow(tokens: number): string {
-	return formatTokens(tokens);
-}
+const keyOf = modelKey;
 
 /** 打开 neko 终端界面；用户退出（/exit 或 Ctrl+C）后 resolve。 */
 export async function runTui(options: NekoTuiOptions = {}): Promise<void> {

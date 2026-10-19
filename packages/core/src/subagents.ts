@@ -306,6 +306,7 @@ const structuredOutputSchema = Type.Union([
 export function createSubagentExtension(
 	prepare: (id: ConversationId, requestId: string, cwd: string) => Promise<void>,
 	discard: (id: ConversationId, requestId: string) => void,
+	guard?: (model: { provider: string; modelId: string }) => Promise<void>,
 ): Extension {
 	const finish = async (tx: Tx, input: RoundInput, status: RoundResult["status"], report: string) => {
 		const round = (await tx.doc(DelegationsDoc, input.parentId as ConversationId)).items.find(
@@ -478,6 +479,7 @@ export function createSubagentExtension(
 					if (!args.task.trim() || !args.title.trim() || Buffer.byteLength(args.task) > 32768)
 						throw new Error("Task/title must be nonempty; task limit is 32 KiB.");
 					const agent = await api.agent(context);
+					if (agent.model) await guard?.(agent.model);
 					const round = await api.commit(async (tx) => {
 						const rounds = await refreshDelegations(tx, api.conversationId);
 						const receipt = rounds.find((r) => r.taskId === api.taskId);

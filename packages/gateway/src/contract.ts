@@ -431,10 +431,13 @@ const credentialStatus = Type.Object({
 	savedConfigured: bool,
 	environmentConfigured: bool,
 	source: Type.Enum(["saved", "environment", "runtime", "keyless", "none"]),
+	/** Model providers only: whether the user enabled the provider; absent for search credentials. */
+	enabled: Type.Optional(bool),
 });
 export const CredentialStateSchema = Type.Object({
 	revision: integer,
-	statuses: Type.Object({ deepseek: credentialStatus, tavily: credentialStatus }),
+	/** Keyed by credential provider id from the core catalog. */
+	statuses: Type.Record(str, credentialStatus),
 });
 export const AttachmentSchema = Type.Object({ sessionId: str, attachmentId: str });
 const chatInput = Type.Object({ sessionId: str, attachmentId: str }, { additionalProperties: false });
@@ -481,6 +484,8 @@ const modelInfo = Type.Object({
 	provider: str,
 	modelId: str,
 	name: str,
+	/** Whether the model's provider has credentials. */
+	available: bool,
 	contextWindow: num,
 	input: Type.Array(str),
 	inputLimits: Type.Optional(inputLimits),
@@ -629,9 +634,9 @@ export const NekoWorkspaces = contract("neko.workspaces", {
 		},
 	},
 });
-const provider = Type.Enum(["deepseek", "tavily"]);
+const provider = Type.String({ minLength: 1, maxLength: 64 });
 export const NekoCredentials = contract("neko.credentials", {
-	version: 1,
+	version: 2,
 	input: Type.Object({}, { additionalProperties: false }),
 	variants: {
 		ready: {
@@ -645,6 +650,7 @@ export const NekoCredentials = contract("neko.credentials", {
 					nil,
 				),
 				remove: rpc(Type.Object({ provider }, { additionalProperties: false }), nil),
+				setEnabled: rpc(Type.Object({ provider, enabled: bool }, { additionalProperties: false }), nil),
 			},
 		},
 	},

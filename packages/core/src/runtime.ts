@@ -10,7 +10,7 @@ import type {
 	UserMessage,
 } from "@earendil-works/pi-ai";
 import { clampThinkingLevel, createModels, getSupportedThinkingLevels } from "@earendil-works/pi-ai/models";
-import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import {
 	type AgentEventStream,
 	AssistantEntry,
@@ -59,6 +59,11 @@ import {
 	credentialProvider,
 	FileCredentialStore,
 	InMemoryCredentialStore,
+	isModelProvider,
+	LOCKED_PROVIDERS,
+	MODEL_PROVIDERS,
+	type ModelProviderId,
+	normalizeEnabledProviders,
 } from "./credentials.ts";
 import { type ChangeDetail, type ChangeList, type ChangeSummary, ChangeTracker } from "./file-changes.ts";
 import { ImageDetails } from "./image-metadata.ts";
@@ -235,6 +240,9 @@ export type NekoConversationInfo = {
 };
 
 /** A chat model offered by the runtime's Models registry, for frontend selectors. */
+/** A model offered for selection; `available` means its provider has credentials. */
+export type NekoSelectableModel = NekoModelInfo & { readonly available: boolean };
+
 export type NekoModelInfo = {
 	readonly provider: string;
 	readonly modelId: string;
@@ -314,6 +322,16 @@ const SearchSettingsDoc = defineDoc<{ provider: SearchProviderId | null }>({
 	initial: () => ({ provider: null }),
 });
 
+/** User-level model provider enablement; `null` means "never saved", so only the default providers are enabled. */
+const ProviderSettingsDoc = defineDoc<{ enabled: string[] | null }>({
+	kind: "app.neko.provider-settings",
+	version: 1,
+	scope: "conversation",
+	history: "latest",
+	fork: "initial",
+	initial: () => ({ enabled: null }),
+});
+
 /** User-level context settings saved from a UI; `null` fields were never saved. */
 const ContextSettingsDoc = defineDoc<SavedContextSettings>({
 	kind: "app.neko.context-settings",
@@ -382,7 +400,13 @@ export type NekoRuntime = {
 	/** Change a conversation's model and/or thinking level; `false` when the conversation is unknown or archived. */
 	configureConversation(id: ConversationId, change: NekoConversationChange): Promise<boolean>;
 	/** Every chat model in the Models registry, for frontend model selectors. */
+	/** Every registered model, regardless of provider enablement; for lookups of a session's own model. */
 	listModels(): NekoModelInfo[];
+	/** Models of enabled providers only, each marked with whether its provider has credentials. */
+	listSelectableModels(): Promise<NekoSelectableModel[]>;
+	/** Enabled model providers in catalog order; always includes the locked ones. */
+	enabledProviders(): readonly ModelProviderId[];
+	setProviderEnabled(provider: ModelProviderId, enabled: boolean): Promise<void>;
 	credentialStatus(provider: CredentialProviderId): Promise<CredentialStatus>;
 	/** Effective context settings (saved > config > default) with the source of every value. */
 	contextSettings(): Promise<ContextSettingsState>;
@@ -447,12 +471,46 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			}
 		: credentials;
 	const models = createModels({ credentials: effectiveCredentials });
-	models.setProvider(deepseekProvider());
+	for (const provider of builtinProviders()) if (isModelProvider(provider.id)) models.setProvider(provider);
 	for (const provider of providers) models.setProvider(provider);
+	let enabled = new Set<string>(normalizeEnabledProviders(null));
+	/** Catalog providers need to be enabled and hold credentials; extra providers passed in code are unmanaged. */
+	const guardProvider = async (ref: NekoModelRef | undefined): Promise<void> => {
+		if (!ref || !isModelProvider(ref.provider)) return;
+		const spec = credentialProvider(ref.provider);
+		if (!enabled.has(ref.provider))
+			throw new Error(
+				`PROVIDER_DISABLED: ${spec.name} is not enabled. Enable it in /login or Web settings, or switch model.`,
+			);
+		if (!(await models.checkAuth(ref.provider)))
+			throw new Error(`PROVIDER_KEY_REQUIRED: Configure a ${spec.name} API key in /login or Web settings.`);
+	};
 	const resolveLevel = (ref: NekoModelRef, level: ModelThinkingLevel) => {
 		const info = models.getModel(ref.provider, ref.modelId);
 		if (!info) throw new Error("Unknown model");
 		return clampThinkingLevel(info, level);
+	};
+
+	let modelInfoCache: NekoModelInfo[] | undefined;
+	// Built once: the catalog is static, and projections look a model up on every view update.
+	const allModels = (): NekoModelInfo[] => {
+		modelInfoCache ??= models.getModels().map((model) => ({
+			provider: model.provider,
+			modelId: model.id,
+			name: model.name,
+			contextWindow: model.contextWindow,
+			input: model.input,
+			...(model.inputLimits ? { inputLimits: model.inputLimits } : {}),
+			reasoning: model.reasoning,
+			supportedThinkingLevels: getSupportedThinkingLevels(model),
+			thinkingLevelAdjustments: Object.fromEntries(
+				(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const).map((level) => [
+					level,
+					clampThinkingLevel(model, level),
+				]),
+			) as Record<ModelThinkingLevel, ModelThinkingLevel>,
+		}));
+		return modelInfoCache;
 	};
 
 	const workspaceFiles = new WorkspaceFiles();
@@ -486,9 +544,13 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 	);
 	registry.install(createNekoPrompt(resourceSnapshots.current));
 	registry.install(
-		createSubagentExtension(async (id, requestId, cwd) => {
-			resourceSnapshots.stage(id, requestId, cwd, await loadResources(cwd));
-		}, resourceSnapshots.discard),
+		createSubagentExtension(
+			async (id, requestId, cwd) => {
+				resourceSnapshots.stage(id, requestId, cwd, await loadResources(cwd));
+			},
+			resourceSnapshots.discard,
+			(ref) => guardProvider(ref),
+		),
 	);
 	const jobs = new JobManager();
 	registry.install(jobs.extension);
@@ -512,7 +574,10 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				get compaction() {
 					return compactionPolicy(
 						contextState,
-						models.getModels().map((model) => model.contextWindow),
+						// Only models a user can pick count; the whole catalog would pin the trigger to its smallest window.
+						allModels()
+							.filter((model) => !isModelProvider(model.provider) || enabled.has(model.provider))
+							.map((model) => model.contextWindow),
 					);
 				},
 			},
@@ -581,6 +646,9 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			cwd: defaultCwd,
 		},
 	});
+	enabled = new Set(
+		normalizeEnabledProviders((await harness.snapshot(ProviderSettingsDoc, conversation.id, context))?.enabled),
+	);
 	const savedSearch = (await harness.snapshot(SearchSettingsDoc, conversation.id, context))?.provider;
 	if (isSearchProvider(savedSearch)) searchProvider = savedSearch;
 	savedContext = sanitizeSavedContextSettings(await harness.snapshot(ContextSettingsDoc, conversation.id, context));
@@ -623,7 +691,18 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		}, context);
 	};
 	if (existing.length === 0) await touchConversation(conversation.id);
-	const metadata = new SessionMetadataManager(harness, storage, context, registry, options.onReport);
+	const metadata = new SessionMetadataManager(
+		harness,
+		storage,
+		context,
+		registry,
+		options.onReport,
+		(provider, modelId) =>
+			guardProvider({ provider, modelId }).then(
+				() => true,
+				() => false,
+			),
+	);
 	if (existing.length === 0) await metadata.initialize(conversation.id);
 	for (const record of existing)
 		if (!record.owner && !(await harness.snapshot(ArchivedDoc, record.id, context))?.archived)
@@ -696,9 +775,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 					},
 				);
 			}
-			if (!duplicate && agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek"))) {
-				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure a DeepSeek API key in /login or Web settings.");
-			}
+			if (!duplicate) await guardProvider(agent.model);
 			if (!duplicate && agent.model) {
 				const resolved = models.getModel(agent.model.provider, agent.model.modelId);
 				if (resolved) content = await prepareInput(content, resolved);
@@ -838,8 +915,7 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 		},
 		async compact(instructions) {
 			const agent = await target.agent(context);
-			if (agent.model?.provider === "deepseek" && !(await models.checkAuth("deepseek")))
-				throw new Error("DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.");
+			await guardProvider(agent.model);
 			await admit(target.id, async () => {
 				const live = await harness.snapshot(importLiveDoc, target.id, context);
 				if (
@@ -1117,6 +1193,8 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 				const ref = change.model ?? current.model;
 				const targetModel = ref && models.getModel(ref.provider, ref.modelId);
 				if (!targetModel) throw new Error("Unknown model");
+				if (change.model && isModelProvider(ref.provider) && !enabled.has(ref.provider))
+					throw new Error(`PROVIDER_DISABLED: ${credentialProvider(ref.provider).name} is not enabled.`);
 				await session.conversation.configure(
 					{ model: ref, thinkingLevel: clampThinkingLevel(targetModel, change.thinkingLevel ?? current.thinkingLevel) },
 					context,
@@ -1186,22 +1264,35 @@ export async function createNekoRuntime(options: NekoRuntimeOptions = {}): Promi
 			}
 		},
 		listModels() {
-			return models.getModels().map((model) => ({
-				provider: model.provider,
-				modelId: model.id,
-				name: model.name,
-				contextWindow: model.contextWindow,
-				input: model.input,
-				...(model.inputLimits ? { inputLimits: model.inputLimits } : {}),
-				reasoning: model.reasoning,
-				supportedThinkingLevels: getSupportedThinkingLevels(model),
-				thinkingLevelAdjustments: Object.fromEntries(
-					(["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const).map((level) => [
-						level,
-						clampThinkingLevel(model, level),
-					]),
-				) as Record<ModelThinkingLevel, ModelThinkingLevel>,
-			}));
+			return allModels();
+		},
+		async listSelectableModels() {
+			const availability = new Map<string, boolean>();
+			const result: NekoSelectableModel[] = [];
+			for (const info of allModels()) {
+				const managed = isModelProvider(info.provider);
+				if (managed && !enabled.has(info.provider)) continue;
+				if (!availability.has(info.provider))
+					availability.set(info.provider, !managed || Boolean(await models.checkAuth(info.provider)));
+				result.push({ ...info, available: availability.get(info.provider) ?? false });
+			}
+			return result;
+		},
+		enabledProviders() {
+			return MODEL_PROVIDERS.map((item) => item.id).filter((id) => enabled.has(id));
+		},
+		async setProviderEnabled(provider, value) {
+			if (!isModelProvider(provider)) throw new Error("Unknown model provider.");
+			if (typeof value !== "boolean") throw new Error("Enabled must be a boolean.");
+			if (!value && LOCKED_PROVIDERS.includes(provider)) throw new Error("DeepSeek is always enabled.");
+			const next = new Set(enabled);
+			if (value) next.add(provider);
+			else next.delete(provider);
+			const list = normalizeEnabledProviders([...next]);
+			await harness.commit(async (tx) => {
+				(await tx.doc(ProviderSettingsDoc, conversation.id)).enabled = list;
+			}, context);
+			enabled = new Set(list);
 		},
 		async getAgent(id?: ConversationId) {
 			const session = await sessionFor(id);

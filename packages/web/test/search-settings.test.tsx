@@ -127,7 +127,7 @@ it("follows server state and warns when DeepSeek is selected without a key", asy
 	expect(view.host.textContent).not.toContain("尚未配置 DeepSeek 密钥");
 	await view.rerender({ ...props, settings: settings("deepseek", 2) });
 	expect(view.host.textContent).toContain("尚未配置 DeepSeek 密钥");
-	expect(view.host.querySelector('a[href="#credential-deepseek"]')).not.toBeNull();
+	expect(view.host.querySelector('a[href="/settings#credential-deepseek"]')).not.toBeNull();
 	await view.rerender({ ...props, settings: settings("deepseek", 2), credentials: credentials("saved") });
 	expect(view.host.textContent).not.toContain("尚未配置 DeepSeek 密钥");
 	await view.rerender({ ...props, settings: null, ready: false });

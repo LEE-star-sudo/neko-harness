@@ -376,8 +376,6 @@ export function serveSessions(host: Host<GatewayPrincipal>, runtime: NekoRuntime
 					);
 					for (const id of input.images ?? []) uploads.value.release(id);
 				} catch (error) {
-					if (error instanceof Error && error.message.startsWith("DEEPSEEK_KEY_REQUIRED:"))
-						throw new ChordError("invalid", "DEEPSEEK_KEY_REQUIRED: Configure DeepSeek in /login or Web settings.");
 					throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot submit message");
 				}
 				return null;

@@ -11,14 +11,14 @@ setActiveTheme("light");
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 const text = (panel: PickerPanel) => panel.render(100).map(stripTerminalSequences).join("\n");
 
-const status = (source: NekoCredentialState["statuses"]["deepseek"]["source"]) => ({
+const status = (source: NekoCredentialState["statuses"][string]["source"]) => ({
 	savedConfigured: source === "saved",
 	environmentConfigured: source === "environment",
 	source,
 });
 const credentials = (
-	deepseek: NekoCredentialState["statuses"]["deepseek"]["source"],
-	tavily: NekoCredentialState["statuses"]["tavily"]["source"] = "keyless",
+	deepseek: NekoCredentialState["statuses"][string]["source"],
+	tavily: NekoCredentialState["statuses"][string]["source"] = "keyless",
 ): NekoCredentialState => ({ revision: 1, statuses: { deepseek: status(deepseek), tavily: status(tavily) } });
 const settings = (selected: NekoSearchSettingsState["selected"], revision = 1): NekoSearchSettingsState => ({
 	revision,

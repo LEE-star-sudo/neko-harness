@@ -31,6 +31,13 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 - 不要提交 lockfile 之外的意外文件；不主动 git commit。
 - 真实 API key 只从环境变量读取，不打印、不落盘。
 
+## 模型 provider
+
+- 凭据 / provider 目录是 core 的纯模块 `credential-providers.ts`（子路径 `@neko-harness/core/credential-providers`，前端共用）：`MODEL_PROVIDERS`（Pi 1.3.0 里纯 API Key 的 32 个 provider，封闭集合）与 `SEARCH_CREDENTIAL_PROVIDERS`（Tavily）。目录的 `envVar` 由 `provider-settings.test.ts` 与 Pi 的 `checkAuth` 对账，升级 Pi 时该测试失败即需显式更新目录；Azure / Anthropic / Cloudflare / Bedrock / Vertex / OAuth 类 provider 不在范围内。
+- 运行时注册目录内全部 Pi provider，但只有「已启用」的才可选：启用集合存于 `app.neko.provider-settings` 文档（缺省仅 deepseek，DeepSeek 锁定不可取消），`listSelectableModels()` 只含已启用 provider 的模型并带 `available`（有无凭据），`listModels()` 仍是全部模型供按会话模型查找（投影、图片能力）。经 `options.providers` 注入的非目录 provider（测试 faux）不受启用 / Key 门禁。
+- 受理输入、`compact`、子 agent 启动与会话命名统一走 `guardProvider`：先 `PROVIDER_DISABLED`，再 `PROVIDER_KEY_REQUIRED`（`CODE: 文案` 前缀，网关原样透传）。`--model` / `defaultModel` 指向未启用 provider 不阻止启动，只在提交时拦截。自动压缩 `triggerPercent` 的基准窗口只统计已启用 provider 的模型。
+- 网关 `neko.credentials` v2：`statuses` 是按 provider id 的映射（模型 provider 带 `enabled`），`setEnabled` 修改启用；`neko.models.list` 返回可选模型。应用协议 7。Web 在凭据状态变化后重拉模型列表；设置页：`/settings` = 模型服务，`/settings/search` = 联网搜索（Tavily Key 与搜索服务选择）。
+
 ## 提示词与技能
 
 - 系统提示词由 core 的 `neko-prompt` 扩展按五节组装：`preamble` / `rules` / `project_context` / `skills` / `cwd`（`packages/core/src/prompt/`）。
@@ -74,7 +81,7 @@ bun run neko serve      # 仅启动 gateway（Unix socket + WebSocket）
 
 - durable 异步调用使用 `Context`（core 默认 `BACKGROUND_CONTEXT`）；远程 Chord 引用（`Ref`）方法使用可选 `Ctx`，普通调用自动 root，需要取消/组合时使用 host.root；ctx 只能给创建它的 host 的引用用（否则 `invalid/foreign_ctx`）。
 - Chord 1.3：契约 `remote(..., { host: hostNamed(...) })` 声明放置，调用方不再传 `{ at }`；工厂返回 `variant`（非 `kind`）；`self.state(name, schema, initial)`、`self.resource(name, { version, ... })`、`self.on(name, source, handler)` 按名声明；`lifetime: "host"` 取代 `eager`。`host.get` 异步并等首个状态快照，`host.hold` 同步可能仍 loading（状态在水合前读取会抛 `not_ready`，已结束的引用读取会抛其结束错误）；状态类型是 `T` 不含 `undefined`。对状态的监听器会在重订阅时再收到当前值，必须幂等对账。Chord 未导出 `MethodSpec`，`gateway/contract.ts` 用 `contract()`/`rpc()` 元组封装以保持声明可移植。
-- 网关：host 名固定为 `GATEWAY_HOST`（`neko`），`serverId` 由应用信息校验（`GatewayIdentityError` / `assertGatewayIdentity`），客户端 host 一律用 `createClientHost(link)`；主体类型是 `GatewayPrincipal`。链路协议版本 6：协议版本不同或握手无法解析（如 Pi 1.2 网关）会被客户端报告为 `ApplicationProtocolError`（不可重试）。服务端 WebSocket 不接受压缩帧；`ws` 在 Bun 下经 `addEventListener` 把文本帧交成 Buffer，因此有界链路用 `on("message", (data, isBinary))`。
+- 网关：host 名固定为 `GATEWAY_HOST`（`neko`），`serverId` 由应用信息校验（`GatewayIdentityError` / `assertGatewayIdentity`），客户端 host 一律用 `createClientHost(link)`；主体类型是 `GatewayPrincipal`。链路协议版本 7：协议版本不同或握手无法解析（如 Pi 1.2 网关）会被客户端报告为 `ApplicationProtocolError`（不可重试）。服务端 WebSocket 不接受压缩帧；`ws` 在 Bun 下经 `addEventListener` 把文本帧交成 Buffer，因此有界链路用 `on("message", (data, isBinary))`。
 - 存储：`openNodeSqliteStorage(path)`（自动建父目录）或 `MemoryStorage`；一个存储同时只被一个 Harness 打开。
 - 上下文设置：`context.compaction`/`context.pruning`（配置文件）与 UI 保存值（`app.neko.context-settings` 文档）按保存值 > 配置 > 默认解析（`packages/core/src/context-settings.ts`）；压缩通过 `Harness.open` 的 `settings.compaction` getter 即时生效，未设置的字段不传，保持原生策略。
 - 工具结果裁剪（`packages/core/src/context-pruning.ts`，默认关闭）：`ContextPruner` 监听提交，成功回答的占用 ≥ 阈值时写入 `app.neko.context-prune` 条目（`requestId = prune:<助手条目 id>`），其 `edits` 把旧大工具结果替换为占位；只改模型上下文，原条目、投影与统计不变（投影对该种类无分支）。

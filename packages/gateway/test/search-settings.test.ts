@@ -31,10 +31,10 @@ it("synchronizes the search provider across clients without touching credentials
 
 		// Saving or removing a DeepSeek key never changes the explicit choice.
 		await unix.credentials.save({ provider: "deepseek", key: "test-private-value" });
-		await waitFor(() => web.credentials.state.value?.statuses.deepseek.source === "saved");
+		await waitFor(() => web.credentials.state.value?.statuses.deepseek?.source === "saved");
 		expect(JSON.stringify(web.searchSettings.state.value)).not.toContain("test-private-value");
 		await web.credentials.remove({ provider: "deepseek" });
-		await waitFor(() => unix.credentials.state.value?.statuses.deepseek.source === "none");
+		await waitFor(() => unix.credentials.state.value?.statuses.deepseek?.source === "none");
 		expect(unix.searchSettings.state.value!.selected).toBe("deepseek");
 
 		await web.searchSettings.set({ provider: "tavily" });

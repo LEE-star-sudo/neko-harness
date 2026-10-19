@@ -2,18 +2,23 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Icon } from "./primitives";
 
-export type SettingsSection = "credentials" | "context" | "mobile" | "about";
+export type SettingsSection = "credentials" | "search" | "context" | "mobile" | "about";
 
-const MENU: readonly { key: SettingsSection; label: string; icon: "key" | "layers" | "phone" | "info"; to: string }[] =
-	[
-		{ key: "credentials", label: "密钥", icon: "key", to: "/settings" },
-		{ key: "context", label: "上下文", icon: "layers", to: "/settings/context" },
-		{ key: "mobile", label: "手机配对", icon: "phone", to: "/settings/mobile" },
-		{ key: "about", label: "关于与更新", icon: "info", to: "/about" },
-	];
+const MENU: readonly {
+	key: SettingsSection;
+	label: string;
+	icon: "key" | "layers" | "phone" | "info" | "search";
+	to: string;
+}[] = [
+	{ key: "credentials", label: "模型服务", icon: "key", to: "/settings" },
+	{ key: "search", label: "联网搜索", icon: "search", to: "/settings/search" },
+	{ key: "context", label: "上下文", icon: "layers", to: "/settings/context" },
+	{ key: "mobile", label: "手机配对", icon: "phone", to: "/settings/mobile" },
+	{ key: "about", label: "关于与更新", icon: "info", to: "/about" },
+];
 
 /**
- * 设置区统一外壳：左侧栏菜单（密钥 / 关于与更新，未来可扩展通用偏好）+ 右侧内容。
+ * 设置区统一外壳：左侧栏菜单（模型服务 / 联网搜索 / 上下文 / 手机配对 / 关于与更新）+ 右侧内容。
  * 移动端侧栏转为顶部横排，菜单项保持可点。
  */
 export function SettingsShell({ active, children }: { active: SettingsSection; children: ReactNode }) {

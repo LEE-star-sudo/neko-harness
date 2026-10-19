@@ -22,7 +22,7 @@ neko tui   # 终端界面
 neko web   # 浏览器界面，自动打开
 ```
 
-首次使用在 TUI 输入 `/login`，或打开 Web「设置 → 密钥」，填入 [DeepSeek API Key](https://platform.deepseek.com/api_keys)。默认使用 DeepSeek V4.1 Flash，可在界面中切换模型。也可用环境变量提供：
+首次使用在 TUI 输入 `/login`，或打开 Web「设置 → 模型服务」，填入 [DeepSeek API Key](https://platform.deepseek.com/api_keys)。默认使用 DeepSeek V4.1 Flash，可在界面中切换模型。也可用环境变量提供：
 
 ```bash
 export DEEPSEEK_API_KEY='你的 API Key'
@@ -30,11 +30,13 @@ export DEEPSEEK_API_KEY='你的 API Key'
 
 界面保存的 Key 优先于环境变量，仅保存在本机，请勿分享。
 
+默认只启用 DeepSeek。如需使用其他模型服务（OpenRouter、OpenCode Go / Zen、OpenAI、Google、Groq、Mistral、xAI、Together 等 32 个纯 API Key 服务），在 TUI `/login`（空格勾选）或 Web「设置 → 模型服务」中启用并配置 Key，也可用对应环境变量（如 `OPENROUTER_API_KEY`、`OPENCODE_API_KEY`，各服务的变量名显示在配置页中）。启用后模型会出现在 `/model` 与输入框的模型选择器里；取消启用不会删除已保存的 Key，但使用该服务的会话将无法发送新消息，直到重新启用或切换模型。`--model` 的格式为 `provider/modelId`，例如 `openrouter/anthropic/claude-haiku-4.5`。
+
 ## 日常操作
 
 - **工作区**：默认使用启动目录。Web 侧栏可添加、切换项目，浏览文件、查看本次由助手产生的改动，并可在本机用 VS Code 或文件管理器打开。
 - **会话**：TUI 用 `/new` 新建、`/sessions` 切换；Web 使用侧栏。
-- **模型与思考强度**：TUI 用 `/model` 和 `/think`；Web 点击输入框中的模型入口。
+- **模型与思考强度**：TUI 用 `/model`（按服务分组、可输入过滤）和 `/think`；Web 点击输入框中的模型入口（按服务分组、可搜索）。
 - **文件与图片**：输入 `@` 引用文件或目录；TUI 用 `Ctrl+V` 粘贴图片，Web 支持粘贴、拖放和选择。识图能力取决于所选模型。
 - **上下文**：`/compact` 整理较长对话。默认沿用 pi-durable 的自动压缩策略（接近模型窗口上限才触发），可在 TUI `/context`、Web 设置页「上下文」或配置文件 `context.compaction` 调整触发百分比、保留量与开关，保存值优先。
 - **工具结果裁剪**（默认关闭）：配置 `context.pruning`，上下文占用过高时把较旧的工具结果在模型上下文中替换为占位，界面与导出仍显示原始结果，模型需要时会重新执行工具。阈值与保留量可在 `/context` 与设置页修改。
@@ -44,7 +46,7 @@ export DEEPSEEK_API_KEY='你的 API Key'
 - **后台任务**：`npm run dev`、`uv run` 等长命令可由 `job` 工具转入后台（同时最多 4 个），结束时助手会收到回报并继续处理。Web 顶栏「任务」、TUI `/jobs` 查看实时输出或手动停止。重启后运行中的任务标记为已丢失，不会自动重跑。
 - **待办列表**：多步骤任务中，助手用 `todo` 工具维护一份有序待办，用户只读。Web 顶栏「待办 n/m」、TUI `/todos`、手机聊天页进度入口查看。列表随会话保存，重启与压缩后仍在，子 agent 不能使用。
 - **向你提问**：缺少必要决策时，助手用 `ask_user` 提问：可单选或多选（带「推荐」提示但不预选），可附加文字，也可只回文字或跳过。Web 在输入区上方、TUI 按 `Ctrl+O` 或 `/question`、手机在聊天页回答；选择需点「提交回答」（TUI 按 Enter）才生效。等待期间助手暂停，期间发送的消息仍排队到回答之后；问题与选项按纯文本显示。
-- **网页搜索**：默认使用 Tavily（无 Key 时为有限流的 keyless 模式，可在密钥设置中配置自己的 Key），也可改用 DeepSeek 搜索与抓取，复用你的 DeepSeek Key：TUI 用 `/search`、Web 在设置页「搜索服务」选择，或用配置 `webSearch.provider` 设置初始值。DeepSeek 搜索按成功请求计费（5 元 / 千次）。
+- **网页搜索**：默认使用 Tavily（无 Key 时为有限流的 keyless 模式，可在 Web「设置 → 联网搜索」或 TUI `/login` 中配置自己的 Key），也可改用 DeepSeek 搜索与抓取，复用你的 DeepSeek Key：TUI 用 `/search`、Web 在设置页「联网搜索」选择，或用配置 `webSearch.provider` 设置初始值。DeepSeek 搜索按成功请求计费（5 元 / 千次）。
 - **手机配对**：Web 设置页「手机配对」开启后用 App 扫码连接。手机需与电脑同一网络，系统防火墙放行所选端口；撤销设备、重新生成证书也在设置页完成。gateway 由 `neko web` 启动时，退出页面会同时停止手机入口，需要长期连接请改用 `neko serve` 或保持 TUI 运行。WSL 默认 NAT 网络下会自动经 `powershell.exe` 转发，无需 portproxy。
 
 助手可以执行命令和修改文件，请在可信项目中使用；工作区目录不限制助手的文件访问范围。

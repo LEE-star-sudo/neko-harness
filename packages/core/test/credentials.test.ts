@@ -36,9 +36,9 @@ it("boots without a key, preserves input state and uses Pi capabilities and defa
 	try {
 		expect((await runtime.getAgent()).thinkingLevel).toBe("high");
 		const before = await runtime.listConversations();
-		await expect(runtime.submit("hello")).rejects.toThrow("DEEPSEEK_KEY_REQUIRED");
+		await expect(runtime.submit("hello")).rejects.toThrow("PROVIDER_KEY_REQUIRED");
 		expect(await runtime.listConversations()).toEqual(before);
-		expect(runtime.listModels().map((m) => m.supportedThinkingLevels)).toEqual([
+		expect((await runtime.listSelectableModels()).map((m) => m.supportedThinkingLevels)).toEqual([
 			["off", "low", "high", "max"],
 			["off", "high", "max"],
 		]);

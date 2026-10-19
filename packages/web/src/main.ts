@@ -16,11 +16,12 @@ const USAGE = `用法: neko web [选项]
   --server-id <id>     网关逻辑身份（默认读取/生成 <数据目录>/gateway-server-id）
   --storage <path>     SQLite 存储文件（默认 ~/.neko/neko.sqlite）
   --cwd <dir>          会话工具的工作目录（默认当前目录）
-  --model <ref>        模型，格式 provider/modelId（默认 deepseek/deepseek-flash）
+  --model <ref>        模型，格式 provider/modelId（modelId 可含 /，默认 deepseek/deepseek-flash）
   --no-open            不自动打开浏览器（适用于远程或无桌面环境）
   -h, --help           显示此帮助
 
-可在 Web 设置页配置 Key；网关子进程也会继承 DEEPSEEK_API_KEY。`;
+可在 Web 设置页「模型服务」启用 provider（如 OpenRouter、OpenCode Go）并配置 Key，联网搜索在「联网搜索」页设置；
+网关子进程也会继承 DEEPSEEK_API_KEY / OPENROUTER_API_KEY / OPENCODE_API_KEY 等环境变量。`;
 
 type CliOptions = {
 	open: boolean;

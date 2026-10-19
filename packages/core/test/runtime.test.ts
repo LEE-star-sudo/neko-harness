@@ -10,7 +10,7 @@ describe("createNekoRuntime", () => {
 		delete process.env.DEEPSEEK_API_KEY;
 		try {
 			const runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), storage: "memory" });
-			await expect(runtime.submit("hello")).rejects.toThrow(/DEEPSEEK_KEY_REQUIRED/);
+			await expect(runtime.submit("hello")).rejects.toThrow(/PROVIDER_KEY_REQUIRED/);
 			await runtime.close();
 		} finally {
 			if (original !== undefined) process.env.DEEPSEEK_API_KEY = original;

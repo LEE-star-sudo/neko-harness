@@ -1,6 +1,5 @@
-import type { ChatView, NekoConversationChange, NekoModelInfo, NekoSkillInfo } from "@neko-harness/core";
+import type { ChatView, NekoConversationChange, NekoSelectableModel, NekoSkillInfo } from "@neko-harness/core";
 import { ApplicationProtocolError, type UpdateState } from "@neko-harness/core/application-version";
-import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import { downloadImage, type ImageFile, uploadImage } from "@neko-harness/core/image-transfer";
 import type { SearchProviderId } from "@neko-harness/core/search-providers";
 import { byMessage, byVisited } from "@neko-harness/core/session-display";
@@ -53,7 +52,7 @@ export type GatewayEvents = {
 	onWorkspaces(state: NekoWorkspaceState): void;
 	onWorkspace(path: string): void;
 	onOperation(busy: boolean): void;
-	onModels(models: readonly NekoModelInfo[]): void;
+	onModels(models: readonly NekoSelectableModel[]): void;
 	onSessionChange(sessionId: string | null): void;
 	onView(view: ChatView | null): void;
 };
@@ -119,13 +118,17 @@ export class GatewayConnection {
 	get managementReady() {
 		return this.#connected && !this.#operating;
 	}
-	async saveCredential(provider: CredentialProviderId, key: string): Promise<void> {
+	async saveCredential(provider: string, key: string): Promise<void> {
 		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
 		await this.#credentials.save({ provider, key });
 	}
-	async removeCredential(provider: CredentialProviderId): Promise<void> {
+	async removeCredential(provider: string): Promise<void> {
 		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
 		await this.#credentials.remove({ provider });
+	}
+	async setProviderEnabled(provider: string, enabled: boolean): Promise<void> {
+		if (!this.#connected || !this.#credentials) throw new Error("网关未连接");
+		await this.#credentials.setEnabled({ provider, enabled });
 	}
 	async setSearchProvider(provider: SearchProviderId): Promise<void> {
 		if (!this.#connected || !this.#searchSettings) throw new Error("网关未连接");
@@ -373,7 +376,7 @@ export class GatewayConnection {
 		if (!this.ready || sessionId !== this.#currentSessionId) throw new Error("会话未就绪");
 		return this.#client!.host.root((ctx) => this.#chat!.skills(null, ctx), { signal });
 	}
-	async listModels(): Promise<readonly NekoModelInfo[]> {
+	async listModels(): Promise<readonly NekoSelectableModel[]> {
 		return this.#models?.list(null) ?? [];
 	}
 	/** 技能市场：读操作直发；工作区缺省用当前工作区（项目级状态判定的依据）。 */
@@ -442,9 +445,14 @@ export class GatewayConnection {
 		this.#contextSettings = client.contextSettings;
 		this.#skillMarket = client.skillMarket;
 
+		let credentialRevision = this.#credentials.state.value?.revision;
 		this.#unsub.push(
 			this.#credentials.state.subscribe((value) => {
-				if (epoch === this.#epoch) this.#options.events.onCredentials?.(value);
+				if (epoch !== this.#epoch) return;
+				this.#options.events.onCredentials?.(value);
+				// Enablement and keys decide which models are selectable, so a changed state refetches the list.
+				if (this.#connected && value.revision !== credentialRevision) this.#refreshModels(epoch);
+				credentialRevision = value.revision;
 			}),
 		);
 		this.#options.events.onCredentials?.(this.#credentials.state.value);
@@ -486,10 +494,15 @@ export class GatewayConnection {
 		this.#connected = true;
 		this.#attempt = 0;
 		this.#options.events.onPhase("ready");
+		this.#refreshModels(epoch);
+	}
+	#modelRequest = 0;
+	#refreshModels(epoch: number): void {
+		const request = ++this.#modelRequest;
 		void this.#models
-			.list(null)
+			?.list(null)
 			.then((models) => {
-				if (epoch === this.#epoch) this.#options.events.onModels(models);
+				if (epoch === this.#epoch && request === this.#modelRequest) this.#options.events.onModels(models);
 			})
 			.catch(() => {});
 	}

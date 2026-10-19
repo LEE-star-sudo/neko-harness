@@ -13,7 +13,13 @@ import { labels } from "../labels.ts";
 import { style, theme } from "../theme/index.ts";
 import { shortcutHints } from "./shortcut-hints.ts";
 
-export type PickerItem = SelectItem & { rightLabel?: string; searchText?: string; header?: boolean };
+export type PickerItem = SelectItem & {
+	rightLabel?: string;
+	searchText?: string;
+	header?: boolean;
+	/** Visible but not confirmable: Enter shows this hint instead of picking. */
+	blockedHint?: string;
+};
 
 /**
  * An in-panel detail view (list stays underneath; Esc pops back to the list).
@@ -38,6 +44,8 @@ export class PickerPanel implements Component {
 	agentNavigation = false;
 	/** Shown instead of "No results" when the unfiltered list is empty. */
 	emptyText: string | undefined;
+	/** Keep group headers (only those with matches) while filtering. Reset when the panel closes. */
+	groupedFilter = false;
 	/** Pre-filter for list keys (e.g. `S`, `←`); return true to consume. Reset when the panel closes. */
 	listKey: ((data: string, value: string | undefined) => boolean) | undefined;
 	readonly search = new Input({ prompt: "❯ ", placeholder: "Type to filter" });
@@ -47,6 +55,7 @@ export class PickerPanel implements Component {
 	#generation = 0;
 	#state: "closed" | "loading" | "ready" | "error" | "applying" = "closed";
 	#error = "";
+	#hint = "";
 	#title = "";
 	#load: (() => Promise<readonly PickerItem[]>) | undefined;
 	// biome-ignore lint/suspicious/noConfusingVoidType: pick 要么无返回（关闭面板）要么返回详情视图
@@ -111,6 +120,8 @@ export class PickerPanel implements Component {
 		this.pointerSelection = false;
 		this.agentNavigation = false;
 		this.emptyText = undefined;
+		this.groupedFilter = false;
+		this.#hint = "";
 		this.listKey = undefined;
 		++this.#generation;
 		for (const detail of this.#details) detail.close?.();
@@ -140,9 +151,20 @@ export class PickerPanel implements Component {
 	#details: PickerDetail[] = [];
 	#filtered(): readonly PickerItem[] {
 		const query = this.search.getValue().toLowerCase();
-		// 搜索时隐藏组头，平铺命中项。
-		if (query !== "") return this.#items.filter((item) => !item.header && this.#matches(item, query));
-		return this.#items;
+		if (query === "") return this.#items;
+		if (!this.groupedFilter) return this.#items.filter((item) => !item.header && this.#matches(item, query));
+		// 分组过滤：保留含命中项的组头。
+		const result: PickerItem[] = [];
+		let header: PickerItem | undefined;
+		for (const item of this.#items) {
+			if (item.header) header = item;
+			else if (this.#matches(item, query)) {
+				if (header) result.push(header);
+				header = undefined;
+				result.push(item);
+			}
+		}
+		return result;
 	}
 	#matches(item: PickerItem, query: string): boolean {
 		return `${item.label} ${item.description ?? ""} ${item.searchText ?? ""}`.toLowerCase().includes(query);
@@ -185,6 +207,7 @@ export class PickerPanel implements Component {
 			return;
 		}
 		if (this.#state !== "ready") return;
+		this.#hint = "";
 		const items = this.#filtered();
 		if (this.listKey?.(data, items[this.#index]?.value)) {
 			this.changed();
@@ -195,6 +218,11 @@ export class PickerPanel implements Component {
 		else if (matchesKey(data, "enter")) {
 			const item = items[this.#index];
 			if (!item || item.header) return;
+			if (item.blockedHint) {
+				this.#hint = item.blockedHint;
+				this.changed();
+				return;
+			}
 			const generation = this.#generation;
 			this.#state = "applying";
 			void this.#pick!(item.value).then(
@@ -276,7 +304,8 @@ export class PickerPanel implements Component {
 						? shortcutHints(["↑↓", "Select"], ["→/Enter", "Open"], ["←", "Main"])
 						: labels.select
 					: labels.close;
-		const available = Math.max(1, height - rows.length - 1);
+		const hint = this.#state === "ready" && height >= 5 ? this.#hint : "";
+		const available = Math.max(1, height - rows.length - 1 - (hint ? 1 : 0));
 		if (this.#state !== "ready")
 			rows.push(
 				this.#state === "error"
@@ -293,7 +322,8 @@ export class PickerPanel implements Component {
 				if (first >= 0) this.#index = first;
 			}
 			const selected = items[this.#index];
-			const details = height >= 9 && selected?.description ? wrapTextWithAnsi(selected.description, w).slice(0, 2) : [];
+			const details =
+				height >= 9 && !hint && selected?.description ? wrapTextWithAnsi(selected.description, w).slice(0, 2) : [];
 			const count = Math.max(1, available - details.length);
 			const start = Math.max(0, Math.min(this.#index - Math.floor(count / 2), items.length - count));
 			for (const [i, item] of items.slice(start, start + count).entries()) {
@@ -311,8 +341,9 @@ export class PickerPanel implements Component {
 			}
 			if (items.length === 0)
 				rows.push(this.emptyText !== undefined && this.#items.length === 0 ? this.emptyText : labels.noResults);
-			while (rows.length < height - 1 - details.length) rows.push("");
+			while (rows.length < height - 1 - details.length - (hint ? 1 : 0)) rows.push("");
 			rows.push(...details.map((line) => theme.dim(line)));
+			if (hint) rows.push(theme.warning(hint));
 		}
 		while (rows.length < height - 1) rows.push("");
 		if (height > 1) rows.push(help);

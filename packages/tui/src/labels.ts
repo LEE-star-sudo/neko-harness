@@ -12,7 +12,7 @@ export const commands: SlashCommand[] = [
 	{ name: "exit", description: "Exit neko TUI" },
 	{ name: "new", description: "Create a new session" },
 	{ name: "sessions", description: "Switch or create a session" },
-	{ name: "login", description: "Configure DeepSeek API key" },
+	{ name: "login", description: "Manage model providers and API keys" },
 	{ name: "model", description: "Choose a model" },
 	{ name: "agents", description: "View agent tasks and activity" },
 	{ name: "jobs", description: "View background jobs" },

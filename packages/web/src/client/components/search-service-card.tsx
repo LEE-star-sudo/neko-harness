@@ -71,7 +71,7 @@ export function SearchServiceCard(props: {
 			{warning && (
 				<p className="mt-3 text-xs text-sakura-800">
 					{warning}{" "}
-					<a href="#credential-deepseek" className="focus-neko rounded underline">
+					<a href="/settings#credential-deepseek" className="focus-neko rounded underline">
 						前往配置
 					</a>
 				</p>

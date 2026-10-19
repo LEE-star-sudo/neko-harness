@@ -18,6 +18,7 @@ import { appActions } from "../lib/bootstrap";
 import { commandSuggestions, isCommandQuery } from "../lib/command-suggestions";
 import { fitHeight } from "../lib/composer-height";
 import { type HistoryBrowse, stepHistory } from "../lib/input-history";
+import { providerIssue, providerName } from "../lib/providers";
 import { questionUi } from "../lib/question-ui";
 import { getState, storeActions, useNekoState } from "../lib/store";
 import { readUpgradeDraft, removeUpgradeDraft, saveUpgradeDraft } from "../lib/upgrade-draft";
@@ -195,7 +196,8 @@ function SessionComposer(props: Props & { sessionId: string }) {
 		for (const listener of draftListeners) listener();
 	};
 	const edit = (next: Partial<Draft>) => update({ ...current.current, ...next, requestId: crypto.randomUUID() });
-	const missingKey = view?.agent.model?.provider === "deepseek" && credentials?.statuses.deepseek.source === "none";
+	const issue = providerIssue(credentials, view?.agent.model?.provider);
+	const missingKey = issue !== null;
 	const model = models.find(
 		(m) => m.provider === view?.agent.model?.provider && m.modelId === view?.agent.model?.modelId,
 	);
@@ -556,10 +558,16 @@ function SessionComposer(props: Props & { sessionId: string }) {
 							</output>
 						)}
 						{drag && <p className="text-sm text-sakura-700">松开以添加图片，不会自动发送</p>}
-						{missingKey && (
+						{issue && (
 							<p className="text-sm text-sakura-700">
-								尚未配置 DeepSeek Key。
-								<Link to="/settings" className="focus-neko underline">
+								{issue === "disabled"
+									? `模型服务 ${providerName(view?.agent.model?.provider ?? "")} 已取消启用，请重新启用或切换模型。`
+									: `尚未配置 ${providerName(view?.agent.model?.provider ?? "")} Key。`}
+								<Link
+									to="/settings"
+									hash={`credential-${view?.agent.model?.provider ?? ""}`}
+									className="focus-neko underline"
+								>
 									前往设置
 								</Link>
 							</p>

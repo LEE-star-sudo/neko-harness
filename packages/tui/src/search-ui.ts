@@ -6,7 +6,7 @@ export const SEARCH_EMPTY = "Search settings are unavailable.";
 
 const NAMES: Record<SearchProviderId, string> = { tavily: "Tavily", deepseek: "DeepSeek" };
 
-const SOURCES: Record<NekoCredentialState["statuses"]["deepseek"]["source"], string> = {
+const SOURCES: Record<NekoCredentialState["statuses"][string]["source"], string> = {
 	saved: "saved key",
 	environment: "environment variable",
 	runtime: "runtime key",
@@ -24,7 +24,7 @@ export function searchItems(
 		const status = credentials?.statuses[provider];
 		return status ? SOURCES[status.source] : "loading";
 	};
-	const deepseekMissing = credentials?.statuses.deepseek.source === "none";
+	const deepseekMissing = credentials?.statuses.deepseek?.source === "none";
 	const descriptions: Record<SearchProviderId, string> = {
 		tavily: `Tavily search (${source("tavily")}). Default`,
 		deepseek: deepseekMissing

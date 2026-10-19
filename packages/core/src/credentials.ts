@@ -8,6 +8,14 @@ export {
 	type CredentialProviderId,
 	type CredentialProviderSpec,
 	credentialProvider,
+	DEFAULT_ENABLED_PROVIDERS,
+	isCredentialProvider,
+	isModelProvider,
+	LOCKED_PROVIDERS,
+	MODEL_PROVIDERS,
+	type ModelProviderId,
+	normalizeEnabledProviders,
+	SEARCH_CREDENTIAL_PROVIDERS,
 } from "./credential-providers.ts";
 
 export type CredentialStatus = {

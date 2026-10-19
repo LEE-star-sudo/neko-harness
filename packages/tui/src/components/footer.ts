@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { type Component, type TuiMouseEvent, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { formatTokens } from "../format.ts";
+import { formatTokens, modelDisplayName } from "../format.ts";
 import { labels } from "../labels.ts";
 import { theme } from "../theme/index.ts";
 
@@ -80,7 +80,7 @@ export class StatusFooter implements Component {
 					: tone === "accent"
 						? theme.accent(statusText)
 						: theme.ok(statusText);
-		const modelShort = s.model.split("/").at(-1) ?? s.model;
+		const modelShort = modelDisplayName(s.model);
 		const identity: Array<{ text: string; slot: (t: string) => string }> = [
 			{ text: basename(s.cwd) || s.cwd, slot: theme.muted },
 			{ text: modelShort, slot: theme.model },

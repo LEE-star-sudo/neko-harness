@@ -103,7 +103,7 @@ export function mergeUsage(base: UsageState, extra: UsageState): UsageState {
 }
 
 /** Native tasks own retries, close cancellation and restart recovery; this gate only limits requests. */
-function namingTask() {
+function namingTask(canUse: (provider: string, modelId: string) => Promise<boolean>) {
 	let active = 0;
 	const waits = new Set<() => void>();
 	return defineTask<
@@ -143,7 +143,13 @@ function namingTask() {
 				try {
 					const saved = await runtime.snapshot(SessionMetadataDoc, runtime.conversationId, context);
 					const model = saved?.model && runtime.models.getModel(saved.model.provider, saved.model.modelId);
-					if (!saved || !model || saved.attempts >= 2 || !getSupportedThinkingLevels(model).includes("off")) {
+					if (
+						!saved ||
+						!model ||
+						saved.attempts >= 2 ||
+						!getSupportedThinkingLevels(model).includes("off") ||
+						!(await canUse(model.provider, model.id))
+					) {
 						await runtime.commit(async (tx) => {
 							(await tx.doc(SessionMetadataDoc, runtime.conversationId)).naming = "fallback";
 							return { status: "terminal", outcome: { status: "completed", result: null } };
@@ -232,7 +238,7 @@ export class SessionMetadataManager {
 	#known = new Set<ConversationId>();
 	#unsubscribe: () => void;
 	#live = new Map<ConversationId, boolean>();
-	readonly task = namingTask();
+	readonly task: ReturnType<typeof namingTask>;
 	private harness: Harness;
 	private storage: Storage;
 	private context: Context;
@@ -243,7 +249,9 @@ export class SessionMetadataManager {
 		context: Context,
 		registry: Registry,
 		report: (error: unknown) => void = console.error,
+		canUseModel: (provider: string, modelId: string) => Promise<boolean> = async () => true,
 	) {
+		this.task = namingTask(canUseModel);
 		this.harness = harness;
 		this.storage = storage;
 		this.context = context;

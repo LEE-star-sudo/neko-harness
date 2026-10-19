@@ -11,7 +11,7 @@ import { createNekoRuntime } from "../src/runtime.ts";
 it("uses published DeepSeek 1.3 capabilities directly", async () => {
 	const runtime = await createNekoRuntime({ storage: "memory" });
 	try {
-		const models = runtime.listModels();
+		const models = await runtime.listSelectableModels();
 		expect(models.map((m) => m.provider)).toEqual(["deepseek", "deepseek"]);
 		expect(models.find((m) => m.modelId === "deepseek-flash")).toMatchObject({
 			input: ["text", "image"],

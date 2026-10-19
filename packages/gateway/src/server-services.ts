@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ChordError, type Context, type Ctx, type Host, local, method, type Self } from "@earendil-works/chord";
 import type { ConversationId } from "@earendil-works/pi-durable";
-import { CREDENTIAL_PROVIDERS, type NekoRuntime } from "@neko-harness/core";
+import { CREDENTIAL_PROVIDERS, type CredentialProviderId, isModelProvider, type NekoRuntime } from "@neko-harness/core";
 import { UpdateChecker, type UpdateCheckerOptions } from "@neko-harness/core/application-updates";
 import type { UpdateState } from "@neko-harness/core/application-version";
 import { Type } from "typebox";
@@ -151,10 +151,17 @@ export async function createNekoServerServices(options: {
 			awaitingAnswer: info.awaitingAnswer,
 		}));
 
-	const readStatuses = async (): Promise<NekoCredentialState["statuses"]> =>
-		Object.fromEntries(
-			await Promise.all(CREDENTIAL_PROVIDERS.map(async (spec) => [spec.id, await runtime.credentialStatus(spec.id)])),
-		) as NekoCredentialState["statuses"];
+	const readStatuses = async (): Promise<NekoCredentialState["statuses"]> => {
+		const enabled = new Set<string>(runtime.enabledProviders());
+		return Object.fromEntries(
+			await Promise.all(
+				CREDENTIAL_PROVIDERS.map(async (spec) => {
+					const status = await runtime.credentialStatus(spec.id as CredentialProviderId);
+					return [spec.id, spec.kind === "model" ? { ...status, enabled: enabled.has(spec.id) } : status];
+				}),
+			),
+		);
+	};
 	const [sessions, workspaces, statuses, search, contextSettings0] = await Promise.all([
 		list(),
 		runtime.listWorkspaces(),
@@ -255,13 +262,23 @@ export async function createNekoServerServices(options: {
 			variant: "ready",
 			state: hub.credentials,
 			save: async (input, ctx) => {
-				await runtime.saveCredential(input.provider, input.key);
+				await runtime.saveCredential(input.provider as CredentialProviderId, input.key);
 				return hub.refreshCredentials(null, ctx);
 			},
 			remove: async (input, ctx) => {
-				await runtime.removeCredential(input.provider);
+				await runtime.removeCredential(input.provider as CredentialProviderId);
 				return hub.refreshCredentials(null, ctx);
 			},
+			setEnabled: (input, ctx) =>
+				serialize(async () => {
+					if (!isModelProvider(input.provider)) throw new ChordError("invalid", "Unknown model provider.");
+					try {
+						await runtime.setProviderEnabled(input.provider, input.enabled);
+					} catch (error) {
+						throw new ChordError("invalid", error instanceof Error ? error.message : "Cannot change provider.");
+					}
+					return hub.refreshCredentials(null, ctx);
+				}),
 		};
 	});
 	host.serve(NekoSearchSettings, (_input, _principal, self) => {
@@ -296,7 +313,7 @@ export async function createNekoServerServices(options: {
 	host.serve(NekoModels, () => ({
 		variant: "ready",
 		list: async () =>
-			[...runtime.listModels()].map((value) => ({
+			(await runtime.listSelectableModels()).map((value) => ({
 				...value,
 				input: [...value.input],
 				supportedThinkingLevels: [...value.supportedThinkingLevels],

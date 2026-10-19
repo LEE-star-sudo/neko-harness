@@ -1,6 +1,5 @@
 import type { NekoConversationChange, NekoModelRef, NekoSkillInfo } from "@neko-harness/core";
 import { ApplicationProtocolError } from "@neko-harness/core/application-version";
-import type { CredentialProviderId } from "@neko-harness/core/credential-providers";
 import type { ImageFile } from "@neko-harness/core/image-transfer";
 import type { SearchProviderId } from "@neko-harness/core/search-providers";
 import type { NekoBrowseOptions, NekoContextSettingsPatch, WireQuestionResponse } from "./contract.ts";
@@ -133,11 +132,14 @@ export const appActions = {
 	checkUpdates() {
 		return requireConnection().checkUpdates();
 	},
-	saveCredential(provider: CredentialProviderId, key: string) {
+	saveCredential(provider: string, key: string) {
 		return requireConnection().saveCredential(provider, key);
 	},
-	removeCredential(provider: CredentialProviderId) {
+	removeCredential(provider: string) {
 		return requireConnection().removeCredential(provider);
+	},
+	setProviderEnabled(provider: string, enabled: boolean) {
+		return requireConnection().setProviderEnabled(provider, enabled);
 	},
 	setContextSettings(patch: NekoContextSettingsPatch) {
 		return requireConnection().setContextSettings(patch);
