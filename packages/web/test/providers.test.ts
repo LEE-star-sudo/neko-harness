@@ -3,11 +3,13 @@ import type { NekoSelectableModel } from "@neko-harness/core";
 import type { NekoCredentialState } from "../src/client/lib/contract.ts";
 import {
 	describeModel,
+	filterProviderOptions,
 	formatContextWindow,
 	groupModels,
 	isDefaultModel,
 	providerIssue,
 	providerName,
+	resolveProviderId,
 } from "../src/client/lib/providers.ts";
 
 const model = (provider: string, modelId: string, name: string, available = true): NekoSelectableModel => ({
@@ -88,4 +90,36 @@ it("matches the default model by provider and modelId regardless of source", () 
 	// 来源（cli / saved / config / default）不影响标识：一律按 effective 命中。
 	for (const source of ["cli", "saved", "config", "default"] as const)
 		expect(isDefaultModel({ effective: ref, source }, ref)).toBe(true);
+});
+
+it("resolves the provider a picker starts on: preferred, else first usable, else first, else none", () => {
+	const groups = groupModels(
+		[model("openrouter", "a", "A", false), model("opencode-go", "b", "B"), model("deepseek", "c", "C", false)],
+		"",
+	);
+	expect(resolveProviderId(groups, "opencode-go")).toBe("opencode-go");
+	// 当前 provider 不在可选集合（被取消启用）：改选首个可用的，而不是首个。
+	expect(resolveProviderId(groups, "openai")).toBe("opencode-go");
+	expect(resolveProviderId(groups, undefined)).toBe("opencode-go");
+	// 无可用（全缺 Key）：退回首个，仍能显示未配置提示。
+	expect(
+		resolveProviderId(
+			groups.filter((group) => !group.available),
+			"openai",
+		),
+	).toBe("deepseek");
+	expect(resolveProviderId([], "deepseek")).toBeNull();
+});
+
+it("filters provider options by every word over name, id and keywords, keeping order", () => {
+	const options = [
+		{ id: "openai", name: "OpenAI", keywords: "OPENAI_API_KEY" },
+		{ id: "openrouter", name: "OpenRouter", keywords: "OPENROUTER_API_KEY" },
+		{ id: "deepseek", name: "DeepSeek", keywords: "DEEPSEEK_API_KEY" },
+	];
+	expect(filterProviderOptions(options, "").map((item) => item.id)).toEqual(["openai", "openrouter", "deepseek"]);
+	expect(filterProviderOptions(options, "open").map((item) => item.id)).toEqual(["openai", "openrouter"]);
+	expect(filterProviderOptions(options, "open router").map((item) => item.id)).toEqual(["openrouter"]);
+	expect(filterProviderOptions(options, "deepseek_api").map((item) => item.id)).toEqual(["deepseek"]);
+	expect(filterProviderOptions(options, "zzz")).toEqual([]);
 });

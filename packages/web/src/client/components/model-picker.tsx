@@ -3,9 +3,19 @@ import type { NekoModelRef, NekoSelectableModel } from "@neko-harness/core";
 import { Link } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { appActions } from "../lib/bootstrap";
-import { describeModel, groupModels, isDefaultModel, providerIssue, providerName } from "../lib/providers";
+import {
+	describeModel,
+	formatContextWindow,
+	groupModels,
+	isDefaultModel,
+	type ProviderOption,
+	providerIssue,
+	providerName,
+	resolveProviderId,
+} from "../lib/providers";
 import { useNekoState } from "../lib/store";
 import { Modal } from "./primitives";
+import { ProviderCombobox } from "./provider-combobox";
 
 export function ModelPicker(props: { current: NekoModelRef | null; fallbackLabel: string }) {
 	const { models, currentSessionId, view, phase, operating, defaultModel } = useNekoState();
@@ -40,6 +50,16 @@ export function ModelPicker(props: { current: NekoModelRef | null; fallbackLabel
 	);
 }
 
+function badges(model: NekoSelectableModel): string {
+	return [
+		formatContextWindow(model.contextWindow),
+		model.input.includes("image") ? "图" : "",
+		model.reasoning ? "思" : "",
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
 function ModelForm(props: {
 	session: string;
 	currentRef: NekoModelRef;
@@ -51,14 +71,21 @@ function ModelForm(props: {
 	const [selected, setSelected] = useState<NekoSelectableModel | null>(props.current);
 	const [level, setLevel] = useState<ModelThinkingLevel>(props.level as ModelThinkingLevel);
 	const [query, setQuery] = useState("");
-	const [open, setOpen] = useState<Record<string, boolean>>({});
+	const [provider, setProvider] = useState<string | null>(props.currentRef.provider);
 	const [busy, setBusy] = useState(false);
 	const pending = useRef(false);
 	const [error, setError] = useState("");
-	const groups = groupModels(models, query);
-	const issue = providerIssue(credentials, props.currentRef.provider);
+	const allGroups = groupModels(models, "");
+	const providerId = resolveProviderId(allGroups, provider ?? undefined);
+	const providerOptions: ProviderOption[] = allGroups.map((group) => ({
+		id: group.provider,
+		name: group.name,
+		detail: group.available ? `${group.models.length} 个模型` : "未配置 Key",
+		tone: group.available ? "on" : "warn",
+	}));
 	const searching = query.trim().length > 0;
-	const isOpen = (provider: string) => open[provider] ?? (searching || provider === props.currentRef.provider);
+	const visible = searching ? groupModels(models, query) : allGroups.filter((group) => group.provider === providerId);
+	const issue = providerIssue(credentials, props.currentRef.provider);
 	async function apply() {
 		if (pending.current || !selected) return;
 		pending.current = true;
@@ -111,42 +138,43 @@ function ModelForm(props: {
 					</p>
 				)}
 				<div className="space-y-2">
-					<label className="sr-only" htmlFor="model-search">
-						搜索模型
-					</label>
-					<input
-						id="model-search"
-						type="search"
-						value={query}
-						onChange={(event) => setQuery(event.target.value)}
-						placeholder="搜索模型名称、ID 或服务商"
-						autoComplete="off"
-						spellCheck={false}
-						className="focus-neko w-full min-w-0 rounded-xl border border-sakura-200 bg-base px-3 py-2 text-sm"
-					/>
+					<div className="flex flex-col gap-2 sm:flex-row">
+						<div className="min-w-0 sm:w-64 sm:shrink-0">
+							<ProviderCombobox
+								label="模型服务商"
+								options={providerOptions}
+								value={providerId}
+								onChange={(id) => {
+									setProvider(id);
+									setQuery("");
+								}}
+							/>
+						</div>
+						<label className="sr-only" htmlFor="model-search">
+							搜索模型
+						</label>
+						<input
+							id="model-search"
+							type="search"
+							value={query}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder="搜索模型名称、ID 或服务商"
+							autoComplete="off"
+							spellCheck={false}
+							className="focus-neko w-full min-w-0 rounded-xl border border-sakura-200 bg-base px-3 py-2 text-sm"
+						/>
+					</div>
 					<fieldset
 						aria-label="模型"
-						className="m-0 min-w-0 max-h-[min(50vh,28rem)] space-y-2 overflow-y-auto border-0 p-0 pr-1"
+						className="m-0 min-w-0 max-h-[min(40vh,22rem)] space-y-1 overflow-y-auto border-0 p-0 pr-1"
 					>
-						{groups.map((group) => {
-							const expanded = isOpen(group.provider);
-							const panel = `models-${group.provider}`;
-							return (
-								<section key={group.provider} className="rounded-xl border border-sakura-200">
-									<div className="flex items-center gap-2 px-3 py-2">
-										<button
-											type="button"
-											aria-expanded={expanded}
-											aria-controls={panel}
-											onClick={() => setOpen({ ...open, [group.provider]: !expanded })}
-											className="focus-neko flex min-w-0 flex-1 items-center gap-2 rounded text-left text-sm font-semibold text-ink-900"
-										>
-											<span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
-											<span className="truncate">{group.name}</span>
-											<span className="text-xs font-normal text-ink-500">{group.models.length}</span>
-										</button>
+						{visible.map((group) => (
+							<section key={group.provider} id={`models-${group.provider}`}>
+								{(searching || !group.available) && (
+									<div className="flex items-center gap-2 px-1 pt-1 pb-0.5 text-xs">
+										{searching && <span className="truncate font-semibold text-ink-700">{group.name}</span>}
 										{!group.available && (
-											<span className="shrink-0 text-xs text-sakura-800">
+											<span className="ml-auto shrink-0 text-sakura-800">
 												未配置 Key ·{" "}
 												<Link
 													to="/settings"
@@ -158,51 +186,54 @@ function ModelForm(props: {
 											</span>
 										)}
 									</div>
-									{expanded && (
-										<ul id={panel} className="space-y-1.5 px-2 pb-2">
-											{group.models.map((model) => {
-												const chosen = selected?.provider === model.provider && selected.modelId === model.modelId;
-												const fallback = isDefaultModel(defaultModel, model);
-												return (
-													<li key={`${model.provider}/${model.modelId}`} className="flex items-stretch gap-1">
-														<button
-															type="button"
-															disabled={busy || !group.available}
-															aria-pressed={chosen}
-															onClick={() => {
-																setSelected(model);
-																setLevel(model.thinkingLevelAdjustments[level]);
-															}}
-															className={`focus-neko block min-w-0 flex-1 rounded-lg border px-3 py-2 text-left text-sm disabled:opacity-50 ${chosen ? "border-sakura-300 bg-sakura-50 text-sakura-800" : "border-sakura-100 bg-surface text-ink-700"}`}
-														>
-															{fallback ? "★ " : ""}
-															{model.name}
-															{chosen ? " ✓" : ""}
-															<span className="block truncate text-xs text-ink-400">{model.modelId}</span>
-															<span className="mt-0.5 block text-xs text-ink-500">{describeModel(model)}</span>
-														</button>
-														{group.available && (
-															<button
-																type="button"
-																disabled={busy}
-																aria-pressed={fallback}
-																aria-label={`${fallback ? "取消默认" : "设为默认"} ${model.name}`}
-																title={fallback ? "取消默认模型（只影响新建会话）" : "设为默认模型（只影响新建会话）"}
-																onClick={() => void toggleDefault(model)}
-																className="focus-neko shrink-0 rounded-lg border border-sakura-100 px-2 text-sm text-ink-400 hover:bg-sakura-50 disabled:opacity-50"
-															>
-																<span aria-hidden="true">{fallback ? "★" : "☆"}</span>
-															</button>
-														)}
-													</li>
-												);
-											})}
-										</ul>
-									)}
-								</section>
-							);
-						})}
-						{groups.length === 0 && (
+								)}
+								<ul className="space-y-1">
+									{group.models.map((model) => {
+										const chosen = selected?.provider === model.provider && selected.modelId === model.modelId;
+										const fallback = isDefaultModel(defaultModel, model);
+										return (
+											<li key={`${model.provider}/${model.modelId}`} className="flex items-stretch gap-1">
+												<button
+													type="button"
+													disabled={busy || !group.available}
+													aria-pressed={chosen}
+													title={`${model.modelId} · ${describeModel(model)}`}
+													onClick={() => {
+														setSelected(model);
+														setLevel(model.thinkingLevelAdjustments[level]);
+													}}
+													className={`focus-neko flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-sm disabled:opacity-50 ${chosen ? "border-sakura-300 bg-sakura-50 text-sakura-800" : "border-sakura-100 bg-surface text-ink-700"}`}
+												>
+													<span className="min-w-0 truncate">
+														{fallback ? "★ " : ""}
+														{model.name}
+														{chosen ? " ✓" : ""}
+													</span>
+													<span className="hidden min-w-0 flex-1 truncate text-xs text-ink-400 sm:inline">
+														{model.modelId}
+													</span>
+													<span className="ml-auto shrink-0 text-xs text-ink-500">{badges(model)}</span>
+												</button>
+												{group.available && (
+													<button
+														type="button"
+														disabled={busy}
+														aria-pressed={fallback}
+														aria-label={`${fallback ? "取消默认" : "设为默认"} ${model.name}`}
+														title={fallback ? "取消默认模型（只影响新建会话）" : "设为默认模型（只影响新建会话）"}
+														onClick={() => void toggleDefault(model)}
+														className="focus-neko shrink-0 rounded-lg border border-sakura-100 px-2 text-sm text-ink-400 hover:bg-sakura-50 disabled:opacity-50"
+													>
+														<span aria-hidden="true">{fallback ? "★" : "☆"}</span>
+													</button>
+												)}
+											</li>
+										);
+									})}
+								</ul>
+							</section>
+						))}
+						{visible.length === 0 && (
 							<p className="px-1 py-3 text-sm text-ink-500">
 								{searching ? "没有匹配的模型。" : "没有可选模型，请先在设置中启用模型服务。"}
 							</p>

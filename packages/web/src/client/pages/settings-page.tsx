@@ -1,37 +1,55 @@
 import { MODEL_PROVIDERS } from "@neko-harness/core/credential-providers";
 import { useEffect, useState } from "react";
+import { ProviderCombobox } from "../components/provider-combobox";
 import { ProviderCredentialCard } from "../components/provider-credential-card";
 import { SettingsShell } from "../components/settings-shell";
 import { appActions } from "../lib/bootstrap";
+import type { ProviderOption } from "../lib/providers";
 import { useNekoState } from "../lib/store";
+
+type ProviderSpec = (typeof MODEL_PROVIDERS)[number];
+
+const HASH_PREFIX = "credential-";
+
+function providerFromHash(): string {
+	const hash = typeof window === "undefined" ? "" : window.location.hash.slice(1);
+	const id = hash.startsWith(HASH_PREFIX) ? hash.slice(HASH_PREFIX.length) : "";
+	return MODEL_PROVIDERS.some((spec) => spec.id === id) ? id : "deepseek";
+}
 
 export function SettingsPage() {
 	const { credentials, phase } = useNekoState();
 	const ready = phase === "ready" && credentials !== null;
-	const [query, setQuery] = useState("");
-	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-	const matches = (spec: (typeof MODEL_PROVIDERS)[number]) =>
-		words.every((word) => `${spec.name} ${spec.id} ${spec.envVar}`.toLowerCase().includes(word));
-	const enabled = MODEL_PROVIDERS.filter((spec) => credentials?.statuses[spec.id]?.enabled !== false);
-	const others = MODEL_PROVIDERS.filter((spec) => credentials?.statuses[spec.id]?.enabled === false);
-	const shown = others.filter(matches);
-	const hash = typeof window === "undefined" ? "" : window.location.hash.slice(1);
+	const [selected, setSelected] = useState(providerFromHash);
 	useEffect(() => {
-		if (hash && credentials) document.getElementById(hash)?.scrollIntoView({ block: "center" });
-	}, [hash, credentials]);
-	const card = (spec: (typeof MODEL_PROVIDERS)[number]) => (
-		<ProviderCredentialCard
-			key={spec.id}
-			spec={spec}
-			status={credentials?.statuses[spec.id]}
-			ready={ready}
-			enable={{
-				enabled: credentials?.statuses[spec.id]?.enabled !== false,
-				locked: spec.id === "deepseek",
-				onChange: (value) => appActions.setProviderEnabled(spec.id, value),
-			}}
-		/>
-	);
+		const sync = () => setSelected(providerFromHash());
+		window.addEventListener("hashchange", sync);
+		window.addEventListener("popstate", sync);
+		return () => {
+			window.removeEventListener("hashchange", sync);
+			window.removeEventListener("popstate", sync);
+		};
+	}, []);
+	const spec: ProviderSpec = MODEL_PROVIDERS.find((item) => item.id === selected) ?? MODEL_PROVIDERS[0];
+	const enabledOf = (item: ProviderSpec) => credentials?.statuses[item.id]?.enabled !== false;
+	const options: ProviderOption[] = MODEL_PROVIDERS.map((item) => {
+		const status = credentials?.statuses[item.id];
+		const enabled = enabledOf(item);
+		return {
+			id: item.id,
+			name: item.name,
+			keywords: item.envVar,
+			detail: !enabled ? "未启用" : status && status.source !== "none" ? "已配置" : "未配置 Key",
+			tone: !enabled ? "off" : status && status.source !== "none" ? "on" : "warn",
+		};
+	});
+	const enabledCount = MODEL_PROVIDERS.filter(enabledOf).length;
+	const hasCredentials = credentials !== null;
+	useEffect(() => {
+		if (hasCredentials && window.location.hash === `#${HASH_PREFIX}${selected}`) {
+			document.getElementById(`${HASH_PREFIX}${selected}`)?.scrollIntoView?.({ block: "center" });
+		}
+	}, [hasCredentials, selected]);
 	return (
 		<SettingsShell active="credentials">
 			<div className="mx-auto w-full max-w-4xl px-5 pt-6 pb-3">
@@ -45,24 +63,25 @@ export function SettingsPage() {
 			</div>
 			<main className="mx-auto w-full max-w-4xl px-5 pb-8">
 				<div className="flex flex-col gap-4">
-					{enabled.map(card)}
-					<details className="rounded-2xl border border-sakura-200 bg-surface p-4 shadow-soft" open={words.length > 0}>
-						<summary className="focus-neko cursor-pointer rounded text-sm font-semibold text-ink-900">
-							更多模型服务（{others.length}，未启用）
-						</summary>
-						<div className="mt-3 flex flex-col gap-4">
-							<input
-								type="search"
-								value={query}
-								onChange={(event) => setQuery(event.target.value)}
-								aria-label="搜索模型服务"
-								placeholder="搜索名称或环境变量"
-								className="focus-neko w-full min-w-0 rounded-xl border border-sakura-200 bg-base px-3 py-2 text-sm"
-							/>
-							{shown.map(card)}
-							{shown.length === 0 && <p className="text-xs text-ink-500">没有匹配的模型服务。</p>}
+					<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+						<div className="w-full min-w-0 sm:w-80">
+							<ProviderCombobox label="模型服务商" options={options} value={spec.id} onChange={setSelected} />
 						</div>
-					</details>
+						<span className="text-xs text-ink-500">
+							已启用 {enabledCount} / {MODEL_PROVIDERS.length}
+						</span>
+					</div>
+					<ProviderCredentialCard
+						key={spec.id}
+						spec={spec}
+						status={credentials?.statuses[spec.id]}
+						ready={ready}
+						enable={{
+							enabled: enabledOf(spec),
+							locked: spec.id === "deepseek",
+							onChange: (value) => appActions.setProviderEnabled(spec.id, value),
+						}}
+					/>
 				</div>
 			</main>
 		</SettingsShell>

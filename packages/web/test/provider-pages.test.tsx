@@ -107,6 +107,14 @@ async function mount(element: React.ReactElement) {
 	return { host, unmount: () => act(async () => root.unmount()) };
 }
 const click = (element: Element | null) => act(async () => (element as HTMLElement).click());
+const combobox = () => document.body.querySelector<HTMLInputElement>('input[role="combobox"]')!;
+async function chooseProvider(name: string) {
+	await click(combobox());
+	const option = [...document.body.querySelectorAll('[role="option"]')].find((item) =>
+		item.textContent?.includes(name),
+	);
+	await click(option ?? null);
+}
 
 beforeEach(() => {
 	configured.length = 0;
@@ -127,7 +135,7 @@ beforeEach(() => {
 	]);
 });
 
-it("groups models, collapses other providers, blocks keyless ones and applies a choice", async () => {
+it("shows one provider's models, blocks keyless ones and applies a choice", async () => {
 	storeActions.setView(view("deepseek", "deepseek-flash"));
 	const picker = await mount(
 		React.createElement(ModelPicker, {
@@ -137,19 +145,23 @@ it("groups models, collapses other providers, blocks keyless ones and applies a 
 	);
 	await click(picker.host.querySelector("button"));
 	const body = document.body;
-	const headers = [...body.querySelectorAll("button[aria-expanded]")];
-	expect(headers.map((header) => header.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+	expect(combobox().value).toBe("DeepSeek");
+	expect(body.querySelector("button[aria-expanded]")).toBeNull();
 	expect(body.textContent).toContain("DeepSeek Pro");
 	expect(body.textContent).not.toContain("Claude Haiku");
+	expect(body.querySelector('a[href="/settings#credential-openrouter"]')).toBeNull();
+
+	await chooseProvider("OpenRouter");
+	expect(combobox().value).toBe("OpenRouter");
+	expect(body.textContent).not.toContain("DeepSeek Pro");
 	expect(body.textContent).toContain("未配置 Key");
 	expect(body.querySelector('a[href="/settings#credential-openrouter"]')).not.toBeNull();
-
-	await click(headers[1]!);
 	const blocked = [...body.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")].find((b) =>
 		b.textContent?.includes("Claude Haiku"),
 	)!;
 	expect(blocked.disabled).toBe(true);
 
+	await chooseProvider("DeepSeek");
 	const pro = [...body.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")].find((b) =>
 		b.textContent?.includes("DeepSeek Pro"),
 	)!;
@@ -162,7 +174,7 @@ it("groups models, collapses other providers, blocks keyless ones and applies a 
 	await picker.unmount();
 });
 
-it("searches across providers, expanding matching groups, and reports an empty result", async () => {
+it("searches across providers, labelling matches, restores the dropdown view and reports an empty result", async () => {
 	storeActions.setView(view("deepseek", "deepseek-flash"));
 	const picker = await mount(
 		React.createElement(ModelPicker, {
@@ -180,9 +192,40 @@ it("searches across providers, expanding matching groups, and reports an empty r
 		});
 	await type("claude");
 	expect(document.body.querySelector("dialog")!.textContent).toContain("Claude Haiku");
+	expect(document.body.querySelector("dialog")!.textContent).toContain("OpenRouter");
 	expect(document.body.querySelector("dialog")!.textContent).not.toContain("DeepSeek Flash");
 	await type("zzz");
 	expect(document.body.querySelector("dialog")!.textContent).toContain("没有匹配的模型");
+	await type("");
+	expect(document.body.querySelector("dialog")!.textContent).toContain("DeepSeek Flash");
+	expect(document.body.querySelector("dialog")!.textContent).not.toContain("Claude Haiku");
+	await picker.unmount();
+});
+
+it("keeps hundreds of models in one scrollable list and Escape only closes the dropdown", async () => {
+	storeActions.setModels([
+		model("deepseek", "deepseek-flash", "DeepSeek Flash", true),
+		...Array.from({ length: 400 }, (_, index) => model("openrouter", `vendor/m-${index}`, `Model ${index}`, true)),
+	]);
+	storeActions.setView(view("deepseek", "deepseek-flash"));
+	const picker = await mount(
+		React.createElement(ModelPicker, {
+			current: { provider: "deepseek", modelId: "deepseek-flash" },
+			fallbackLabel: "x",
+		}),
+	);
+	await click(picker.host.querySelector("button"));
+	await chooseProvider("OpenRouter");
+	const list = document.body.querySelector("fieldset[aria-label='模型']")!;
+	expect(list.className).toContain("overflow-y-auto");
+	expect(list.querySelectorAll("button[aria-pressed]").length).toBe(800);
+
+	await click(combobox());
+	expect(document.body.textContent).toContain("400 个模型");
+	const esc = new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+	await act(async () => void combobox().dispatchEvent(esc));
+	expect(esc.defaultPrevented).toBe(true);
+	expect(combobox().getAttribute("aria-expanded")).toBe("false");
 	await picker.unmount();
 });
 
@@ -197,6 +240,7 @@ it("still opens for a session whose provider was disabled and explains why", asy
 	const trigger = picker.host.querySelector("button")!;
 	expect(trigger.disabled).toBe(false);
 	await click(trigger);
+	expect(combobox().value).toBe("DeepSeek");
 	expect(document.body.textContent).toContain("已取消启用");
 	expect(document.body.querySelector('a[href="/settings#credential-openai"]')).not.toBeNull();
 	const apply = [...document.body.querySelectorAll("button")].find((b) => b.textContent === "应用")!;
@@ -204,21 +248,63 @@ it("still opens for a session whose provider was disabled and explains why", asy
 	await picker.unmount();
 });
 
-it("lists model providers with DeepSeek locked and toggles enablement through the gateway", async () => {
+it("selects a provider from the dropdown, locks DeepSeek and toggles enablement through the gateway", async () => {
 	const page = await mount(React.createElement(SettingsPage));
 	const body = page.host;
 	expect(body.querySelector("h1")?.textContent).toBe("模型服务");
 	expect(body.textContent).not.toContain("Tavily");
+	expect(body.querySelector("details")).toBeNull();
+	expect(combobox().value).toBe("DeepSeek");
 	const deepseek = body.querySelector<HTMLInputElement>('input[aria-label="启用 DeepSeek"]')!;
 	expect(deepseek.checked).toBe(true);
 	expect(deepseek.disabled).toBe(true);
-	const openrouter = body.querySelector<HTMLInputElement>('input[aria-label="启用 OpenRouter"]')!;
-	expect(openrouter.checked).toBe(true);
+	expect(body.querySelector('input[aria-label="启用 OpenRouter"]')).toBeNull();
+
+	await chooseProvider("OpenRouter");
+	expect(body.querySelector('input[aria-label="启用 DeepSeek"]')).toBeNull();
+	expect(body.querySelector<HTMLInputElement>('input[aria-label="启用 OpenRouter"]')!.checked).toBe(true);
+
+	await chooseProvider("OpenAI");
 	const openai = body.querySelector<HTMLInputElement>('input[aria-label="启用 OpenAI"]')!;
 	expect(openai.checked).toBe(false);
 	await click(openai);
 	expect(enabledCalls).toEqual([["openai", true]]);
-	expect(body.querySelectorAll("details").length).toBe(1);
+	await page.unmount();
+});
+
+it("filters the provider dropdown by name, id and environment variable", async () => {
+	const page = await mount(React.createElement(SettingsPage));
+	const input = combobox();
+	await click(input);
+	const options = () => [...document.body.querySelectorAll('[role="option"]')].map((item) => item.textContent ?? "");
+	expect(options().length).toBeGreaterThan(20);
+	const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!;
+	await act(async () => {
+		setValue.call(input, "OPENROUTER_API");
+		input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+	});
+	expect(options()).toHaveLength(1);
+	expect(options()[0]).toContain("OpenRouter");
+	expect(options()[0]).toContain("未配置 Key");
+	await page.unmount();
+});
+
+it("opens the provider named by the credential deep link and clears typed keys on switch", async () => {
+	dom.window.history.replaceState(null, "", "/settings#credential-openrouter");
+	const page = await mount(React.createElement(SettingsPage));
+	expect(combobox().value).toBe("OpenRouter");
+	expect(page.host.querySelector("#credential-openrouter")).not.toBeNull();
+	const key = page.host.querySelector<HTMLInputElement>("#openrouter-key")!;
+	const setValue = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!;
+	await act(async () => {
+		setValue.call(key, "sk-secret");
+		key.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+	});
+	expect(key.value).toBe("sk-secret");
+	await chooseProvider("DeepSeek");
+	await chooseProvider("OpenRouter");
+	expect(page.host.querySelector<HTMLInputElement>("#openrouter-key")!.value).toBe("");
+	dom.window.history.replaceState(null, "", "/");
 	await page.unmount();
 });
 
@@ -295,8 +381,7 @@ it("offers no default toggle on models that cannot be picked for lack of a key",
 		}),
 	);
 	await click(picker.host.querySelector("button"));
-	const headers = [...document.body.querySelectorAll("button[aria-expanded]")];
-	await click(headers[1]!);
+	await chooseProvider("OpenRouter");
 	expect(document.body.textContent).toContain("Claude Haiku");
 	expect(star("Claude Haiku", "设为默认")).toBeNull();
 	expect(star("Claude Haiku", "取消默认")).toBeNull();

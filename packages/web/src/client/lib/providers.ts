@@ -64,6 +64,31 @@ export function groupModels(models: readonly NekoSelectableModel[], query: strin
 	);
 }
 
+/** The provider a model picker starts on: the preferred one if listed, else the first usable, else the first. */
+export function resolveProviderId(groups: readonly ModelGroup[], preferred: string | undefined): string | null {
+	if (preferred && groups.some((group) => group.provider === preferred)) return preferred;
+	return (groups.find((group) => group.available) ?? groups[0])?.provider ?? null;
+}
+
+export type ProviderOption = {
+	id: string;
+	name: string;
+	/** Short status shown at the right of the option (model count, key state). */
+	detail?: string;
+	tone?: "on" | "warn" | "off";
+	/** Extra searchable text beyond the name and id. */
+	keywords?: string;
+};
+
+/** Options matching every query word on name, id and keywords, keeping the given order. */
+export function filterProviderOptions(options: readonly ProviderOption[], query: string): ProviderOption[] {
+	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+	return options.filter((option) => {
+		const haystack = `${option.name} ${option.id} ${option.keywords ?? ""}`.toLowerCase();
+		return words.every((word) => haystack.includes(word));
+	});
+}
+
 export function formatContextWindow(tokens: number): string {
 	if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(1))}M`;
 	if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`;
