@@ -1,9 +1,10 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { PromptInput } from "@earendil-works/pi-durable";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { createNekoPrompt } from "../src/prompt/prompt.ts";
 import { createResourceLoader } from "../src/prompt/resources.ts";
 
@@ -14,7 +15,7 @@ function directory() {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 
 const input = (cwd: string, tools: string[]): PromptInput =>
@@ -41,7 +42,7 @@ it("renders five ordered sections, untagged preamble, tagged rest", async () => 
 	expect(out.rules).toMatch(/^<rules>\n/);
 	expect(out.project_context).toBeUndefined();
 	expect(out.skills).toBeUndefined();
-	expect(out.cwd).toBe(`<cwd>\n${workspace}\n</cwd>`);
+	expect(out.cwd).toBe(`<cwd>\n${workspace.replaceAll("\\", "/")}\n</cwd>`);
 });
 
 it("renders project_context and skills when resources exist", async () => {

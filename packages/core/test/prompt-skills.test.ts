@@ -1,7 +1,8 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { formatSkillsForPrompt, mergeSkills, parseSkillFile, scanSkillsDir } from "../src/prompt/skills.ts";
 
 const dirs: string[] = [];
@@ -11,7 +12,7 @@ function directory() {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 
 function skill(dir: string, name: string, content: string) {

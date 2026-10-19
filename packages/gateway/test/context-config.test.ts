@@ -1,7 +1,8 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rm } from "../../../test/temp-dir.ts";
 import { startGateway } from "../src/index.ts";
 import { testSocketPath } from "./helpers.ts";
 

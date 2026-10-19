@@ -3,12 +3,13 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { testAddress, testSocketPath } from "./helpers.ts";
 

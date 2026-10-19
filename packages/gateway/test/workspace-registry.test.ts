@@ -1,7 +1,8 @@
 import { expect, it } from "bun:test";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway } from "../src/client.ts";
 import { browseWorkspaces } from "../src/workspaces.ts";
 import { cleanup, IS_WINDOWS, makeGateway, testAddress, waitFor } from "./helpers.ts";

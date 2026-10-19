@@ -1,10 +1,11 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NekoSelectableModel } from "@neko-harness/core";
+import { rm } from "../../../test/temp-dir.ts";
 import { startGateway } from "../../gateway/src/gateway.ts";
-import { waitFor } from "../../gateway/test/helpers.ts";
+import { testSocketPath, waitFor } from "../../gateway/test/helpers.ts";
 import type { NekoDefaultModelState } from "../src/client/lib/contract.ts";
 import { GatewayConnection } from "../src/client/lib/gateway.ts";
 
@@ -16,6 +17,7 @@ it("refetches the selectable models when provider enablement or keys change", as
 		storage: "memory",
 		storagePath: join(dir, "db.sqlite"),
 		credentialsPath: join(dir, "credentials.json"),
+		socketPath: testSocketPath(dir),
 		port: 0,
 	});
 	let models: readonly NekoSelectableModel[] = [];
@@ -71,6 +73,7 @@ it("keeps the default model aligned with the list across credential-driven refet
 		storage: "memory",
 		storagePath: join(dir, "db.sqlite"),
 		credentialsPath: join(dir, "credentials.json"),
+		socketPath: testSocketPath(dir),
 		port: 0,
 	});
 	let models: readonly NekoSelectableModel[] = [];

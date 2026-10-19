@@ -1,8 +1,9 @@
 import { expect, it, spyOn } from "bun:test";
-import { mkdir, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Connection } from "@earendil-works/pi-env";
+import { rm } from "../../../test/temp-dir.ts";
 import { FILE_CACHE_LIMITS, WorkspaceFiles } from "../src/workspace-files.ts";
 
 it("restarts a lost helper, invalidates other cached directories and keeps shared queries usable", async () => {
@@ -139,7 +140,7 @@ it("refreshes external Git global excludes through the TTL fallback", async () =
 		await mkdir(join(root, ".git"));
 		await writeFile(join(root, ".git/HEAD"), "ref: refs/heads/main\n");
 		await mkdir(home);
-		await writeFile(join(home, ".gitconfig"), `[core]\nexcludesFile = ${global}\n`);
+		await writeFile(join(home, ".gitconfig"), `[core]\nexcludesFile = ${global.replaceAll("\\", "/")}\n`);
 		await writeFile(join(root, "global.txt"), "");
 		await writeFile(global, "global.txt\n");
 		// The native walker reads the user's global Git config, so isolate only this child process's home.
@@ -161,7 +162,7 @@ it("refreshes external Git global excludes through the TTL fallback", async () =
 			} finally { await files.close(); }
 		`,
 			],
-			{ env: { ...process.env, HOME: home }, stdout: "pipe", stderr: "pipe" },
+			{ env: { ...process.env, HOME: home, USERPROFILE: home }, stdout: "pipe", stderr: "pipe" },
 		);
 		const [output, error, code] = await Promise.all([
 			new Response(child.stdout).text(),

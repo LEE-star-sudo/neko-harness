@@ -10,7 +10,8 @@ import sharp from "sharp";
 const require=createRequire(import.meta.url);
 const root=process.cwd();
 const daemon=localDaemon();await access(daemon);
-if(!daemon.includes(`${process.platform}-${process.arch}`))throw new Error(`Unexpected daemon platform: ${daemon}`);
+const platform=process.platform==="win32"?"windows":process.platform;
+if(!daemon.includes(`${platform}-${process.arch}`))throw new Error(`Unexpected daemon platform: ${daemon}`);
 await access(require.resolve("@silvia-odwyer/photon/photon_rs_bg.wasm"));
 await access(join(dirname(require.resolve("@earendil-works/pi-durable/images/node")),"node-worker.js"));
 const connection=new Connection({command:[daemon]});
@@ -21,7 +22,7 @@ try{
  await writeFile("cache-first.txt","file body");
  let changed=false;const watch=await env.watch([{path:root}],()=>{changed=true;},context);if(!watch.ok)throw watch.error;
  const first=await env.listFiles(".",{maxEntries:100,exclude:["node_modules"]},context);if(!first.ok||!first.value.entries.some(entry=>entry.path==="cache-first.txt"))throw new Error("Initial discovery failed");
- await writeFile("cache-after.txt","next");for(let i=0;i<100&&!changed;i++)await new Promise(resolve=>setTimeout(resolve,10));if(!changed)throw new Error("Watch did not invalidate");
+ await writeFile("cache-after.txt","next");for(let i=0;i<200&&!changed;i++)await new Promise(resolve=>setTimeout(resolve,25));if(!changed)throw new Error("Watch did not invalidate");
  const refreshed=await env.listFiles(".",{maxEntries:100,exclude:["node_modules"]},context);if(!refreshed.ok||!refreshed.value.entries.some(entry=>entry.path==="cache-after.txt"))throw new Error("Refresh failed");await watch.value.close(context);
  const processor=await createNodePhotonImages({idleMs:30});
  const read=createReadTool({images:processor});

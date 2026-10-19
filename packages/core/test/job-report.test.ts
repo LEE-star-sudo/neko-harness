@@ -1,9 +1,10 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationView, PromptInput } from "@earendil-works/pi-durable";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { exportConversation } from "../src/conversation-export.ts";
 import { NekoInput } from "../src/input.ts";
 import { promptHistory } from "../src/input-history.ts";
@@ -77,7 +78,7 @@ it("leaves job reports out of the input history", () => {
 
 const dirs: string[] = [];
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 const rules = async (tools: string[]) => {
 	const home = realpathSync(mkdtempSync(join(tmpdir(), "neko-prompt-")));

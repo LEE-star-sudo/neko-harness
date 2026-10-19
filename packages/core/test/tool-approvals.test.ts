@@ -1,9 +1,10 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { createNekoRuntime, type NekoRuntime } from "../src/runtime.ts";
 import type { ToolApproval } from "../src/tool-approvals.ts";
 

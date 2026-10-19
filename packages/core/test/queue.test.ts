@@ -1,10 +1,11 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall, type TranscriptContext, Type } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime, projectChatView, QUEUED_PREVIEW_CHARS } from "../src/index.ts";
 
@@ -15,7 +16,7 @@ const directory = () => {
 	return d;
 };
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 
 const gate = () => {

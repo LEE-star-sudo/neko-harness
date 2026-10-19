@@ -4,7 +4,7 @@ import { fauxProvider } from "../../../test/faux.ts";
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ChordError } from "@earendil-works/chord";
@@ -15,6 +15,7 @@ import {
 	fauxText,
 } from "@earendil-works/pi-ai";
 import type { ChatView } from "@neko-harness/core";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../src/index.ts";
 import { testAddress, testSocketPath, waitFor } from "./helpers.ts";
 

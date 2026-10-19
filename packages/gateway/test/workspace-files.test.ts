@@ -1,10 +1,11 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { downloadImage } from "@neko-harness/core/image-transfer";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { IS_WINDOWS, testAddress, testSocketPath } from "./helpers.ts";
 

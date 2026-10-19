@@ -1,7 +1,8 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { testAddress, testSocketPath, waitFor as wait } from "./helpers.ts";
 

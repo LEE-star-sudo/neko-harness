@@ -4,13 +4,15 @@
 
 ## 安装
 
-支持 macOS 和 Linux，需要 **Bun 1.4.2 或更新的 1.4.x 版本**。按 [Bun 安装说明](https://bun.sh/docs/installation)装好后运行：
+支持 Windows、macOS 和 Linux，需要 **Bun 1.4.2 或更新的 1.4.x 版本**。按 [Bun 安装说明](https://bun.sh/docs/installation)装好后运行：
 
 ```bash
 bun add --global neko-harness
 ```
 
-找不到 `neko` 命令时，请将 `~/.bun/bin` 加入 `PATH`。
+找不到 `neko` 命令时，请将 Bun 的 bin 目录加入 `PATH`（`~/.bun/bin`，Windows 为 `%USERPROFILE%\.bun\bin`）。
+
+Windows 还需要安装 [Git for Windows](https://git-scm.com/download/win)，助手执行命令依赖它提供的 `bash`。
 
 ## 开始使用
 
@@ -39,7 +41,7 @@ export DEEPSEEK_API_KEY='你的 API Key'
 - **工作区**：默认使用启动目录。Web 侧栏可添加、切换项目，浏览文件、查看本次由助手产生的改动，并可在本机用 VS Code 或文件管理器打开。
 - **会话**：TUI 用 `/new` 新建、`/sessions` 切换；Web 使用侧栏。
 - **模型与思考强度**：TUI 用 `/model`（按服务分组、可输入过滤）和 `/think`；Web 点击输入框中的模型入口（按服务分组、可搜索）。
-- **文件与图片**：输入 `@` 引用文件或目录；TUI 用 `Ctrl+V` 粘贴图片，Web 支持粘贴、拖放和选择。识图能力取决于所选模型。
+- **文件与图片**：输入 `@` 引用文件或目录；TUI 用 `Ctrl+V` 粘贴图片（Windows 与 WSL 为 `Alt+V`，避免与终端自带粘贴冲突）；Web 支持粘贴、拖放和选择。识图能力取决于所选模型。
 - **上下文**：`/compact` 整理较长对话。默认沿用 pi-durable 的自动压缩策略（接近模型窗口上限才触发），可在 TUI `/context`、Web 设置页「上下文」或配置文件 `context.compaction` 调整触发百分比、保留量与开关，保存值优先。
 - **工具结果裁剪**（默认关闭）：配置 `context.pruning`，上下文占用过高时把较旧的工具结果在模型上下文中替换为占位，界面与导出仍显示原始结果，模型需要时会重新执行工具。阈值与保留量可在 `/context` 与设置页修改。
 - **复制与导出**：Web 在消息下方复制回答（不含思考过程），顶栏「导出」可选 Markdown、HTML、JSON 及是否包含思考过程；TUI 用 `/copy` 与 `/export [path] [--thinking]`，省略路径时写入工作区目录，不覆盖已有文件。

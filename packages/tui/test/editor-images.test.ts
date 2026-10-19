@@ -17,6 +17,9 @@ it("accepts only the initial clipboard key press, not Kitty release or repeat", 
 	expect(isClipboardShortcut("\x1b[118;5:2u", "darwin")).toBe(false);
 	expect(isClipboardShortcut("\x1b[118;5:3u", "darwin")).toBe(false);
 	expect(isClipboardShortcut("\x1bv", "win32")).toBe(true);
+	expect(isClipboardShortcut("\x1bv", "linux", true)).toBe(true);
+	expect(isClipboardShortcut("\x16", "linux", true)).toBe(false);
+	expect(isClipboardShortcut("\x16", "linux", false)).toBe(true);
 });
 it("deletes an image reference as a single undoable operation without eating adjacent text", () => {
 	const e = editor();

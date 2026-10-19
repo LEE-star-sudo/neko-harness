@@ -1,7 +1,9 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { rm } from "../../../test/temp-dir.ts";
 import { FileCredentialStore, InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/runtime.ts";
 
@@ -20,7 +22,8 @@ it("serializes file stores, persists private credentials and preserves invalid f
 		b.modify("b", async () => ({ type: "api_key", key: "test-b" })),
 	]);
 	expect((await new FileCredentialStore(path).list()).length).toBe(2);
-	expect((await stat(path)).mode & 0o777).toBe(0o600);
+	// Windows reports ACL-backed modes, not the POSIX 0600 bit the store requests.
+	if (process.platform !== "win32") expect((await stat(path)).mode & 0o777).toBe(0o600);
 	await b.delete("a");
 	expect(await a.read("a")).toBeUndefined();
 	await writeFile(path, "broken-secret");
@@ -184,7 +187,7 @@ it("locks read-modify-write across processes and preserves callback rejections",
 	const path = join(dir, "keys.json");
 	const store = new FileCredentialStore(path);
 	await store.modify("counter", async () => ({ type: "api_key", key: "0" }));
-	const modulePath = new URL("../src/credentials.ts", import.meta.url).pathname;
+	const modulePath = fileURLToPath(new URL("../src/credentials.ts", import.meta.url));
 	const code = `import { FileCredentialStore } from ${JSON.stringify(modulePath)}; const store = new FileCredentialStore(process.argv[1]); for(let i=0;i<3;i++) await store.modify("counter", async(value)=> { await Bun.sleep(10); return {type:"api_key", key:String(Number(value.key)+1)}; });`;
 	const a = Bun.spawn([process.execPath, "-e", code, path], { stdout: "pipe", stderr: "pipe" });
 	const b = Bun.spawn([process.execPath, "-e", code, path], { stdout: "pipe", stderr: "pipe" });

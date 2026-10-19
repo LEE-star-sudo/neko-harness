@@ -1,9 +1,10 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_MODEL } from "@neko-harness/core";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { testAddress, testSocketPath, waitFor as wait } from "./helpers.ts";
 

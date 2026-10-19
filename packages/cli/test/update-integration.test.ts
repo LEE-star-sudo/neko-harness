@@ -1,10 +1,11 @@
 import { expect, it } from "bun:test";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { UpdateChecker } from "../../core/src/application-updates.ts";
 import { updateAction } from "../../core/src/application-version.ts";
 import { connectNekoGateway } from "../../gateway/src/client.ts";
@@ -13,7 +14,9 @@ import { waitFor } from "../../gateway/test/helpers.ts";
 import { startWebServer } from "../../web/src/server.ts";
 import { updateCommand } from "../src/update.ts";
 
-it("upgrades an isolated installation, detects old live services, then a stale page", async () => {
+const posixIt = it.skipIf(process.platform === "win32");
+
+posixIt("upgrades an isolated installation, detects old live services, then a stale page", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "neko-update-flow-")),
 		root = join(dir, "global/node_modules/neko-harness"),
 		bin = join(dir, "bin"),

@@ -1,5 +1,5 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -16,6 +16,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { defineExtension, defineTool, type EntryRecord } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { ContextPruner, estimateTokens, PRUNE_ENTRY_KIND, planPrune, toolResultChars } from "../src/context-pruning.ts";
 import { projectChatView } from "../src/projection.ts";
 import { createNekoRuntime } from "../src/runtime.ts";

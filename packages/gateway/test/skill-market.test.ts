@@ -3,10 +3,11 @@
 
 import { afterEach, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipSync } from "fflate";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { activeLevelOf, createSkillMarketClient, SkillMarketError } from "../src/skill-market.ts";
 
 const dirs: string[] = [];
@@ -16,7 +17,7 @@ function directory() {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 
 function makePackage(files: Record<string, string>) {

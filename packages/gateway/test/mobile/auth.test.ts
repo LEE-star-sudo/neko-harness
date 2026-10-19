@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { createServer as createNetServer } from "node:net";
@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect as tlsConnect } from "node:tls";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
+import { rm } from "../../../../test/temp-dir.ts";
 import { type NekoGateway, startGateway } from "../../src/index.ts";
 import { AUTH_FAILURE_LIMIT, MobileAuth, type MobileAuthStore } from "../../src/mobile/auth.ts";
 import { MobileStore, type MobileStoreState } from "../../src/mobile/store.ts";

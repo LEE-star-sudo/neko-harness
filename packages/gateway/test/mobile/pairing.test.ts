@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createHash, randomBytes, randomUUID, X509Certificate } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdtemp, readFile } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
+import { rm } from "../../../../test/temp-dir.ts";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../../src/index.ts";
 import type { MobileCertificate } from "../../src/mobile/certificate.ts";
 import {

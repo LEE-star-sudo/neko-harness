@@ -1,6 +1,7 @@
 import { getKeybindings, matchesKey, TUI_KEYBINDINGS, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { PickerDetail } from "./components/picker.ts";
 import { shortcutHints } from "./components/shortcut-hints.ts";
+import { clipboardShortcutKey, runningInWsl } from "./image-input.ts";
 import { commands } from "./labels.ts";
 import { theme } from "./theme/index.ts";
 
@@ -12,7 +13,7 @@ const keyLabel = (key: string) =>
 		)
 		.join("+");
 
-export function helpLines(platform: string = process.platform): string[] {
+export function helpLines(platform: string = process.platform, wsl: boolean = runningInWsl()): string[] {
 	const rows: string[] = [];
 	const section = (title: string, hints: readonly (readonly [string, string])[]) => {
 		rows.push(theme.accent(title), ...hints.map(([key, description]) => shortcutHints([key, description])), "");
@@ -25,7 +26,7 @@ export function helpLines(platform: string = process.platform): string[] {
 		["Ctrl+C", "Stop while running; exit when idle"],
 		["Ctrl+S", "Open sessions"],
 		["Ctrl+O", "Open or close the assistant's question"],
-		[platform === "win32" ? "Alt+V" : "Ctrl+V", "Paste clipboard image or text"],
+		[keyLabel(clipboardShortcutKey(platform, wsl)), "Paste clipboard image or text"],
 		["/", "Complete commands"],
 		["@", "Complete workspace files"],
 		["/skill:", "Complete installed skills"],

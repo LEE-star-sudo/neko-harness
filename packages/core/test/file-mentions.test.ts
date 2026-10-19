@@ -1,7 +1,8 @@
 import { expect, it } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rm, trySymlink } from "../../../test/temp-dir.ts";
 import { mentionAt, replaceMention } from "../src/file-mentions.ts";
 import { WorkspaceFiles, workspaceTarget } from "../src/workspace-files.ts";
 
@@ -29,7 +30,7 @@ it("scopes discovery, honors ignores and never returns outside symlinks", async 
 		await writeFile(join(root, ".hidden"), "h");
 		await writeFile(join(root, "src/runtime.ts"), "secret body");
 		await writeFile(join(root, "ignored/runtime.ts"), "no");
-		await symlink(tmpdir(), join(root, "outside"));
+		const linked = trySymlink(tmpdir(), join(root, "outside"));
 		const signal = new AbortController().signal;
 		const result = await files.search(root, "runtime", signal);
 		expect(result.entries.map((e) => e.path)).toEqual(["src/runtime.ts"]);
@@ -44,7 +45,7 @@ it("scopes discovery, honors ignores and never returns outside symlinks", async 
 		]);
 		expect(JSON.stringify(result)).not.toContain("secret body");
 		expect((await files.search(root, "", signal)).entries.some((e) => e.path === ".hidden")).toBe(true);
-		await expect(workspaceTarget(root, "outside")).rejects.toThrow("outside");
+		if (linked) await expect(workspaceTarget(root, "outside")).rejects.toThrow("outside");
 		await expect(files.search(root, "../", signal)).rejects.toThrow("relative");
 		const abort = new AbortController();
 		abort.abort();

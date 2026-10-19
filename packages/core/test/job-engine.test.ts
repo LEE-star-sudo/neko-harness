@@ -1,9 +1,10 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { NekoInput } from "../src/input.ts";
 import { JOB_LIMITS } from "../src/jobs.ts";
@@ -17,6 +18,21 @@ const alive = (pid: number) => {
 	} catch {
 		return false;
 	}
+};
+const quoteShell = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+/** Forward slashes so Git Bash does not treat a quoted Windows path as literal backslashes. */
+const shellPath = (value: string) => quoteShell(value.replaceAll("\\", "/"));
+/** A shell command that prints the OS pid of a grandchild, then waits.
+ * Git Bash's `$!` is an MSYS pid, so `process.kill` cannot see that process on Windows.
+ */
+const hangingTreeCommand = (): string => {
+	const script = [
+		'const {spawn}=require("node:child_process");',
+		'const child=spawn(process.execPath,["-e","setInterval(()=>{},1e9)"],{stdio:"ignore"});',
+		'process.stdout.write(String(child.pid)+"\\n");',
+		"setInterval(()=>{},1e9)",
+	].join("");
+	return `${shellPath(process.execPath)} -e ${quoteShell(script)}`;
 };
 const until = async (check: () => boolean | Promise<boolean>, ms = 15000) => {
 	const end = Date.now() + ms;
@@ -124,7 +140,7 @@ it("rejects invalid arguments without starting a process", () =>
 it("returns immediately for a long-running job, reports a user stop, and kills the process tree", () =>
 	withDir(async (dir) => {
 		const runtime = await open(dir, [
-			call({ action: "start", command: "sh -c 'sleep 300 & echo $!; wait'", title: "server" }),
+			call({ action: "start", command: hangingTreeCommand(), title: "server" }),
 			answer("running"),
 			answer("noted stop"),
 		]);
@@ -243,7 +259,7 @@ it(
 		withDir(async (dir) => {
 			const counter = join(dir, "runs");
 			const first = await open(dir, [
-				call({ action: "start", command: `echo run >> '${counter}'; sleep 300` }),
+				call({ action: "start", command: `echo run >> ${shellPath(counter)}; sleep 300` }),
 				answer("started"),
 			]);
 			await first.waitAnswer(await first.submit("go"));
@@ -273,10 +289,7 @@ it(
 
 it("kills running processes on close without leaving orphans", () =>
 	withDir(async (dir) => {
-		const runtime = await open(dir, [
-			call({ action: "start", command: "sh -c 'sleep 300 & echo $!; wait'" }),
-			answer("ok"),
-		]);
+		const runtime = await open(dir, [call({ action: "start", command: hangingTreeCommand() }), answer("ok")]);
 		await runtime.waitAnswer(await runtime.submit("go"));
 		const child = Number.parseInt((await runtime.root.jobOutput("job-1")).output.text.trim(), 10);
 		expect(alive(child)).toBe(true);
@@ -290,10 +303,7 @@ it("kills running processes on close without leaving orphans", () =>
 
 it("stops a conversation's running jobs when it is archived, without a report", () =>
 	withDir(async (dir) => {
-		const runtime = await open(dir, [
-			call({ action: "start", command: "sh -c 'sleep 300 & echo $!; wait'" }),
-			answer("ok"),
-		]);
+		const runtime = await open(dir, [call({ action: "start", command: hangingTreeCommand() }), answer("ok")]);
 		let child = 0;
 		try {
 			const session = await runtime.createConversation();

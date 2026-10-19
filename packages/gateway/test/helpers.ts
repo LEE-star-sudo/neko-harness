@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type FauxProviderHandle, fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { removeDir } from "../../../test/temp-dir.ts";
 import { type NekoGateway, type NekoGatewayAddress, startGateway } from "../src/index.ts";
 
 export const IS_WINDOWS = process.platform === "win32";
@@ -58,7 +59,7 @@ export async function makeGateway(): Promise<TestGateway> {
 
 export async function cleanup(target: TestGateway): Promise<void> {
 	await target.gateway.close().catch(() => {});
-	await rm(target.dir, { recursive: true, force: true });
+	await removeDir(target.dir);
 }
 
 /** 轮询直到 predicate 为真；超时给出生动的错误信息。 */

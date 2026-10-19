@@ -167,7 +167,8 @@ for (const mode of ["failure", "cancel", "retry", "overflow"] as const) {
 }
 
 it("waits for the native write boundary and restores terminal state after reopening", async () => {
-	const { mkdtemp, rm } = await import("node:fs/promises");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { rm } = await import("../../../test/temp-dir.ts");
 	const { tmpdir } = await import("node:os");
 	const { join } = await import("node:path");
 	const dir = await mkdtemp(join(tmpdir(), "neko-compact-recovery-"));
@@ -218,7 +219,8 @@ it("waits for the native write boundary and restores terminal state after reopen
 }, 15000);
 
 it("resumes an interrupted native summary after runtime restart", async () => {
-	const { mkdtemp, rm } = await import("node:fs/promises");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { rm } = await import("../../../test/temp-dir.ts");
 	const { tmpdir } = await import("node:os");
 	const { join } = await import("node:path");
 	const dir = await mkdtemp(join(tmpdir(), "neko-summary-restart-"));
@@ -290,7 +292,8 @@ it("reports a native stale summary as skipped instead of applied", async () => {
 }, 15000);
 
 it("keeps the native compaction failure visible after reopening and a later no-op", async () => {
-	const { mkdtemp, rm } = await import("node:fs/promises");
+	const { mkdtemp } = await import("node:fs/promises");
+	const { rm } = await import("../../../test/temp-dir.ts");
 	const { tmpdir } = await import("node:os");
 	const { join } = await import("node:path");
 	const dir = await mkdtemp(join(tmpdir(), "neko-failure-restart-"));

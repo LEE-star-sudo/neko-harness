@@ -2,10 +2,11 @@
 // 优先级合并（CLI > 配置文件 > 默认值）。
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rm } from "../../../test/temp-dir.ts";
 import {
 	DEFAULT_NEKO_CONFIG,
 	findNekoConfigFile,

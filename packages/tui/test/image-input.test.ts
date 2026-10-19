@@ -1,8 +1,9 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compactInstructions } from "@neko-harness/core/image-transfer";
+import { rm } from "../../../test/temp-dir.ts";
 import { imagePaths, readImageFile } from "../src/image-input.ts";
 
 it("recognizes quoted drag paths without interpreting ordinary prose or shell commands", () => {
@@ -43,10 +44,22 @@ it("clipboard adapters fall back to text and decode platform image payloads", as
 	expect(text).toEqual({ text: "ordinary text" });
 	const png = await clipboard({ platform: "win32", command: async () => "IMAGE:AQID" });
 	expect([...png.image!.bytes]).toEqual([1, 2, 3]);
+	// WSL reads the Windows clipboard via PowerShell first and keeps its error if the Linux fallback is unavailable.
+	expect(await clipboard({ platform: "linux", wsl: true, command: async () => "hi\r\n" })).toEqual({ text: "hi" });
+	await expect(
+		clipboard({
+			platform: "linux",
+			wsl: true,
+			command: async (tool) => {
+				throw new Error(tool === "powershell.exe" ? "interop disabled" : "xclip missing");
+			},
+		}),
+	).rejects.toThrow("interop disabled");
 	const calls: string[] = [];
 	expect(
 		await clipboard({
 			platform: "linux",
+			wsl: false,
 			wayland: true,
 			command: async (tool, args) => {
 				calls.push(tool);
@@ -59,6 +72,7 @@ it("clipboard adapters fall back to text and decode platform image payloads", as
 	await expect(
 		clipboard({
 			platform: "linux",
+			wsl: false,
 			command: async () => {
 				throw new Error("backend missing");
 			},

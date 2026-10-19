@@ -1,11 +1,12 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import { InboxDoc } from "@earendil-works/pi-durable";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { DEFAULT_IMAGE_PROMPT } from "../src/image-prompt.ts";
 import { createNekoRuntime, projectChatView } from "../src/index.ts";
 import { NekoInput } from "../src/input.ts";

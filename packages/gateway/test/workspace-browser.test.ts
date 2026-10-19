@@ -1,9 +1,10 @@
 import { expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
+import { removeDirSync, trySymlink } from "../../../test/temp-dir.ts";
 import { WORKSPACE_UNSUPPORTED, workspaceClient } from "../src/client-session.ts";
 import {
 	ChangeDetailSchema,
@@ -28,7 +29,7 @@ it("browses a session's workspace read-only and refuses escapes and credentials"
 		writeFileSync(join(work, "src/a.ts"), "export const a = 1;\n");
 		writeFileSync(join(work, ".env"), "SECRET=hunter2");
 		writeFileSync(join(outside, "secret.txt"), "outside");
-		symlinkSync(join(outside, "secret.txt"), join(work, "link.txt"));
+		const linked = trySymlink(join(outside, "secret.txt"), join(work, "link.txt"));
 		const session = await target.gateway.runtime.createConversation({ cwd: work });
 		const chat = await client.attach(String(session.id));
 		const files = workspaceClient(chat, client.host);
@@ -37,7 +38,7 @@ it("browses a session's workspace read-only and refuses escapes and credentials"
 
 		const root = await files.dir("");
 		expect(Value.Check(WorkspaceDirSchema, root)).toBe(true);
-		expect(root.entries.map((e) => e.name)).toEqual(["src", ".env", "link.txt"]);
+		expect(root.entries.map((e) => e.name)).toEqual(["src", ".env", ...(linked ? ["link.txt"] : [])]);
 		expect((await files.dir("src")).entries.map((e) => e.path)).toEqual(["src/a.ts"]);
 		const file = await files.file("src/a.ts");
 		expect(Value.Check(WorkspaceFileSchema, file)).toBe(true);
@@ -46,7 +47,7 @@ it("browses a session's workspace read-only and refuses escapes and credentials"
 		const secret = await files.file(".env");
 		expect(secret.kind).toBe("protected");
 		expect(JSON.stringify(secret)).not.toContain("hunter2");
-		for (const bad of ["../x", outside, "link.txt", ".git/config", "a\\b", "missing.ts"])
+		for (const bad of ["../x", outside, ...(linked ? ["link.txt"] : []), ".git/config", "a\\b", "missing.ts"])
 			await expect(files.file(bad)).rejects.toThrow();
 		await expect(files.dir("../")).rejects.toThrow();
 
@@ -57,8 +58,8 @@ it("browses a session's workspace read-only and refuses escapes and credentials"
 	} finally {
 		await client.close();
 		await cleanup(target);
-		rmSync(work, { recursive: true, force: true });
-		rmSync(outside, { recursive: true, force: true });
+		removeDirSync(work);
+		removeDirSync(outside);
 	}
 }, 30_000);
 
@@ -104,7 +105,7 @@ it("publishes agent changes live with a revision, a list and per-file diffs, sub
 	} finally {
 		await client.close();
 		await cleanup(target);
-		rmSync(work, { recursive: true, force: true });
+		removeDirSync(work);
 	}
 }, 30_000);
 

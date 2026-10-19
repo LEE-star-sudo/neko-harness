@@ -1,12 +1,13 @@
 import { expect } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FauxProviderHandle } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../../test/faux.ts";
+import { rm } from "../../../../test/temp-dir.ts";
 import type { NekoGatewayConnection } from "../../src/client-session.ts";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../../src/index.ts";
 import { testAddress, testSocketPath } from "../helpers.ts";

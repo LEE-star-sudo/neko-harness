@@ -4,11 +4,12 @@
 // - fork 从会话当前状态分叉：新会话带父会话历史、可独立继续；空会话 fork 退化为新建。
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ChatItem, ChatView } from "@neko-harness/core";
+import { rm } from "../../../test/temp-dir.ts";
 import { connectNekoGateway, type NekoGatewayClient } from "../src/index.ts";
 import { cleanup, makeGateway, type TestGateway, testAddress, waitFor } from "./helpers.ts";
 
@@ -114,6 +115,10 @@ describe("fork", () => {
 			// fork 当前会话：目录新增，新会话带父会话历史。
 			const forked = await client.management.fork("1");
 			expect(forked.id).not.toBe("1");
+			await waitFor(
+				() => client.directory.state.value?.sessions.some((session) => session.id === forked.id) === true,
+				"fork 出现在目录",
+			);
 			const directory = client.directory.state.value?.sessions.map((session) => session.id) ?? [];
 			expect(directory).toContain("1");
 			expect(directory).toContain(forked.id);

@@ -1,10 +1,11 @@
 import { afterEach, expect, it, spyOn } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type FileListing, ok, type WatchChange } from "@earendil-works/pi-durable/env";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { Connection, LocalExecutionEnv } from "@earendil-works/pi-env";
+import { rm } from "../../../test/temp-dir.ts";
 import { FILE_CACHE_LIMITS, WorkspaceFiles } from "../src/workspace-files.ts";
 
 const roots: string[] = [];

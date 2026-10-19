@@ -3,7 +3,7 @@ import * as childProcess from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,6 +13,7 @@ import { APPLICATION_PROTOCOL, ApplicationProtocolError } from "@neko-harness/co
 import { startGateway } from "@neko-harness/gateway";
 import { WebSocketServer } from "ws";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { waitFor } from "../../gateway/test/helpers.ts";
 import { connectToGateway } from "../src/gateway.ts";
 

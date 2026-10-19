@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { configure } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
+import { removeDirSync, rm } from "../../../test/temp-dir.ts";
 import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime, type NekoRuntime } from "../src/index.ts";
 import { listDelegations } from "../src/subagents.ts";
@@ -25,7 +26,7 @@ const directory = () => {
 	return d;
 };
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 const toolNames = async (runtime: NekoRuntime, id: number) =>
 	(await (await runtime.harness.conversation(id as never, runtime.context))!.agent(runtime.context)).tools.map(

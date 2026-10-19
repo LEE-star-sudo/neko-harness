@@ -51,7 +51,7 @@ import { fileCompletion } from "./file-completion.ts";
 import { modelDisplayName } from "./format.ts";
 import { connectToGateway, type NekoTuiGateway } from "./gateway.ts";
 import { HelpDetail } from "./help-ui.ts";
-import { clipboard, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
+import { clipboard, clipboardShortcutKey, imagePaths, isClipboardShortcut, readImageFile } from "./image-input.ts";
 import { createInputRouter } from "./input-router.ts";
 import { confirmStop, JOBS_EMPTY, JobDetail, jobItems } from "./jobs-ui.ts";
 import { commands } from "./labels.ts";
@@ -318,7 +318,7 @@ class NekoTuiApp {
 				showAgents: () => this.#showAgents(),
 				toggleQuestion: () => this.#toggleQuestion(),
 				clipboardKey: (data) => {
-					if (!matchesKey(data, process.platform === "win32" ? "alt+v" : "ctrl+v")) return false;
+					if (!matchesKey(data, clipboardShortcutKey())) return false;
 					if (isClipboardShortcut(data)) void this.pasteClipboard();
 					return true;
 				},

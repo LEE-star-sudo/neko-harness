@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { ConversationBusy, defineExtension, defineTool, type Extension } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime } from "../src/index.ts";
 
@@ -22,7 +23,7 @@ function directory() {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 
 const writeSkill = (root: string, name: string, description: string, extra = "", body = `body of ${name}`) => {

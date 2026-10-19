@@ -1,12 +1,13 @@
 import { expect, it } from "bun:test";
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { downloadImage, uploadImage } from "@neko-harness/core/image-transfer";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { DEFAULT_IMAGE_PROMPT } from "../../core/src/image-prompt.ts";
 import { connectNekoGateway, startGateway } from "../src/index.ts";
 import { IS_WINDOWS, testAddress, testSocketPath, waitFor } from "./helpers.ts";

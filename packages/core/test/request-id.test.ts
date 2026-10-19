@@ -2,10 +2,11 @@ import { fauxProvider } from "../../../test/faux.ts";
 // 2.3 requestId 幂等：同一 requestId 重复提交返回同一 submission，重开后依然成立。
 
 import { afterAll, describe, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
+import { rm } from "../../../test/temp-dir.ts";
 import { createNekoRuntime, InMemoryCredentialStore, type NekoRuntimeOptions } from "../src/index.ts";
 
 let directory = "";

@@ -1,9 +1,10 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import type { ContextSettings } from "../src/context-settings.ts";
 import { createNekoRuntime } from "../src/runtime.ts";
 

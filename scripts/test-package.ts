@@ -1,9 +1,10 @@
-import { cp, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, symlink } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import manifest from "../package.json";
 import { connectNekoGateway } from "../packages/gateway/src/client.ts";
+import { removeDir } from "../test/temp-dir.ts";
 
 async function run(cmd: string[], cwd: string, env = process.env) {
 	const child = Bun.spawn(cmd, { cwd, env, stdout: "pipe", stderr: "pipe" });
@@ -15,6 +16,12 @@ async function run(cmd: string[], cwd: string, env = process.env) {
 	if (code !== 0) throw new Error(`${cmd[0]} failed (${code})\n${stdout}\n${stderr}`);
 	return stdout;
 }
+
+/** Windows has no graceful signal; kill the whole tree so the gateway child does not keep the temp dir locked. */
+function killWindowsTree(pid: number): void {
+	Bun.spawnSync(["taskkill", "/T", "/F", "/PID", String(pid)], { stdout: "ignore", stderr: "ignore" });
+}
+
 const root = resolve(import.meta.dir, "..");
 await mkdir(join(root, "artifacts"), { recursive: true });
 await run([process.execPath, "pm", "pack", "--destination", "artifacts"], root);
@@ -22,7 +29,7 @@ const archive = join(root, "artifacts", `neko-harness-${manifest.version}.tgz`);
 const listing = await run(["tar", "-tzf", archive], root);
 const files = listing
 	.trim()
-	.split("\n")
+	.split(/\r?\n/)
 	.filter((name) => !name.endsWith("/"));
 for (const file of files) {
 	if (!/^package\/(dist\/|package\.json$|README\.md$|LICENSE$)/.test(file)) {
@@ -59,8 +66,17 @@ try {
 	if (process.platform === "win32") await cp(process.execPath, join(bin, "bun.exe"));
 	else await symlink(process.execPath, join(bin, "bun"));
 	await cp(join(root, "scripts/package-sdk-smoke.mjs"), join(temp, "package-sdk-smoke.mjs"));
-	const cli = join(temp, "node_modules", ".bin", "neko");
-	const env = { ...process.env, HOME: join(temp, "home"), DEEPSEEK_API_KEY: "", TAVILY_API_KEY: "", PATH: bin };
+	const cli = join(temp, "node_modules", ".bin", process.platform === "win32" ? "neko.exe" : "neko");
+	const home = join(temp, "home");
+	// Windows resolves the home directory from USERPROFILE, not HOME.
+	const env = {
+		...process.env,
+		HOME: home,
+		USERPROFILE: home,
+		DEEPSEEK_API_KEY: "",
+		TAVILY_API_KEY: "",
+		PATH: bin,
+	};
 	await mkdir(env.HOME, { recursive: true });
 	if ((await run([cli, "--version"], temp, env)).trim() !== manifest.version) throw new Error("Version mismatch");
 	for (const command of ["tui", "web", "serve", "update"]) {
@@ -151,20 +167,37 @@ try {
 			throw new Error("Page version missing");
 	}
 	const updateResult = Bun.spawn([cli, "update"], { cwd: temp, env, stdout: "pipe", stderr: "pipe" });
-	const updateError = await new Response(updateResult.stderr as ReadableStream).text();
-	if ((await updateResult.exited) === 0 || !updateError.includes("不支持自升级"))
-		throw new Error("Local install update should refuse");
-	web.kill("SIGTERM");
-	const exit = await Promise.race([
-		web.exited,
-		Bun.sleep(10_000).then(() => {
-			throw new Error("Web shutdown timed out");
-		}),
+	const [updateOut, updateError, updateCode] = await Promise.all([
+		new Response(updateResult.stdout as ReadableStream).text(),
+		new Response(updateResult.stderr as ReadableStream).text(),
+		updateResult.exited,
 	]);
-	await readers;
-	if (exit !== 0) throw new Error(`Web failed to shut down: ${logs}`);
+	if (process.platform === "win32") {
+		if (updateCode !== 0 || !updateOut.includes("bun add --global neko-harness@latest"))
+			throw new Error("Windows update should print manual upgrade instructions");
+	} else if (updateCode === 0 || !updateError.includes("不支持自升级")) {
+		throw new Error("Local install update should refuse");
+	}
+	if (process.platform === "win32") {
+		killWindowsTree(web.pid);
+		await web.exited;
+	} else {
+		web.kill("SIGTERM");
+		const exit = await Promise.race([
+			web.exited,
+			Bun.sleep(10_000).then(() => {
+				throw new Error("Web shutdown timed out");
+			}),
+		]);
+		await readers;
+		if (exit !== 0) throw new Error(`Web failed to shut down: ${logs}`);
+	}
 	console.log(`Package smoke test passed: ${archive} (${files.length} files)`);
 } finally {
-	if (web && web.exitCode === null) web.kill("SIGKILL");
-	await rm(temp, { recursive: true, force: true });
+	if (web && web.exitCode === null) {
+		if (process.platform === "win32") killWindowsTree(web.pid);
+		else web.kill("SIGKILL");
+		await web.exited;
+	}
+	await removeDir(temp);
 }

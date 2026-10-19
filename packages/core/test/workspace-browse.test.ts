@@ -1,7 +1,8 @@
 import { expect, it } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rm, trySymlink } from "../../../test/temp-dir.ts";
 import { BROWSE_LIMITS, FILE_CACHE_LIMITS, isProtectedPath, WorkspaceFiles } from "../src/workspace-files.ts";
 
 const signal = () => new AbortController().signal;
@@ -31,13 +32,13 @@ it("lists direct children dirs first, honors gitignore, hides .git and marks lin
 		await writeFile(join(root, "src/deep/c.ts"), "c");
 		await writeFile(join(root, "z.txt"), "z");
 		await writeFile(join(root, ".env"), "SECRET=1");
-		await symlink(outside, join(root, "link"));
+		const linked = trySymlink(outside, join(root, "link"));
 		const top = await files.children(root, "", signal());
 		expect(top.entries.map((e) => [e.name, e.kind])).toEqual([
 			["src", "directory"],
 			[".env", "file"],
 			[".gitignore", "file"],
-			["link", "symlink"],
+			...(linked ? [["link", "symlink"]] : []),
 			["z.txt", "file"],
 		]);
 		expect(top.entries.find((e) => e.name === ".env")?.protected).toBe(true);
@@ -71,14 +72,15 @@ it("rejects escaping, absolute, backslash, control-character and symlink-escapin
 	try {
 		await writeFile(join(outside, "secret.txt"), "secret");
 		await mkdir(join(outside, "dir"));
-		await symlink(outside, join(root, "link"));
-		await symlink(join(outside, "secret.txt"), join(root, "secret-link.txt"));
+		const linkedDir = trySymlink(outside, join(root, "link"));
+		const linkedFile = trySymlink(join(outside, "secret.txt"), join(root, "secret-link.txt"));
 		for (const bad of ["../x", "a/../../x", outside, "~/x", "a\\b", "a\0b", ".git/config"]) {
 			await expect(files.read(root, bad, signal())).rejects.toThrow();
 			await expect(files.children(root, bad, signal())).rejects.toThrow();
 		}
-		await expect(files.read(root, "secret-link.txt", signal())).rejects.toThrow("outside the workspace");
-		await expect(files.children(root, "link", signal())).rejects.toThrow("outside the workspace");
+		if (linkedFile)
+			await expect(files.read(root, "secret-link.txt", signal())).rejects.toThrow("outside the workspace");
+		if (linkedDir) await expect(files.children(root, "link", signal())).rejects.toThrow("outside the workspace");
 		await expect(files.read(root, "missing.txt", signal())).rejects.toThrow("File not found");
 		await expect(files.read(root, "", signal())).rejects.toThrow();
 	} finally {
@@ -115,11 +117,11 @@ it("reads text with size and truncation, reports binary and undecodable files, p
 		await writeFile(join(root, ".env.example"), "KEY=");
 		await writeFile(join(root, "id_ed25519"), "private");
 		await writeFile(join(root, "id_ed25519.pub"), "public");
-		await symlink(join(root, ".env"), join(root, "innocent.txt"));
+		const linked = trySymlink(join(root, ".env"), join(root, "innocent.txt"));
 		const secret = await files.read(root, ".env", signal());
 		expect(secret.kind).toBe("protected");
 		expect(JSON.stringify(secret)).not.toContain("SECRET");
-		expect((await files.read(root, "innocent.txt", signal())).kind).toBe("protected");
+		if (linked) expect((await files.read(root, "innocent.txt", signal())).kind).toBe("protected");
 		expect((await files.read(root, "id_ed25519", signal())).kind).toBe("protected");
 		expect(await files.read(root, ".env.example", signal())).toMatchObject({ kind: "text", content: "KEY=" });
 		expect((await files.read(root, "id_ed25519.pub", signal())).kind).toBe("text");

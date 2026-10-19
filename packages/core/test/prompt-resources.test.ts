@@ -2,6 +2,7 @@ import { afterEach, expect, it } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { createResourceLoader } from "../src/prompt/resources.ts";
 
 const dirs: string[] = [];
@@ -11,7 +12,7 @@ function directory() {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 
 const writeAgents = (dir: string, content: string) => writeFileSync(join(dir, "AGENTS.md"), content);
@@ -48,12 +49,18 @@ it("omits missing files and survives unreadable ones", async () => {
 	const unreadable = join(home, ".agents");
 	mkdirSync(unreadable, { recursive: true });
 	writeAgents(unreadable, "user rules");
-	chmodSync(join(unreadable, "AGENTS.md"), 0o000);
-	try {
+	// chmod does not revoke read access on Windows, so the user file stays visible there.
+	if (process.platform === "win32") {
 		const resources = await createResourceLoader(home, undefined, { builtinDir: null })(workspace);
-		expect(resources.contextFiles.map((f) => f.content)).toEqual(["project rules"]);
-	} finally {
-		chmodSync(join(unreadable, "AGENTS.md"), 0o644);
+		expect(resources.contextFiles.map((f) => f.content)).toEqual(["user rules", "project rules"]);
+	} else {
+		chmodSync(join(unreadable, "AGENTS.md"), 0o000);
+		try {
+			const resources = await createResourceLoader(home, undefined, { builtinDir: null })(workspace);
+			expect(resources.contextFiles.map((f) => f.content)).toEqual(["project rules"]);
+		} finally {
+			chmodSync(join(unreadable, "AGENTS.md"), 0o644);
+		}
 	}
 	const empty = await createResourceLoader(directory(), undefined, { builtinDir: null })(directory());
 	expect(empty.contextFiles).toEqual([]);
@@ -88,15 +95,17 @@ it("refreshes permissions without mtime changes and reports failures without ins
 	const diagnostics: { path: string; message: string }[] = [];
 	const load = createResourceLoader(home, (d) => diagnostics.push(d), { builtinDir: null });
 	expect((await load(workspace)).contextFiles).toHaveLength(1);
-	chmodSync(file, 0o000);
-	try {
-		expect((await load(workspace)).contextFiles).toHaveLength(0);
-		expect(diagnostics).toHaveLength(1);
-		expect((await load(workspace)).contextFiles).toHaveLength(0);
-		expect(diagnostics).toHaveLength(1);
-		expect(JSON.stringify(diagnostics)).not.toContain("private instruction body");
-	} finally {
-		chmodSync(file, 0o600);
+	if (process.platform !== "win32") {
+		chmodSync(file, 0o000);
+		try {
+			expect((await load(workspace)).contextFiles).toHaveLength(0);
+			expect(diagnostics).toHaveLength(1);
+			expect((await load(workspace)).contextFiles).toHaveLength(0);
+			expect(diagnostics).toHaveLength(1);
+			expect(JSON.stringify(diagnostics)).not.toContain("private instruction body");
+		} finally {
+			chmodSync(file, 0o600);
+		}
 	}
 	expect((await load(workspace)).contextFiles).toHaveLength(1);
 	rmSync(file);

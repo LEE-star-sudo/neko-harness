@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { request as httpsRequest } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import { connect as tlsConnect } from "node:tls";
 import { ChordError, type Link } from "@earendil-works/chord";
 import { fauxAssistantMessage, fauxProvider, fauxText } from "@earendil-works/pi-ai";
 import { renderPairingQr } from "../../../../scripts/mobile-dev-pair.ts";
+import { rm } from "../../../../test/temp-dir.ts";
 import { connectNekoGateway, type NekoGateway, startGateway } from "../../src/index.ts";
 import { createClientHost } from "../../src/link.ts";
 import { createMobileAdminFactory, NekoMobileAdmin } from "../../src/mobile/admin.ts";
@@ -16,7 +17,7 @@ import type { MobileGateway } from "../../src/mobile/listener.ts";
 import { MobileStore } from "../../src/mobile/store.ts";
 import { createUnixLink } from "../../src/unix-link.ts";
 import { createWsLink } from "../../src/ws-listener.ts";
-import { IS_WINDOWS, waitFor } from "../helpers.ts";
+import { IS_WINDOWS, testAddress, waitFor } from "../helpers.ts";
 import { connectMobileWs, type MobileWsClient } from "./ws-client.ts";
 
 function parsePairingText(pairingText: string): { readonly sid: string; readonly code: string; readonly ep: string } {
@@ -243,11 +244,7 @@ describe("mobile admin minimal subset", () => {
 	it("does not bind the admin contract into createGatewayConnection", async () => {
 		const gateway = await startGatewayOnly(dir);
 		try {
-			const desktop = await connectNekoGateway(
-				IS_WINDOWS
-					? { transport: "ws", url: gateway.wsUrl ?? "", serverId: gateway.serverId }
-					: { transport: "unix", socketPath: gateway.socketPath ?? "", serverId: gateway.serverId },
-			);
+			const desktop = await connectNekoGateway(testAddress(gateway));
 			const exposed = Object.keys(desktop).filter((key) => key.toLowerCase().includes("admin"));
 			expect(exposed).toEqual([]);
 			const models = await desktop.models.list(null);
@@ -267,11 +264,7 @@ describe("mobile admin minimal subset", () => {
 			const survivor = await pairDevice(gateway, port);
 			const targetClient = await connectMobileHello(port, target);
 			const survivorClient = await connectMobileHello(port, survivor);
-			const desktop = await connectNekoGateway(
-				IS_WINDOWS
-					? { transport: "ws", url: gateway.wsUrl ?? "", serverId: gateway.serverId }
-					: { transport: "unix", socketPath: gateway.socketPath ?? "", serverId: gateway.serverId },
-			);
+			const desktop = await connectNekoGateway(testAddress(gateway));
 
 			const token = await (await MobileStore.open(dir)).ensureAdminToken();
 			const { host, link, admin } = await connectAdmin(gateway, token);
@@ -608,11 +601,7 @@ describe("mobile admin full surface (4.1)", () => {
 			await gateway.mobile.enable({ address: "127.0.0.1", port });
 			const device = await pairDevice(gateway, port);
 			const client = await connectMobileHello(port, device);
-			const desktop = await connectNekoGateway(
-				IS_WINDOWS
-					? { transport: "ws", url: gateway.wsUrl ?? "", serverId: gateway.serverId }
-					: { transport: "unix", socketPath: gateway.socketPath ?? "", serverId: gateway.serverId },
-			);
+			const desktop = await connectNekoGateway(testAddress(gateway));
 			const created = await desktop.management.create({});
 			const chat = await desktop.attach(created.id);
 			await chat.submit({ content: "before revoke" });
@@ -776,7 +765,7 @@ async function runScript(
 ): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
 	const root = join(import.meta.dir, "../../../..");
 	const proc = Bun.spawn({
-		cmd: ["bun", "scripts/mobile-dev-pair.ts", ...args],
+		cmd: [process.execPath, "--conditions=neko-source", "scripts/mobile-dev-pair.ts", ...args],
 		cwd: root,
 		stdout: "pipe",
 		stderr: "pipe",

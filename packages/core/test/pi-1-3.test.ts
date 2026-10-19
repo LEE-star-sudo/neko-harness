@@ -1,13 +1,14 @@
 // Pi 1.3 acceptance: upstream behavior changes neko relies on and must not regress or patch around.
 
 import { expect, it } from "bun:test";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AssistantMessage, fauxAssistantMessage, fauxText, type Message } from "@earendil-works/pi-ai";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { createNekoRuntime, projectChatView } from "../src/index.ts";
 
 const usage = {

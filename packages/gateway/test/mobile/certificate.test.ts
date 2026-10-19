@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import { createHash, randomUUID, X509Certificate } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import forge from "node-forge";
+import { rm } from "../../../../test/temp-dir.ts";
 import { MobileCertificate, minimalPositiveIntegerHex } from "../../src/mobile/certificate.ts";
 import { MobileStore } from "../../src/mobile/store.ts";
 

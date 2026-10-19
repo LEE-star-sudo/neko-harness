@@ -25,6 +25,7 @@ it("lists commands and context-specific shortcuts, with platform clipboard keys"
 	])
 		expect(text).toContain(action);
 	expect(helpLines("win32").map(stripTerminalSequences).join("\n")).toContain("Alt+V");
+	expect(helpLines("linux", true).map(stripTerminalSequences).join("\n")).toContain("Alt+V");
 });
 
 it("scrolls help at narrow widths and closes directly to the main view", async () => {

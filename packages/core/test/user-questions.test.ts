@@ -1,11 +1,12 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { defineExtension, wrapTool } from "@earendil-works/pi-durable";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import type { QuestionResponse } from "../src/interactions.ts";
 import { createNekoRuntime, type NekoRuntime } from "../src/runtime.ts";
 import { createAskUserTool, QuestionDoc, QuestionsDoc } from "../src/user-questions.ts";

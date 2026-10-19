@@ -1,10 +1,11 @@
 import { expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import { fauxProvider } from "../../../test/faux.ts";
+import { rm } from "../../../test/temp-dir.ts";
 import { DEFAULT_IMAGE_PROMPT } from "../src/image-prompt.ts";
 import { createNekoRuntime, projectChatView } from "../src/index.ts";
 import { SessionMetadataDoc } from "../src/session-metadata.ts";
@@ -222,9 +223,12 @@ it("reports denied and changing files as image tool errors", async () => {
 	const original = NodeExecutionEnv.prototype.openBinaryReader;
 	let spy: ReturnType<typeof spyOn> | undefined;
 	try {
-		await chmod(path, 0);
-		expect((await call()).isError).toBe(true);
-		await chmod(path, 0o600);
+		// chmod does not revoke read access on Windows.
+		if (process.platform !== "win32") {
+			await chmod(path, 0);
+			expect((await call()).isError).toBe(true);
+			await chmod(path, 0o600);
+		}
 		spy = spyOn(NodeExecutionEnv.prototype, "openBinaryReader").mockImplementation(async function (
 			this: InstanceType<typeof NodeExecutionEnv>,
 			...args

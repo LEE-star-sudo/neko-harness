@@ -1,12 +1,16 @@
 import { expect, it } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { rm } from "../../../test/temp-dir.ts";
 import { UpdateChecker } from "../../core/src/application-updates.ts";
 import { acquireUpdateLock, confirmGlobalInstallation, updateCommand } from "../src/update.ts";
 
-it("only updates the same global installation and verifies a fresh executable", async () => {
+// The fixture links the bin entry with a symlink, which needs elevated rights on Windows.
+const posixIt = it.skipIf(process.platform === "win32");
+
+posixIt("only updates the same global installation and verifies a fresh executable", async () => {
 	const dir = await mkdtemp(join(tmpdir(), "neko-update-cli-"));
 	try {
 		const root = join(dir, "global/node_modules/neko-harness"),

@@ -1,9 +1,10 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { removeDirSync, trySymlink } from "../../../test/temp-dir.ts";
 import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { createNekoRuntime, normalizeWorkspace, projectChatView } from "../src/index.ts";
 
@@ -16,16 +17,16 @@ function directory() {
 	return d;
 }
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 const model = { provider: "faux", modelId: "faux-1" };
 it("normalizes paths without promoting subdirectories; rejects invalid directories", () => {
 	const a = directory();
 	mkdirSync(join(a, "sub"));
-	symlinkSync(a, join(a, "alias"));
+	const linked = trySymlink(a, join(a, "alias"));
 	writeFileSync(join(a, "file"), "x");
 	expect(normalizeWorkspace(relative(process.cwd(), a))).toBe(a);
-	expect(normalizeWorkspace(join(a, "alias"))).toBe(a);
+	if (linked) expect(normalizeWorkspace(join(a, "alias"))).toBe(a);
 	expect(normalizeWorkspace(join(a, "sub"))).toBe(join(a, "sub"));
 	expect(() => normalizeWorkspace(join(a, "missing"))).toThrow("Workspace");
 	expect(() => normalizeWorkspace(join(a, "file"))).toThrow("Workspace");
@@ -89,7 +90,9 @@ it("persists workspaces and activity, forks empty and populated sessions, and ex
 		const tools = view.items.filter((x) => x.type === "tool");
 		expect(tools).toHaveLength(5);
 		expect(tools.every((x) => !x.isError)).toBe(true);
-		expect(tools.find((x) => x.name === "bash")?.result).toContain(b);
+		const bashResult = tools.find((x) => x.name === "bash")?.result ?? "";
+		// Git Bash prints a temp workspace as /tmp/<name>, not the Win32 path.
+		expect(bashResult.includes(b) || bashResult.includes(b.split(/[/\\]/).pop()!)).toBe(true);
 	} finally {
 		await runtime.close();
 	}
@@ -102,7 +105,7 @@ it("rejects old storage without deleting it, and never rebinds a missing saved d
 	const options = { storagePath, model, providers: [faux.provider] };
 	let runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: b });
 	await runtime.close();
-	rmSync(b, { recursive: true });
+	removeDirSync(b);
 	runtime = await createNekoRuntime({ credentials: new InMemoryCredentialStore(), ...options, cwd: a });
 	expect((await runtime.getAgent()).cwd).toBe(b);
 	await expect(runtime.submit("no directory")).rejects.toThrow("Workspace is not available");
@@ -118,12 +121,13 @@ it("registers independent workspaces across restart, archives and forks", async 
 	const a = directory(),
 		b = directory();
 	mkdirSync(join(b, "sub"));
-	symlinkSync(b, join(a, "link"));
+	const linked = trySymlink(b, join(a, "link"));
 	const faux = fauxProvider();
 	const options = { storagePath: join(a, "registry.sqlite"), cwd: a, providers: [faux.provider], model };
 	let runtime = await createNekoRuntime(options);
 	try {
-		await Promise.all([runtime.addWorkspace(b), runtime.addWorkspace(join(a, "link"))]);
+		await runtime.addWorkspace(b);
+		if (linked) await runtime.addWorkspace(join(a, "link"));
 		await runtime.addWorkspace(join(b, "sub"));
 		expect((await runtime.listConversations()).length).toBe(1);
 		expect((await runtime.listWorkspaces()).map((w) => w.path).sort()).toEqual([a, b, join(b, "sub")].sort());
@@ -131,7 +135,7 @@ it("registers independent workspaces across restart, archives and forks", async 
 		await runtime.archiveConversation(child.id);
 		await runtime.archiveConversation(runtime.root.id);
 		await runtime.close();
-		rmSync(join(b, "sub"), { recursive: true });
+		removeDirSync(join(b, "sub"));
 		runtime = await createNekoRuntime(options);
 		expect(await runtime.listConversations()).toEqual([]);
 		expect((await runtime.listWorkspaces()).length).toBe(3);
@@ -158,7 +162,7 @@ it("rejects archived sessions without new metadata and preserves storage", async
 		await runtime.archiveConversation(older.id);
 		expect((await runtime.listWorkspaces()).map((w) => w.path)).toEqual([a]);
 		await runtime.close();
-		rmSync(b, { recursive: true });
+		removeDirSync(b);
 		await expect(createNekoRuntime(options)).rejects.toThrow("Unsupported session metadata");
 		expect(readFileSync(options.storagePath).length).toBeGreaterThan(0);
 	} finally {

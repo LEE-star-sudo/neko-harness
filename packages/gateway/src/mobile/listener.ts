@@ -127,6 +127,12 @@ function toMessage(error: unknown): string {
 	return String(error);
 }
 
+/** Bun on Windows reports an IPv4 listener as an IPv4-mapped IPv6 address. */
+function normalizeLocalAddress(address: string | undefined): string | undefined {
+	const mapped = address?.startsWith("::ffff:") ? address.slice("::ffff:".length) : undefined;
+	return mapped !== undefined && isIpv4Literal(mapped) ? mapped : address;
+}
+
 export class MobileGateway {
 	private readonly serverId: string;
 	private readonly serverName: string;
@@ -504,11 +510,12 @@ export class MobileGateway {
 
 	/** 中继模式下连接的本地地址是 WSL 内部地址，记录与排序一律使用宣告地址。 */
 	private advertisedAddress(localAddress: string | undefined): string | undefined {
+		const normalized = normalizeLocalAddress(localAddress);
 		const state = this.stateValue;
-		if (state.status === "listening" && state.mode === "wsl-relay" && localAddress === state.bindAddress) {
+		if (state.status === "listening" && state.mode === "wsl-relay" && normalized === state.bindAddress) {
 			return state.address;
 		}
-		return localAddress;
+		return normalized;
 	}
 
 	private requireStore(): MobileStore {

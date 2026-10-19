@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
@@ -45,11 +46,11 @@ export async function readImageFile(path: string, cwd: string): Promise<ImageFil
 	const mimeType = /\.png$/i.test(full) ? "image/png" : /\.webp$/i.test(full) ? "image/webp" : "image/jpeg";
 	return { name: basename(full), mimeType, bytes };
 }
-async function command(file: string, args: string[], encoding: "utf8" | "buffer" = "utf8") {
-	return (await exec(file, args, { timeout: 2000, maxBuffer: 30 * 1024 * 1024, encoding })).stdout;
+async function command(file: string, args: string[], encoding: "utf8" | "buffer" = "utf8", timeout = 2000) {
+	return (await exec(file, args, { timeout, maxBuffer: 30 * 1024 * 1024, encoding })).stdout;
 }
 export async function clipboard(
-	options: { platform?: string; wayland?: boolean; command?: typeof command } = {},
+	options: { platform?: string; wayland?: boolean; wsl?: boolean; command?: typeof command } = {},
 ): Promise<{ paths?: string[]; image?: ImageFile; text?: string }> {
 	const run = options.command ?? command;
 	const platform = options.platform ?? process.platform;
@@ -71,20 +72,15 @@ export async function clipboard(
 		if (hex) return { image: { name: "Clipboard.png", mimeType: "image/png", bytes: Buffer.from(hex, "hex") } };
 		return { text: String(await run("pbpaste", [])) };
 	}
-	if (platform === "win32") {
-		const value = String(
-			await run("powershell.exe", [
-				"-NoProfile",
-				"-STA",
-				"-Command",
-				'Add-Type -AssemblyName System.Windows.Forms; $i=[Windows.Forms.Clipboard]::GetImage(); if($i){$m=New-Object IO.MemoryStream; $i.Save($m,[Drawing.Imaging.ImageFormat]::Png); "IMAGE:"+[Convert]::ToBase64String($m.ToArray());$i.Dispose();$m.Dispose()}else{Get-Clipboard -Raw}',
-			]),
-		);
-		if (value.startsWith("IMAGE:"))
-			return {
-				image: { name: "Clipboard.png", mimeType: "image/png", bytes: Buffer.from(value.slice(6).trim(), "base64") },
-			};
-		return { text: value };
+	if (platform === "win32") return windowsClipboard(run);
+	let windowsError: unknown;
+	if (platform === "linux" && (options.wsl ?? runningInWsl())) {
+		// Windows screenshots and copied text only reach the Windows clipboard; wl-paste/xclip cannot see images from it.
+		try {
+			return await windowsClipboard(run);
+		} catch (error) {
+			windowsError = error;
+		}
 	}
 	const wayland = options.wayland ?? !!process.env.WAYLAND_DISPLAY;
 	const tool = wayland ? "wl-paste" : "xclip";
@@ -96,9 +92,65 @@ export async function clipboard(
 		);
 		if (bytes.length) return { image: { name: "Clipboard.png", mimeType: "image/png", bytes: Buffer.from(bytes) } };
 	} catch {}
-	return { text: String(await run(tool, wayland ? ["--no-newline"] : ["-selection", "clipboard", "-o"])) };
+	try {
+		return { text: String(await run(tool, wayland ? ["--no-newline"] : ["-selection", "clipboard", "-o"])) };
+	} catch (error) {
+		// On WSL the PowerShell failure is the actionable one; a missing xclip is only noise.
+		throw windowsError ?? error;
+	}
 }
 
-export function isClipboardShortcut(data: string, platform: string = process.platform): boolean {
-	return !isKeyRelease(data) && !isKeyRepeat(data) && matchesKey(data, platform === "win32" ? "alt+v" : "ctrl+v");
+const WINDOWS_CLIPBOARD_SCRIPT = [
+	// Console output defaults to the OEM code page, which garbles non-ASCII text. Setting it can throw without a console.
+	"try{[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)}catch{}",
+	"Add-Type -AssemblyName System.Windows.Forms",
+	"$i=[Windows.Forms.Clipboard]::GetImage()",
+	'if($i){$m=New-Object IO.MemoryStream; $i.Save($m,[Drawing.Imaging.ImageFormat]::Png); "IMAGE:"+[Convert]::ToBase64String($m.ToArray());$i.Dispose();$m.Dispose()}else{Get-Clipboard -Raw}',
+].join("; ");
+
+/** Reads the Windows clipboard through powershell.exe, which is also reachable from WSL via interop. */
+async function windowsClipboard(run: typeof command): Promise<{ image?: ImageFile; text?: string }> {
+	// Cold PowerShell start plus Windows.Forms load can exceed the default 2s, especially across WSL interop.
+	const value = String(
+		await run("powershell.exe", ["-NoProfile", "-STA", "-Command", WINDOWS_CLIPBOARD_SCRIPT], "utf8", 8000),
+	);
+	if (value.startsWith("IMAGE:"))
+		return {
+			image: { name: "Clipboard.png", mimeType: "image/png", bytes: Buffer.from(value.slice(6).trim(), "base64") },
+		};
+	// Write-Output appends one line break to the raw clipboard text.
+	return { text: value.replace(/\r?\n$/, "") };
+}
+
+let wslHost: boolean | undefined;
+/** Whether this process runs inside WSL; evaluated once because key handling asks on every keystroke. */
+export function runningInWsl(): boolean {
+	wslHost ??=
+		process.platform === "linux" &&
+		(Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP || process.env.WSLENV) ||
+			/microsoft|wsl/i.test(readFileOrEmpty("/proc/version")));
+	return wslHost;
+}
+function readFileOrEmpty(path: string): string {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return "";
+	}
+}
+
+/** Windows Terminal turns Ctrl+V into a text paste before the app sees it, so Windows and WSL use Alt+V. */
+export function clipboardShortcutKey(
+	platform: string = process.platform,
+	wsl: boolean = runningInWsl(),
+): "alt+v" | "ctrl+v" {
+	return platform === "win32" || (platform === "linux" && wsl) ? "alt+v" : "ctrl+v";
+}
+
+export function isClipboardShortcut(
+	data: string,
+	platform: string = process.platform,
+	wsl: boolean = runningInWsl(),
+): boolean {
+	return !isKeyRelease(data) && !isKeyRepeat(data) && matchesKey(data, clipboardShortcutKey(platform, wsl));
 }

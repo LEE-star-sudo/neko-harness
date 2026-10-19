@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { rm } from "../../../test/temp-dir.ts";
 import { handleOpenRequest } from "../src/open-api.ts";
 import { OpenError, type OpenService, type OpenTargetId } from "../src/open-target.ts";
 
@@ -132,10 +133,11 @@ describe("open api", () => {
 	});
 
 	it("opens an existing directory, resolving symlinks, and passes special characters through", async () => {
-		const special = join(dir, 'a b "c" & $d');
+		const leaf = process.platform === "win32" ? "a b 'c' & $d" : 'a b "c" & $d';
+		const special = join(dir, leaf);
 		await Bun.write(join(special, ".keep"), "");
 		const link = join(dir, "link");
-		await symlink(special, link);
+		await symlink(special, link, process.platform === "win32" ? "junction" : "dir");
 		const opened: Array<{ target: OpenTargetId; dir: string }> = [];
 		for (const path of [special, link]) {
 			const h = post({ target: "file-manager", path });
@@ -144,7 +146,7 @@ describe("open api", () => {
 		}
 		expect(opened.map((o) => o.target)).toEqual(["file-manager", "file-manager"]);
 		expect(new Set(opened.map((o) => o.dir)).size).toBe(1);
-		expect(opened[0]?.dir.endsWith('a b "c" & $d')).toBe(true);
+		expect(opened[0]?.dir.endsWith(leaf)).toBe(true);
 	});
 
 	it("maps unavailable targets to 409 and launch failures to 502", async () => {

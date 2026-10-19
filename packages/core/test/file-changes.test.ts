@@ -1,9 +1,10 @@
 import { afterEach, expect, it } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { fauxProvider } from "../../../test/faux.ts";
+import { removeDirSync } from "../../../test/temp-dir.ts";
 import { InMemoryCredentialStore } from "../src/credentials.ts";
 import { ConversationChanges } from "../src/file-changes.ts";
 import { CHANGE_LIMITS, createNekoRuntime, MAIN_AGENT, normalizeChangePath } from "../src/index.ts";
@@ -16,18 +17,19 @@ const directory = () => {
 	return d;
 };
 afterEach(() => {
-	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+	for (const d of dirs.splice(0)) removeDirSync(d);
 });
 const tool = (name: string, args: Record<string, string>) =>
 	fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" });
 
 it("normalizes tool paths against the tool cwd and marks paths outside the workspace", () => {
-	const root = "/work/space";
+	const root = resolve("/work/space");
+	const elsewhere = resolve("/work/elsewhere/x.ts").split("\\").join("/");
 	expect(normalizeChangePath("a/b.ts", root, root)).toEqual({ path: "a/b.ts", outside: false });
-	expect(normalizeChangePath("/work/space/a/../c.ts", root, root)).toEqual({ path: "c.ts", outside: false });
-	expect(normalizeChangePath("../x.ts", `${root}/sub`, root)).toEqual({ path: "x.ts", outside: false });
-	expect(normalizeChangePath("../../elsewhere/x.ts", `${root}/sub`, root)).toEqual({
-		path: "/work/elsewhere/x.ts",
+	expect(normalizeChangePath(join(root, "a/../c.ts"), root, root)).toEqual({ path: "c.ts", outside: false });
+	expect(normalizeChangePath("../x.ts", join(root, "sub"), root)).toEqual({ path: "x.ts", outside: false });
+	expect(normalizeChangePath("../../elsewhere/x.ts", join(root, "sub"), root)).toEqual({
+		path: elsewhere,
 		outside: true,
 	});
 	expect(normalizeChangePath("~/x.ts", root, root)).toEqual({ path: "~/x.ts", outside: true });
